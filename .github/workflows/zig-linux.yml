@@ -3,11 +3,14 @@
 # What this workflow proves on every push/PR:
 #   - style: portable StyleChecks (ASCII, tabs, EOL, copyright) on git diff;
 #   - zig (test): default Ubuntu 24.04 (x86_64-linux-gnu, glibc 2.39, ICU 74)
-#     build + full `zig build check` (regression, verify-bytecode, check-native,
+#     build + check-build-tools + zig test tools/linux-gate-tests.zig + full
+#     `zig build check` (regression, verify-bytecode, check-native,
 #     check-smoke, check-jit, check-metadata, check-selftest);
 #   - zig-variants: parameterized Linux build matrix (-Djit=false, release-shared,
-#     debug-static) + check-smoke / check-metadata / check-native / verify-bytecode;
-#   - nodeapi: libChakraNodeApi + ch-nodeapi + check-nodeapi + probes + matrices.
+#     debug-static) + check-smoke / check-metadata / verify-bytecode / check-native /
+#     check-package;
+#   - nodeapi: libChakraNodeApi + ch-nodeapi + check-nodeapi (161 exports) +
+#     metadata leak/export check + 19/19 probes + 52/17/0 matrix + node-addon-api.
 
 name: zig-linux (x86_64 Linux build + check + Node-API)
 
@@ -103,7 +106,9 @@ jobs:
           mise exec -- zig version > ci-evidence/zig-version.txt
           mise exec -- zig env > ci-evidence/zig-env.txt
           python3 tools/build/check_metadata_linux.py --self-test 2>&1 | tee ci-evidence/metadata-selftest.log
+          python3 tools/build/check_regression_linux.py --self-test 2>&1 | tee ci-evidence/regression-selftest.log
           mise exec -- zig test tools/linux-gate-tests.zig 2>&1 | tee ci-evidence/linux-gate-tests.log
+          mise exec -- zig build check-build-tools 2>&1 | tee ci-evidence/build-tools.log
       - name: zig build
         run: |
           set -euo pipefail
@@ -119,6 +124,7 @@ jobs:
           grep -F 'check_metadata_linux: PASS' ci-evidence/check.log
           grep -F 'check_smoke_linux: PASS' ci-evidence/check.log
           grep -F 'check_jit: PASS' ci-evidence/check.log
+          grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/check.log
           line="linux-test: build=PASS check=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
@@ -143,7 +149,7 @@ jobs:
             checks: "check-smoke check-metadata verify-bytecode check-native"
           - name: release-shared
             flags: "-Dprofile=release-shared"
-            checks: "check-smoke check-metadata check-jit check-native"
+            checks: "check-smoke check-metadata check-jit check-native check-package"
           - name: debug-static
             flags: "-Dprofile=debug-static -Doptimize=debug"
             checks: "check-smoke check-metadata verify-bytecode check-native"
@@ -176,6 +182,11 @@ jobs:
         run: |
           set -euo pipefail
           grep -F 'check_metadata_linux: PASS' ci-evidence/checks.log
+          if [ "${{ matrix.name }}" = "release-shared" ]; then
+            grep -F 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' ci-evidence/checks.log
+          else
+            grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/checks.log
+          fi
           line="linux-${{ matrix.name }}: build=PASS checks=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
@@ -212,6 +223,7 @@ jobs:
         run: |
           set -euo pipefail
           mise exec -- zig build check-nodeapi 2>&1 | tee ci-evidence/nodeapi-check.log
+          python3 tools/build/check_metadata_linux.py zig-out 2>&1 | tee ci-evidence/nodeapi-metadata.log
       - name: Run Node-API probes (Linux test profile)
         run: |
           set -euo pipefail
@@ -220,10 +232,14 @@ jobs:
           export CC_GATE_LOCK="$RUNNER_TEMP/ci-gate-exec.sh"
           export SKIP_BUILD=1
           bash tools/nodeapi/run_probe.sh 2>&1 | tee ci-evidence/nodeapi-run-probe.log
+          probe_count=0
           for script in test/nodeapi/probes/run_*.sh; do
             echo "=== $script ==="
             bash "$script"
+            probe_count=$((probe_count + 1))
           done 2>&1 | tee ci-evidence/nodeapi-probes.log
+          test "$probe_count" -eq 19
+          echo "probes=${probe_count}/19" | tee -a ci-evidence/nodeapi-probes.log
       - name: Run Node-API and node-addon-api matrices
         run: |
           set -euo pipefail
@@ -231,6 +247,15 @@ jobs:
           export CHAKRA_NODEAPI_HOST="$PWD/zig-out/bin/ch-nodeapi"
           mise exec -- python3 test/nodeapi/run_matrix.py --verify-manifest 2>&1 | tee ci-evidence/nodeapi-manifest.log
           mise exec -- python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi --results ci-evidence/nodeapi-matrix.json 2>&1 | tee ci-evidence/nodeapi-matrix.log
+          python3 - <<'PY' 2>&1 | tee ci-evidence/nodeapi-matrix-summary.txt
+          import json
+          doc = json.load(open("ci-evidence/nodeapi-matrix.json"))
+          counts = {"pass": 0, "skip": 0, "fail": 0}
+          for rec in doc["results"]:
+              counts[rec["status"]] = counts.get(rec["status"], 0) + 1
+          print(f"nodeapi-matrix: pass={counts['pass']} skip={counts['skip']} fail={counts['fail']}")
+          assert (counts["pass"], counts["skip"], counts["fail"]) == (52, 17, 0), counts
+          PY
           rm -f ci-evidence/node-addon-api.json
           mise exec -- python3 test/nodeapi/run_node_addon_api_matrix.py --hosts ch-nodeapi --results ci-evidence/node-addon-api.json 2>&1 | tee ci-evidence/node-addon-api.log || true
           python3 - <<'PY'
@@ -255,9 +280,12 @@ jobs:
         id: tally
         run: |
           set -euo pipefail
-          grep -F 'check_nodeapi: PASS' ci-evidence/nodeapi-check.log
+          grep -F 'check_nodeapi: PASS: dylib exports exactly the allowlist (161 symbols)' ci-evidence/nodeapi-check.log
+          grep -F 'check_metadata_linux: PASS' ci-evidence/nodeapi-metadata.log
           grep -F 'run_probe: ALL PASS' ci-evidence/nodeapi-run-probe.log
-          line="nodeapi-linux: provider=built host=built exports=PASS probes=PASS matrix=PASS"
+          grep -F 'probes=19/19' ci-evidence/nodeapi-probes.log
+          grep -F 'nodeapi-matrix: pass=52 skip=17 fail=0' ci-evidence/nodeapi-matrix-summary.txt
+          line="nodeapi-linux: provider=built host=built exports=161 probes=19/19 matrix=52/17/0"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"

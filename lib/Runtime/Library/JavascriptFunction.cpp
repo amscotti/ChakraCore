@@ -1841,6 +1841,44 @@ dbl_align:
         return false;
     }
 
+    static bool IsThrowingFunctionNative(JavascriptFunction* throwingFunc)
+    {
+        if (throwingFunc == nullptr)
+        {
+            return false;
+        }
+        ScriptContext* throwingContext = throwingFunc->GetScriptContext();
+        if (JavascriptFunction::IsNativeAddress(throwingContext, (void*)throwingFunc->GetEntryPoint()))
+        {
+            return true;
+        }
+#if ENABLE_NATIVE_CODEGEN
+        if (VarIs<ScriptFunction>(throwingFunc))
+        {
+            // Cross-site marshaled functions keep CrossSite::DefaultThunk/ProfileThunk in GetEntryPoint(),
+            // and calls inside BoundFunction or CheckCodeGenThunk transitions can invoke SimpleJIT/FullJIT
+            // without replacing the caller-visible thunk or pre-call entryPoint argument.
+            ScriptFunction* scriptFunc = VarTo<ScriptFunction>(throwingFunc);
+            ProxyEntryPointInfo* entryPointInfo = scriptFunc->GetEntryPointInfo();
+            if (entryPointInfo != nullptr &&
+                JavascriptFunction::IsNativeAddress(throwingContext, (void*)entryPointInfo->jsMethod))
+            {
+                return true;
+            }
+            FunctionBody* body = throwingFunc->GetFunctionBody();
+            if (body != nullptr &&
+                (body->GetNativeEntryPointUsed() ||
+                 body->IsNativeOriginalEntryPoint() ||
+                 (body->GetSimpleJitEntryPointInfo() != nullptr &&
+                  body->GetSimpleJitEntryPointInfo()->IsNativeCode())))
+            {
+                return true;
+            }
+        }
+#endif
+        return false;
+    }
+
     static bool IsDerivedClassConstructorExitUndecl(JavascriptFunction* throwingFunc, uint32 byteCodeOffset, bool isNative)
     {
         if (throwingFunc == nullptr || !throwingFunc->IsScriptFunction())
@@ -1947,7 +1985,7 @@ dbl_align:
                     throwingFunc == targetFunc)
                 {
                     bool isNative = JavascriptFunction::IsNativeAddress(calleeContext, (void*)entryPoint) ||
-                                    JavascriptFunction::IsNativeAddress(throwingFunc->GetScriptContext(), (void*)throwingFunc->GetEntryPoint());
+                                    IsThrowingFunctionNative(throwingFunc);
                     if (IsDerivedClassConstructorExitUndecl(throwingFunc, exceptionObject->GetByteCodeOffset(), isNative))
                     {
                         JavascriptError::ThrowReferenceError(callerContext, JSERR_UseBeforeDeclaration);

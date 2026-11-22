@@ -66,10 +66,17 @@ out/<profile> for debug-static / release-shared):
      to their lib/ sources; on shared profiles, bin/ and lib/ .so copies
      identical; on debug-static, no .so and no singular archives, plus
      required JsRT symbols defined in libChakraCoreStatic.a; archives
-     present with parameterized member counts (base static 670 minus
-     91 when --no-jit and minus 37 on release-shared; Pal 90, Codex 1,
-     PlatformAgnostic 11 on shared profiles; `ar t`).
-  6. The `.profile` marker reads `<profile>`.
+     present with parameterized member counts (base static 681
+     (680 static_order C/C++/ASM TUs + u8a_codec.o) minus 91 when
+     --no-jit and minus 37 on release-shared; Pal 90, Codex 1,
+     PlatformAgnostic 11 on shared profiles; `ar t`), and
+     libChakraCoreStatic.a contains u8a_codec.o.
+  6. Phase-4 symbol & Node-API checks: zero leaked `zig_u8a_*` dynamic
+     exports on ch, GCStress, libChakraCore.so, or (when staged)
+     libChakraNodeApi.so; tools/build/nodeapi_exports.txt carries the
+     161 Node-API v10 + host exports (checked against libChakraNodeApi.so
+     when present in the prefix).
+  7. The `.profile` marker reads `<profile>`.
 
 Every sub-check fails loudly with diagnostics on mismatch.
 
@@ -93,6 +100,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 EXPORTS_SO = os.path.join(HERE, "linux_exports_so.txt")
 EXPORTS_CH = os.path.join(HERE, "linux_exports_ch.txt")
+NODEAPI_EXPORTS = os.path.join(HERE, "nodeapi_exports.txt")
+EXPECTED_NODEAPI_EXPORT_COUNT = 161
+FORBIDDEN_EXPORT_PREFIXES = ("zig_u8a_",)
+REQUIRED_STATIC_ARCHIVE_MEMBERS = ("u8a_codec.o",)
 
 # Non-test profiles compile without ENABLE_DEBUG_CONFIG_OPTIONS, so these
 # Jsrt.cpp CHAKRA_API definitions are absent by design. Keep the exact-set
@@ -115,9 +126,8 @@ WANT_ICU_NEEDED = ("libicuuc.so.74", "libicui18n.so.74")
 FORBID_NEEDED_SUBSTRS = ("libstdc++", "libc++")
 WANT_WABT_SHA256 = "4d365a89ec93f99a52137a5db99446514892cf928b2ff4a824ca997a271749d9"
 WANT_MEMBERS = {
-    # 667 at the B4.3 reference graph; +2 for the C2-S13 WeakRef/
-    # FinalizationRegistry TUs added on the branch after that reference
-    # (tables_linux.zig now compiles 684 TUs), asserted by this gate.
+    # 680 static_order C/C++/ASM TUs + 1 u8a_codec.o = 681 members
+    # (tables_linux.zig compiles 695 C/C++/ASM TUs + u8a_codec.zig).
     "lib/libChakraCoreStatic.a": STATIC_ARCHIVE_BASE,
     "lib/libChakra.Pal.Singular.a": 90,
     "lib/libChakra.Common.Codex.Singular.a": 1,
@@ -319,9 +329,11 @@ def nm_defined(path):
 
 
 def read_export_ref(ref_file):
-    """Sorted nonblank symbol names from a committed export list."""
+    """Sorted nonblank, non-comment symbol names from a committed export list."""
     with open(ref_file) as f:
-        return sorted(line.strip() for line in f if line.strip())
+        return sorted(
+            line.strip() for line in f
+            if line.strip() and not line.lstrip().startswith("#"))
 
 
 def check_exports(path, ref_file, omit=()):
@@ -416,6 +428,60 @@ def check_archive(path, want_members):
     if len(members) != want_members:
         return ("%s: %d members, want %d"
                 % (path, len(members), want_members))
+    return None
+
+
+def check_archive_contains(path, required_members=REQUIRED_STATIC_ARCHIVE_MEMBERS):
+    """Archive must contain each expected member object basename (e.g. u8a_codec.o)."""
+    rc, out, err = common.run_capture(["ar", "t", path])
+    if rc != 0:
+        return "ar t %s failed (rc=%d err=%r)" % (path, rc, err)
+    basenames = {
+        os.path.basename(line.strip())
+        for line in out.splitlines()
+        if line.strip()
+    }
+    missing = [m for m in required_members if m not in basenames]
+    if missing:
+        return "%s: missing required archive members: %r" % (path, missing)
+    return None
+
+
+def find_forbidden_symbol_prefixes(names, forbidden_prefixes=FORBIDDEN_EXPORT_PREFIXES):
+    """Return sorted dynamic symbol names starting with any forbidden prefix."""
+    return sorted(
+        name for name in names
+        if any(name.startswith(prefix) for prefix in forbidden_prefixes)
+    )
+
+
+def check_no_leaked_symbol_prefixes(path, forbidden_prefixes=FORBIDDEN_EXPORT_PREFIXES):
+    """Fail if any defined dynamic symbol matches a forbidden internal prefix."""
+    try:
+        names = nm_defined(path)
+    except (OSError, ValueError) as e:
+        return str(e)
+    leaked = find_forbidden_symbol_prefixes(names, forbidden_prefixes)
+    if leaked:
+        return "%s: leaked internal dynamic symbols %r" % (path, leaked[:8])
+    return None
+
+
+def check_nodeapi_exports_ref(ref_file=NODEAPI_EXPORTS, want_count=EXPECTED_NODEAPI_EXPORT_COUNT):
+    """Verify nodeapi_exports.txt carries the exact unique Phase-4 export count."""
+    try:
+        with open(ref_file) as f:
+            raw = [
+                line.strip() for line in f
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+    except OSError as e:
+        return "cannot read %s: %s" % (ref_file, e)
+    unique = set(raw)
+    if len(raw) != len(unique):
+        return "%s: contains duplicate symbols" % ref_file
+    if len(unique) != want_count:
+        return "%s: %d symbols, want %d" % (ref_file, len(unique), want_count)
     return None
 
 
@@ -715,6 +781,28 @@ def self_test():
                       parse_args(["p", "--icu-major", "nope"])[1] is not None)
         bad += report("parse_args rejects unknown flag",
                       parse_args(["p", "--bogus"])[1] is not None)
+
+        # Phase-4 u8a_codec.o archive membership, zero zig_u8a_* leak, and 161 Node-API exports ref.
+        p_u8a = os.path.join(tmp, "u8a_codec.o")
+        with open(p_u8a, "wb") as f:
+            f.write(good)
+        p_ar_u8a = os.path.join(tmp, "static_with_u8a.a")
+        rc_ar_u8a, _, _ = common.run_capture(["ar", "rcS", p_ar_u8a, p_member, p_u8a])
+        bad += report("archive with u8a_codec.o passes member-presence gate",
+                      rc_ar_u8a == 0 and check_archive_contains(p_ar_u8a) is None)
+        bad += report("archive without u8a_codec.o fails member-presence gate",
+                      rc_ar == 0 and check_archive_contains(p_ar) is not None)
+        bad += report("zig_u8a_* leak prefix detected",
+                      find_forbidden_symbol_prefixes(["JsCreateRuntime", "zig_u8a_encode_base64"])
+                      == ["zig_u8a_encode_base64"])
+        bad += report("clean symbols pass zig_u8a_* leak filter",
+                      find_forbidden_symbol_prefixes(["JsCreateRuntime", "napi_create_int32"]) == [])
+        bad += report("non-ELF target fails no-leaked-prefix gate",
+                      check_no_leaked_symbol_prefixes(p_txt) is not None)
+        bad += report("nodeapi_exports.txt passes at 161 exports",
+                      check_nodeapi_exports_ref(NODEAPI_EXPORTS, EXPECTED_NODEAPI_EXPORT_COUNT) is None)
+        bad += report("nodeapi_exports.txt fails at mismatched count 160",
+                      check_nodeapi_exports_ref(NODEAPI_EXPORTS, 160) is not None)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -778,7 +866,8 @@ def main(argv):
         except (OSError, ValueError) as e:
             failures.append(("ch-needed", str(e)))
 
-    # 3. Exports.
+    # 3. Exports & leak checks.
+    failures.append(("nodeapi-exports-ref", check_nodeapi_exports_ref()))
     if is_static:
         failures.append(("static-archive-exports",
                          check_static_archive_exports(
@@ -789,6 +878,19 @@ def main(argv):
             omit=(RELEASE_SHARED_ABSENT_EXPORTS if is_release else ()))))
         failures.append(("ch-exports", check_exports_subset(
             os.path.join(prefix, "bin/ch"), EXPORTS_CH)))
+        failures.append(("so-no-zig-u8a-leak",
+                         check_no_leaked_symbol_prefixes(
+                             os.path.join(prefix, SOLIBS[1]))))
+    for exe in EXECUTABLES:
+        failures.append((exe + "-no-zig-u8a-leak",
+                         check_no_leaked_symbol_prefixes(
+                             os.path.join(prefix, exe))))
+    nodeapi_so = os.path.join(prefix, "lib/libChakraNodeApi.so")
+    if os.path.lexists(nodeapi_so):
+        failures.append(("nodeapi-so-exports",
+                         check_exports_subset(nodeapi_so, NODEAPI_EXPORTS)))
+        failures.append(("nodeapi-so-no-zig-u8a-leak",
+                         check_no_leaked_symbol_prefixes(nodeapi_so)))
 
     # 4. Configs.
     failures.append(("pal-config", check_file_bytes(
@@ -816,7 +918,11 @@ def main(argv):
         except OSError as e:
             failures.append(("so-copies-identical", str(e)))
     for rel, want in expected_archive_members(profile, jit=jit).items():
-        failures.append((rel, check_archive(os.path.join(prefix, rel), want)))
+        archive_path = os.path.join(prefix, rel)
+        failures.append((rel, check_archive(archive_path, want)))
+        if rel == "lib/libChakraCoreStatic.a":
+            failures.append((rel + "-u8a-codec",
+                             check_archive_contains(archive_path)))
 
     # 6. Profile marker.
     failures.append((".profile", check_profile_marker(prefix, profile)))

@@ -36,9 +36,15 @@ counts to be recorded after validation — a completed run never silently
 passes. Re-record only after a green run on a native host and a receipt
 update recording why the counts changed.
 
-Usage: check_regression_linux.py <runtests.py> <ch> [extra runtests args...]
+Usage: check_regression_linux.py [--allow-higher] <runtests.py> <ch> [extra runtests args...]
        [--self-test]
-Exit code: 0 iff every variant ran green with exactly its recorded counts.
+Options:
+  --allow-higher  Transition gate for unpinned additions (e.g. Phase-4 tests
+                  before a native Linux x64 re-pin): still requires rc == 0 and
+                  failed == RECORDED_BASELINE[variant][1], and permits
+                  passed >= RECORDED_BASELINE[variant][0]. Rejects None baselines,
+                  nonzero exit, any failure count change, or passed < baseline.
+Exit code: 0 iff every variant ran green with its recorded counts.
 """
 
 import os
@@ -66,7 +72,7 @@ VARIANTS = ("interpreted", "dynapogo")
 RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}
 
 
-def grade_variant(variant, rc, lines):
+def grade_variant(variant, rc, lines, allow_higher=False):
     """Grade one single-variant run. Returns (verdict, detail)."""
     try:
         parsed = parse_total(lines)
@@ -141,6 +147,15 @@ def grade_variant(variant, rc, lines):
                 "(doc/b4-linux.md section 8); validate on an "
                 "execution-capable host, then record it"
                 % (passed, failed))
+    if allow_higher:
+        if failed != base[1] or passed < base[0]:
+            return ("FAIL",
+                    "count regression: got passed %d / failed %d, require "
+                    "passed >= %d / failed %d (--allow-higher)"
+                    % (passed, failed, base[0], base[1]))
+        return ("PASS",
+                "passed %d / failed %d satisfy baseline >= %d / %d (--allow-higher)"
+                % (passed, failed, base[0], base[1]))
     if (passed, failed) != base:
         return ("FAIL",
                 "count mismatch: got passed %d / failed %d, require "
@@ -154,9 +169,17 @@ def main(argv):
     args = list(argv[1:])
     if "--self-test" in args:
         return self_test()
+    allow_higher = False
+    filtered_args = []
+    for a in args:
+        if a == "--allow-higher":
+            allow_higher = True
+        else:
+            filtered_args.append(a)
+    args = filtered_args
     if len(args) < 2:
-        print("usage: check_regression_linux.py <runtests.py> <ch> "
-              "[extra runtests args...]", file=sys.stderr)
+        print("usage: check_regression_linux.py [--allow-higher] "
+              "<runtests.py> <ch> [extra runtests args...]", file=sys.stderr)
         return 2
     runtests, ch, extra = args[0], args[1], args[2:]
     if any(a == "--variants" or a.startswith("--variants=") for a in extra):
@@ -191,7 +214,7 @@ def main(argv):
             continue
         print("check_regression_linux: runtests.py [%s] exited %d"
               % (variant, rc))
-        verdict, detail = grade_variant(variant, rc, lines)
+        verdict, detail = grade_variant(variant, rc, lines, allow_higher=allow_higher)
         if verdict == "PASS":
             print("check_regression_linux: observed [%s] %s"
                   % (variant, detail))
@@ -202,8 +225,9 @@ def main(argv):
         print("check_regression_linux: [%s] %s: %s"
               % (variant, verdict, detail), file=stream)
     if all(v == "PASS" for v, _ in verdicts.values()):
-        print("check_regression_linux: PASS: every variant matches its "
-              "recorded baseline")
+        msg = ("satisfy baseline (--allow-higher)"
+               if allow_higher else "match its recorded baseline")
+        print("check_regression_linux: PASS: every variant %s" % msg)
         return 0
     overall = ("FAIL" if any(v == "FAIL" for v, _ in verdicts.values())
                else "BLOCKED")
@@ -363,8 +387,41 @@ def self_test():
                       grade_variant("interpreted", 0,
                                     ["some harness output", abort2[0]])[0]
                       == "FAIL")
+        bad += report("allow_higher passes higher count at rc=0, failed=0",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 15, failed 0"],
+                                    allow_higher=True)[0]
+                      == "PASS")
+        bad += report("allow_higher rejects lower passed count",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 9, failed 0"],
+                                    allow_higher=True)[0]
+                      == "FAIL")
+        bad += report("allow_higher rejects nonzero failures",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 15, failed 1"],
+                                    allow_higher=True)[0]
+                      == "FAIL")
+        bad += report("allow_higher still rejects nonzero rc",
+                      grade_variant("interpreted", 2,
+                                    ["Total: passed 15, failed 0"],
+                                    allow_higher=True)[0]
+                      == "FAIL")
     finally:
         globals()["RECORDED_BASELINE"] = saved_baseline
+    saved_for_ah_none = RECORDED_BASELINE
+    try:
+        globals()["RECORDED_BASELINE"] = {"interpreted": None, "dynapogo": None}
+        bad += report("allow_higher rejects None baseline",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 15, failed 0"],
+                                    allow_higher=True)[0]
+                      == "FAIL")
+    finally:
+        globals()["RECORDED_BASELINE"] = saved_for_ah_none
+    bad += report("--allow-higher with --variants in extras rejected",
+                  main(["check_regression_linux.py", real_rt, __file__,
+                        "--allow-higher", "--variants=disable_jit"]) == 2)
     bad += report("baseline restored after controls",
                   RECORDED_BASELINE == saved_baseline)
     print("check_regression_linux self-test: %s"
