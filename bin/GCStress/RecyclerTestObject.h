@@ -45,6 +45,7 @@ public:
 
         wprintf(_u("-------------------------------------------\n"));
         wprintf(_u("Full heap walk starting. Current generation: %12llu\n"), (unsigned long long) currentGeneration);
+        fflush(stdout);
     }
 
     static void WalkReference(RecyclerTestObject * object)
@@ -86,6 +87,7 @@ public:
         wprintf(_u("Leaf Bytes:             %12llu\n"), (unsigned long long) walkLeafByteCount);
         wprintf(_u("Total Bytes:            %12llu\n"), (unsigned long long) (walkScannedByteCount + walkBarrierByteCount + walkTrackedByteCount + walkFinalizedByteCount + walkLeafByteCount + walkRecyclerVisitedByteCount));
         wprintf(_u("Max Depth:              %12llu\n"), (unsigned long long) maxWalkDepth);
+        fflush(stdout);
     }
 
     // Virtual methods

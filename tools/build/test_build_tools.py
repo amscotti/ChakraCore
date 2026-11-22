@@ -41,6 +41,7 @@ import check_native
 import check_nodeapi
 import check_regression
 import check_regression_linux
+import check_regression_windows
 import check_sanitize
 import check_smoke_windows
 import check_wasm_p1
@@ -1695,6 +1696,165 @@ class WindowsToolsAndNodeApiPeTests(unittest.TestCase):
                 install_profile.safe_rel("bin/ch.exe/", "dest")
             with self.assertRaises(ValueError):
                 install_profile.safe_rel("C:foo.exe", "dest")
+
+
+class WindowsGatePolishTests(unittest.TestCase):
+    """Tests for Windows regression gate, PE check_jit/check_fulljit, and pipe GCStress."""
+
+    def test_check_regression_windows_self_test_and_cli_matrix(self):
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "check_regression_windows.py"),
+             "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+        with tempfile.TemporaryDirectory(prefix="reg-win-unit-") as tmp:
+            rt = Path(tmp) / "test/runtests.py"
+            ch = Path(tmp) / "out/debug-static/bin/ch.exe"
+            rt.parent.mkdir(parents=True)
+            ch.parent.mkdir(parents=True)
+            rt.write_text("# stub\n")
+            ch.write_bytes(b"MZ")
+
+            cmd = check_regression_windows.build_runtests_cmd(
+                str(rt), str(ch), "disable_jit", select="debug", no_icu=True)
+            self.assertIn("--x64", cmd)
+            self.assertIn("--debug", cmd)
+            self.assertNotIn("--test", cmd)
+            self.assertIn("--not-tag", cmd)
+            self.assertEqual(cmd[cmd.index("--not-tag") + 1], "exclude_noicu")
+            self.assertIn("--binary=" + os.path.abspath(str(ch)), cmd)
+            self.assertIn("--variants=disable_jit", cmd)
+            self.assertEqual(
+                check_regression_windows.main([
+                    "check_regression_windows.py", str(rt), str(ch),
+                    "--variants=interpreted",
+                ]),
+                2,
+            )
+
+            saved = dict(check_regression_windows.RECORDED_BASELINE)
+            try:
+                for k in check_regression_windows.RECORDED_BASELINE:
+                    check_regression_windows.RECORDED_BASELINE[k] = None
+                v, d = check_regression_windows.grade_variant(
+                    "test", "interpreted", 0, ["Total: passed 10, failed 0"])
+                self.assertEqual(v, "FAIL")
+                self.assertTrue(d.startswith("UNPINNED:"))
+                v, d = check_regression_windows.grade_variant(
+                    "test", "interpreted", 0, ["Total: passed 10, failed 0"],
+                    allow_unpinned=True)
+                self.assertEqual(v, "PASS")
+                self.assertIn("(10, 0)", d)
+                check_regression_windows.RECORDED_BASELINE[("test", "interpreted")] = (10, 0)
+                self.assertEqual(
+                    check_regression_windows.grade_variant(
+                        "test", "interpreted", 0, ["Total: passed 12, failed 0"],
+                        allow_higher=True)[0],
+                    "PASS",
+                )
+                self.assertEqual(
+                    check_regression_windows.grade_variant(
+                        "test", "interpreted", 0, ["Total: passed 12, failed 0"],
+                        allow_higher=False)[0],
+                    "FAIL",
+                )
+            finally:
+                check_regression_windows.RECORDED_BASELINE.clear()
+                check_regression_windows.RECORDED_BASELINE.update(saved)
+
+    def test_check_jit_pe32plus_and_backend_trace_probe(self):
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "check_jit.py"), "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+        with tempfile.TemporaryDirectory(prefix="check-jit-pe-unit-") as tmp:
+            tdir = Path(tmp)
+            ch = tdir / "ch.exe"
+            dll = tdir / "ChakraCore.dll"
+            ch.write_bytes(check_metadata_windows.build_synthetic_pe(is_dll=False))
+            dll.write_bytes(check_metadata_windows.build_synthetic_pe(is_dll=True))
+            self.assertTrue(check_jit._is_pe_binary(str(ch)))
+            self.assertTrue(check_jit._is_native_binary(str(ch)))
+            self.assertIsNone(check_jit.check_symbols(str(ch)))
+
+            want_out = "\n".join(check_jit.WANT) + "\n"
+            with mock.patch.object(
+                common, "run_capture",
+                side_effect=lambda cmd, **_kw: (
+                    (0, "Usage: ch [flaglist]\n", "") if "-?" in cmd
+                    else (0, "---BeginBackEnd: f---\n---EndBackEnd---\n" + want_out, "")
+                    if "-trace:BackEnd" in cmd
+                    else (0, want_out, "")
+                ),
+            ):
+                self.assertEqual(check_jit.main(["check_jit.py", str(ch)]), 0)
+
+            with mock.patch.object(
+                common, "run_capture",
+                side_effect=lambda cmd, **_kw: (
+                    (0, "Usage: ch [flaglist]\n", "") if "-?" in cmd
+                    else (0, want_out, "")
+                ),
+            ):
+                self.assertEqual(check_jit.main(["check_jit.py", str(ch)]), 1)
+
+    def test_check_fulljit_win32_tags_and_pe_backend_gate(self):
+        arch, alias, not_tags = check_fulljit.resolve_platform_tags(
+            select="test", plat="win32", machine="AMD64")
+        self.assertEqual(arch, "x64")
+        self.assertEqual(alias, "amd64")
+        self.assertIn("exclude_windows", not_tags)
+        self.assertNotIn("exclude_xplat", not_tags)
+        self.assertNotIn("require_simd", not_tags)
+
+        with tempfile.TemporaryDirectory(prefix="fulljit-pe-unit-") as tmp:
+            ch = Path(tmp) / "ch.exe"
+            ch.write_bytes(check_metadata_windows.build_synthetic_pe(is_dll=False))
+            with mock.patch.object(
+                common, "run_capture",
+                side_effect=lambda cmd, **_kw: (
+                    (0, "Usage: ch [flaglist]\n", "") if "-?" in cmd
+                    else (0, "no trace here\n", "")
+                ),
+            ):
+                err = check_fulljit.verify_jit_binary(str(ch))
+                self.assertIsNotNone(err)
+                self.assertIn("BeginBackEnd", err)
+
+    def test_check_gcstress_non_pty_pipe_mode(self):
+        with tempfile.TemporaryDirectory(prefix="gcstress-pipe-unit-") as tmp:
+            good = Path(tmp) / "good.py"
+            good.write_text(
+                "import signal, sys, time\n"
+                "signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))\n"
+                "print('Initialization complete', flush=True)\n"
+                "for g in range(1, 4):\n"
+                "    print('Full heap walk starting. Current generation: %d' % g, flush=True)\n"
+                "    print('Full heap walk finished', flush=True)\n"
+                "while True:\n"
+                "    time.sleep(0.05)\n"
+            )
+            ok, detail, _ = check_gcstress.run_gcstress_leg(
+                "pipe-good", [sys.executable, str(good)],
+                timeout=5.0, min_walks=2, use_pty=False)
+            self.assertTrue(ok, detail)
+
+            early = Path(tmp) / "early.py"
+            early.write_text(
+                "import sys\n"
+                "print('Initialization complete', flush=True)\n"
+                "print('Full heap walk starting. Current generation: 1', flush=True)\n"
+                "print('Full heap walk finished', flush=True)\n"
+                "sys.exit(0)\n"
+            )
+            ok_e, detail_e, _ = check_gcstress.run_gcstress_leg(
+                "pipe-early", [sys.executable, str(early)],
+                timeout=5.0, min_walks=2, use_pty=False)
+            self.assertFalse(ok_e, detail_e)
 
 
 if __name__ == "__main__":

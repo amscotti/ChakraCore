@@ -336,6 +336,7 @@ void SimpleRecyclerTest()
         }
 
         wprintf(_u("Initialization complete\n"));
+        fflush(stdout);
 
         // Do an initial walk
         WalkHeap();
@@ -357,9 +358,11 @@ void SimpleRecyclerTest()
     catch (Js::OutOfMemoryException)
     {
         printf("Error: OOM\n");
+        fflush(stdout);
     }
 
     wprintf(_u("==== Test completed.\n"));
+    fflush(stdout);
 }
 
 //////////////////// End test implementations ////////////////////

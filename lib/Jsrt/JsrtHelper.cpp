@@ -37,6 +37,13 @@ LPCWSTR JsUtil::ExternalApi::GetFeatureKeyName()
 {
     return _u("");
 }
+
+#ifdef _WIN32
+extern "C" bool IsMessageBoxWPresent()
+{
+    return true;
+}
+#endif
 #endif // CHAKRA_STATIC_LIBRARY
 #endif
 

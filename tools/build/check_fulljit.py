@@ -36,10 +36,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_jit
+import check_metadata_windows
 import common
 
 DEFAULT_SUITES = ("Basics", "Array", "Function", "Regex", "es6", "es7")
@@ -87,12 +89,15 @@ def resolve_platform_tags(select="test", plat=None, machine=None):
     }
     if arch_alias:
         not_tags.add("exclude_" + arch_alias)
-    if plat == "darwin":
-        not_tags.add("exclude_mac")
-    if plat.startswith("linux"):
-        not_tags.add("exclude_linux")
-    if not is_darwin_arm64:
-        not_tags.update(("exclude_xplat", "require_simd"))
+    if plat == "win32":
+        not_tags.add("exclude_windows")
+    else:
+        if plat == "darwin":
+            not_tags.add("exclude_mac")
+        if plat.startswith("linux"):
+            not_tags.add("exclude_linux")
+        if not is_darwin_arm64:
+            not_tags.update(("exclude_xplat", "require_simd"))
     return arch, arch_alias, not_tags
 
 
@@ -217,19 +222,15 @@ def grade_test_output(rc, norm_output, baseline_bytes=None):
 
 def verify_jit_binary(ch):
     """Ensure ch carries NativeCodeGenerator and supports the debug flaglist."""
-    dylib_name = ("libChakraCore.dylib" if sys.platform == "darwin"
-                  else "libChakraCore.so")
-    sibling = os.path.join(os.path.dirname(os.path.abspath(ch)), dylib_name)
-    target_for_nm = sibling if os.path.isfile(sibling) else ch
-    nm = shutil.which("nm") or "/usr/bin/nm"
-    rc, out, err = common.run_capture([nm, target_for_nm])
-    if rc != 0:
-        return "nm %s exited %d: %s" % (target_for_nm, rc, err.strip())
-    if "NativeCodeGenerator" not in out:
-        return ("%s has no NativeCodeGenerator symbol; JIT is disabled"
-                % target_for_nm)
+    err = check_jit.check_symbols(ch)
+    if err is not None:
+        return err
     if not check_jit.flaglist_supported(ch):
         return "%s does not support the test/debug flaglist (Release build?)" % ch
+    if sys.platform == "win32" or check_jit.is_pe_target(ch):
+        err = check_jit.check_backend_trace(ch)
+        if err is not None:
+            return err
     return None
 
 
@@ -399,15 +400,66 @@ def self_test():
         " ".join(cmd),
     )
 
-    # 2. Tag filter checks.
+    # 2. Tag filter checks (linux-x64, darwin-arm64, and win32).
     _, _, not_tags = resolve_platform_tags(select="test", plat="linux", machine="x86_64")
     bad += report(
-        "exclude_dynapogo and exclude_linux filtered",
+        "linux-x64 filters exclude_dynapogo, exclude_linux, exclude_xplat, require_simd",
         not should_run_test({"tags": "exclude_dynapogo"}, not_tags)
         and not should_run_test({"tags": "exclude_linux"}, not_tags)
+        and not should_run_test({"tags": "exclude_xplat"}, not_tags)
+        and not should_run_test({"tags": "require_simd"}, not_tags)
         and not should_run_test({"tags": "Slow"}, not_tags)
         and should_run_test({"tags": "require_backend"}, not_tags),
     )
+    mac_arch, mac_alias, mac_tags = resolve_platform_tags(
+        select="test", plat="darwin", machine="arm64")
+    bad += report(
+        "darwin-arm64 uses arm64, exclude_mac, keeps xplat & simd",
+        mac_arch == "arm64"
+        and mac_alias is None
+        and "exclude_mac" in mac_tags
+        and "exclude_xplat" not in mac_tags
+        and "require_simd" not in mac_tags,
+    )
+    win_arch, win_alias, win_tags = resolve_platform_tags(
+        select="test", plat="win32", machine="AMD64")
+    bad += report(
+        "win32 uses x64/amd64, exclude_windows, keeps xplat & simd",
+        win_arch == "x64"
+        and win_alias == "amd64"
+        and "exclude_windows" in win_tags
+        and "exclude_xplat" not in win_tags
+        and "require_simd" not in win_tags
+        and not should_run_test({"tags": "exclude_windows"}, win_tags)
+        and should_run_test({"tags": "exclude_xplat"}, win_tags)
+        and should_run_test({"tags": "require_simd"}, win_tags),
+    )
+
+    # 2b. PE32+ verify_jit_binary fails closed on DISABLE_JIT / Release.
+    with tempfile.TemporaryDirectory(prefix="check-fulljit-pe-") as pe_tmp:
+        pe_ch = os.path.join(pe_tmp, "ch.exe")
+        pe_dll = os.path.join(pe_tmp, "ChakraCore.dll")
+        with open(pe_ch, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=False))
+        with open(pe_dll, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=True))
+
+        def fake_pe_jit(cmd, **_kw):
+            if "-?" in cmd:
+                return 0, "Usage: ch [flaglist] <source file>\n", ""
+            return 0, "---BeginBackEnd: add---\n---EndBackEnd---\n", ""
+
+        def fake_pe_nojit(cmd, **_kw):
+            if "-?" in cmd:
+                return 0, "Usage: ch [flaglist] <source file>\n", ""
+            return 0, "jit-add 5\n", ""
+
+        with mock.patch.object(common, "run_capture", side_effect=fake_pe_jit):
+            bad += report("verify_jit_binary accepts PE32+ with BackEnd trace",
+                          verify_jit_binary(pe_ch) is None)
+        with mock.patch.object(common, "run_capture", side_effect=fake_pe_nojit):
+            bad += report("verify_jit_binary rejects PE32+ DISABLE_JIT",
+                          verify_jit_binary(pe_ch) is not None)
 
     # 3. Grade checks.
     bad += report(

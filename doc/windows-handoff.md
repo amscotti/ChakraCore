@@ -26,26 +26,27 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 | `-Dicu-libdir=<dir>` | optional path | Overrides auto-detected `CHAKRA_ICU_DIR` / `VCPKG_ROOT\installed\x64-windows\lib` import-library directory |
 | `-Dml64=<path>` | optional path | Overrides auto-discovered `ml64.exe` (PATH / `VCToolsInstallDir` / `vswhere.exe`) |
 | `-Dwin-sdk-um=<dir>` | optional path | Overrides auto-discovered Windows SDK `um` directory containing `ksamd64.inc` (`WindowsSdkDir` + `WindowsSDKVersion` / `UniversalCRTSdkDir`) |
+| `-Dallow-unpinned-regression` | `false` *(default)*, `true` | `true` passes `--allow-unpinned` to `check_regression_windows.py` during first-run `B6` bootstrap before `RECORDED_BASELINE` is pinned |
 
-### 1.2 Supported Steps (All 17 Windows `zig build` Targets)
+### 1.2 Supported Steps (16 Named Steps; 17 Targets Including Default `zig build`)
 
 | Step | Scope / Artifacts |
 |---|---|
-| *(default)* `zig build` | Builds and installs `ChakraCore.dll` / `ChakraCore.lib` (shared profiles; `ChakraCore.lib` static on `debug-static`), `ch.exe`, `GCStress.exe`, and public JsRT headers |
-| `libChakraNodeApi` | Builds `libChakraNodeApi.dll` + `libChakraNodeApi.lib` (using `gen_nodeapi_exports.py --def`, `161` exports) and stages `include/nodeapi/*.h` (shared profiles only) |
+| *(default)* `zig build` | Compiles `606` engine/bin TUs (`582` engine C++ + `1` engine C + `7` MASM `.asm` + `3` dll + `9` ch + `4` gcstress) + `1` Zig (`u8a_codec.zig`) and installs `ChakraCore.dll` / `ChakraCore.lib` (shared profiles; static `ChakraCore.lib` on `debug-static`), `ch.exe`, `GCStress.exe`, and public JsRT headers |
+| `libChakraNodeApi` | Compiles `16` `lib/NodeApi` TUs into `libChakraNodeApi.dll` + `libChakraNodeApi.lib` (using `gen_nodeapi_exports.py --def`, `161` exports) and stages `include/nodeapi/*.h` (shared profiles only) |
 | `ch-nodeapi` | Builds `ch-nodeapi.exe` (`NAPI_VERSION=10` multi-addon test host), `libChakraNodeApiStub.dll`, and 5 test `.node` addons (shared profiles only) |
 | `verify-bytecode` | Runs `verify_bytecode_pure.py` / `regenByteCode.py --verify` against built `ch.exe` (`test` & `debug-static`) |
-| `check-regression` | Runs `tools/build/check_regression.py` against `test/runtests.py` and `ch.exe` (`test` & `debug-static`) |
-| `check-selftest` | Runs `--self-test` negative controls across all Python check gates + Zig unit tests (`windows-gate-tests.zig`, `owned-bytes.zig`, `u8a_codec.zig`) |
+| `check-regression` | Runs `tools/build/check_regression_windows.py` against `test/runtests.py` (`--x64`, `--test`/`--debug`, `--no-jit`, `--no-icu`, `--allow-unpinned`) and `ch.exe` (`test` & `debug-static`) |
+| `check-selftest` | Runs `--self-test` negative controls across all 10 Python check scripts (incl. `check_regression_windows.py`, `check_jit.py`, `check_fulljit.py`, `check_gcstress.py`) + `test_build_tools.py` + Zig unit tests (`windows-gate-tests.zig`, `owned-bytes.zig`, `u8a_codec.zig`) |
 | `check-build-tools` | Runs `tools/build/test_build_tools.py` (no full engine build required) |
-| `check-smoke` | Runs `tools/build/check_smoke_windows.py <ch.exe|prefix> [--profile test|debug-static|release-shared] [--ch-nodeapi <ch-nodeapi.exe>] [--icu icu4c|windows|none]` |
-| `check-metadata` | Runs `tools/build/check_metadata_windows.py <prefix> [--profile test|debug-static|release-shared] [--no-jit] [--icu icu4c|windows|none]` (pure-Python PE32+ & COFF archive checker: `.profile`, `bin/{ch,GCStress}.exe`, 4 staged headers, `lib/ChakraCore.lib` `!<arch>\n`, shared `bin/ChakraCore.dll` `>=100` exports / `0` `zig_u8a_*` leaks / `--icu` imports, or `debug-static` standalone binaries with no `ChakraCore.dll`) |
-| `check-jit` | Runs `tools/build/check_jit.py` (`NativeCodeGenerator` flag check + `-mic:1` + `dynapogo`; requires `-Djit=true`) |
+| `check-smoke` | Runs `tools/build/check_smoke_windows.py <ch.exe\|prefix> [--profile test\|debug-static\|release-shared] [--ch-nodeapi <ch-nodeapi.exe>] [--icu icu4c\|windows\|none]` (`zig build check-smoke` always builds `ch-nodeapi` and passes `--ch-nodeapi=` on shared profiles; standalone invocation auto-detects beside `ch.exe`) |
+| `check-metadata` | Runs `tools/build/check_metadata_windows.py <prefix> [--profile test\|debug-static\|release-shared] [--no-jit] [--icu icu4c\|windows\|none]` (pure-Python PE32+ & COFF archive checker: `.profile`, `bin/{ch,GCStress}.exe`, 4 staged headers, `lib/ChakraCore.lib` `!<arch>\n`, shared `bin/ChakraCore.dll` `>=100` exports / `0` `zig_u8a_*` leaks / `--icu` imports, or `debug-static` standalone binaries with no `ChakraCore.dll`) |
+| `check-jit` | Runs `tools/build/check_jit.py` (PE32+ AMD64 `ChakraCore.dll`/`ch.exe` validation + `-trace:BackEnd` `BeginBackEnd`/`EndBackEnd` probe + `-mic:1` / `dynapogo` on `test`/`debug-static`, or PE32+ + default-flags runtime on `release-shared`; requires `-Djit=true`) |
 | `check-nodeapi` | Verifies `gen_nodeapi_exports.py --check` + pure-Python PE32+ export parser `check_nodeapi.py --dll <libChakraNodeApi.dll>` matches all `161` symbols (`155` `napi_*`/`node_api_*` + `6` host) |
 | `check-gcstress` | Runs bounded `GCStress.exe` in-thread and concurrent heap walks |
 | `check-wasm` | Runs `tools/build/check_wasm_p1.py` (`382` P1 entries; requires `-Djit=true` and non-release profile) |
 | `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`) |
-| `check` | Aggregates `check-selftest`, `check-regression`, `verify-bytecode`, `check-smoke`, `check-jit` (when `-Djit=true`), and `check-metadata` |
+| `check` | Aggregates `check-selftest`, `verify-bytecode` (non-release), `check-regression` (non-release), `check-smoke`, `check-jit` (when `-Djit=true`), `check-nodeapi` (shared profiles), `check-gcstress`, and `check-metadata` |
 | `package` | Builds deterministic `out/package/chakracore-<version>-windows-x64.tar.gz` + `MANIFEST.json` (shared profiles only) |
 | `check-package` | Builds, SHA-256 verifies (`verify_package.py`), and executes packaged `ch.exe` + `ch-nodeapi.exe` (`test_package.py`) |
 
@@ -56,7 +57,7 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 Install on **Windows 10 / 11 x64** (`x86_64-windows-msvc`):
 
 1. **Visual Studio 2022 Build Tools (or VS 2022 Community+):**
-   - Select the **Desktop development with C++** workload and a **Windows 10 or Windows 11 SDK** (provides `ml64.exe` MASM assembler, `ksamd64.inc`, UCRT headers/libs, and Win32 import libraries `kernel32.lib`, `user32.lib`, `advapi32.lib`, `ole32.lib`, `rpcrt4.lib`, `bcrypt.lib`, `oleaut32.lib`, plus `icu.lib`/`delayimp.lib` when using `-Dicu=windows`). Because `tools/build/windows.zig` passes `-DENABLE_OOP_NATIVE_CODEGEN=0` (no `midl.exe`) and `-DDISABLE_JS_ETW` (no `mc.exe`), **`ml64.exe` is the sole external MSVC binary required by `zig build`**.
+   - Select the **Desktop development with C++** workload and a **Windows 10 or Windows 11 SDK** (provides `ml64.exe` MASM assembler, `ksamd64.inc`, UCRT headers/libs, and Win32 import libraries `kernel32.lib`, `user32.lib`, `advapi32.lib`, `ole32.lib`, `rpcrt4.lib`, `bcrypt.lib`, `oleaut32.lib`, plus Windows inbox `icu.lib` — or `icuuc.lib` + `icuin.lib` if `icu.lib` is absent from SDK `Lib\<ver>\um\x64` — when using `-Dicu=windows`). Because `tools/build/windows.zig` passes `-DENABLE_OOP_NATIVE_CODEGEN=0` (no `midl.exe`) and `-DDISABLE_JS_ETW` (no `mc.exe`), **`ml64.exe` is the sole external MSVC binary required by `zig build`**.
    - Open an **x64 Native Tools Command Prompt for VS 2022** (or initialize MSVC env vars in PowerShell / use `ilammy/msvc-dev-cmd@v1` in CI) so `VCToolsInstallDir`, `WindowsSdkDir`, `WindowsSDKVersion`, and `PATH` (`ml64.exe`) are set.
 2. **Zig `0.17.0`:**
    - Install `0.17.0` (matching [mise.toml](../mise.toml)) via `mise` (`mise install`) or the official Windows x64 Zig `0.17.0` archive and place `zig.exe` on `PATH`.
@@ -96,6 +97,10 @@ python tools/test262/test_edition_policy.py
 python tools/test262/refresh_baseline.py --self-test
 python tools/build/check_metadata_windows.py --self-test
 python tools/build/check_smoke_windows.py --self-test
+python tools/build/check_regression_windows.py --self-test
+python tools/build/check_jit.py --self-test
+python tools/build/check_fulljit.py --self-test
+python tools/build/check_gcstress.py --self-test
 python tools/build/check_nodeapi.py --self-test
 python tools/build/gen_nodeapi_exports.py --check
 ```
@@ -145,15 +150,17 @@ python tools/build/check_smoke_windows.py zig-out --profile test --icu icu4c
 ```
 
 Expected:
-- `check-smoke`: `ch.exe -v`, profile invalid-flag behavior, JS snippet, ES5/ES6/`Iterator.zip`/`Promise.allKeyed`/`Uint8Array.fromBase64`/`Intl.Locale` (skipped on `--icu none`)/`using`, `hello.js` (`release-shared`), and `ch-nodeapi.exe --help` + `--version` (when `--ch-nodeapi` is passed or `ch-nodeapi.exe` sits beside `ch.exe` on shared profiles) all PASS.
+- `check-smoke`: `ch.exe -v`, profile invalid-flag behavior, JS snippet, ES5/ES6/`Iterator.zip`/`Promise.allKeyed`/`Uint8Array.fromBase64`/`Intl.Locale` (skipped on `--icu none`)/`using`, `hello.js` (`release-shared`), and `ch-nodeapi.exe --help` + `--version` (`zig build check-smoke` always builds `ch-nodeapi` and passes `--ch-nodeapi=` on shared profiles; standalone `check_smoke_windows.py` auto-detects `ch-nodeapi.exe` beside `ch.exe` when omitted) all PASS.
 - `check-metadata`: pure-Python PE32+ & COFF archive validation confirms `.profile = test`, `bin/ch.exe`, `bin/GCStress.exe`, all 4 staged headers (`include/Chakra{Core,Common,Debug}.h`, `include/ChakraCoreVersion.h`), `lib/ChakraCore.lib` (`!<arch>\n`), and shared `bin/ChakraCore.dll` (`>=100` exports, required JsRT exports, zero leaked `zig_u8a_*` exports, `--icu` import check).
 - `verify-bytecode`: exits `0`.
-- `check-jit`: `-mic:1` + `dynapogo` smoke PASS.
+- `check-jit`: PE32+ AMD64 validation + `-trace:BackEnd` (`BeginBackEnd`/`EndBackEnd`) + `-mic:1` + `dynapogo` smoke PASS (or PE32+ validation + default-flags runtime on `release-shared`).
 
-### Step 4 -- Full Default `check` Gate & `I1`/`I2` ECMA-402 Spot-Check
+### Step 4 -- Full Default `check` Gate, Regression Pinning, & `I1`/`I2` ECMA-402 Spot-Check
+
+On the first native `B6` run before `RECORDED_BASELINE` in `tools/build/check_regression_windows.py` is pinned, pass `-Dallow-unpinned-regression=true` (or run `python tools/build/check_regression_windows.py test/runtests.py zig-out/bin/ch.exe --allow-unpinned`):
 
 ```powershell
-zig build check
+zig build -Dallow-unpinned-regression=true check
 foreach ($t in @(
   "test/Intl/IntlLocaleTest.js",
   "test/Intl/IntlListRelativeTimeTest.js",
@@ -167,13 +174,14 @@ foreach ($t in @(
 }
 ```
 
-Expected: `zig build check` exits `0` (note: if `check-regression` reports a new Windows x64 `runtests.py --x64 --test` count vs macOS/Linux, audit every delta before pinning Windows counts — see §4.6 regarding `exclude_windows` tags in `test/Intl/rlexe.xml`).
+Expected: `check` runs `check-selftest`, `verify-bytecode`, `check-regression`, `check-smoke`, `check-jit`, `check-nodeapi`, `check-gcstress`, and `check-metadata`. Audit every `passed` count against `exclude_windows` tags (§4.6) and confirm `0` failures (`rc == 0`), then pin the printed `RECORDED_BASELINE[(select, variant)] = (passed, 0)` tuples in `tools/build/check_regression_windows.py` and `doc/b6-windows-run.md` so subsequent `zig build check` / `zig build check-regression` invocations enforce strict pins without `-Dallow-unpinned-regression=true`.
 
 ### Step 5 -- Build Variants (`-Djit=false`, `debug-static`, `release-shared`, Optional `-Dicu`)
 
 ```powershell
-zig build -Djit=false check-smoke check-metadata verify-bytecode
-zig build -Dprofile=debug-static check-smoke check-metadata verify-bytecode check-regression
+zig build -Djit=false check-smoke check-metadata verify-bytecode check-gcstress
+zig build -Dprofile=debug-static check-smoke check-metadata verify-bytecode check-gcstress
+zig build -Dprofile=debug-static -Dallow-unpinned-regression=true check-regression
 zig build -Dprofile=release-shared check-smoke check-metadata check-jit
 ```
 
@@ -292,11 +300,11 @@ The Windows x64 build assembles 5 core MASM files (`amd64_SAVE_REGISTERS.asm`, `
 Legacy MSBuild (`Build\Chakra.Core.sln`) defaults `ENABLE_OOP_NATIVE_CODEGEN` to `1` (invoking `midl.exe` over `JITIDL` and linking `JITClient`/`JITServer` COM/RPC projects) and defines `ENABLE_JS_ETW` (requiring `mc.exe` / `CoreManifests`). In `modernize/phase4`:
 - `lib/Common/CommonDefines.h` wraps `#define ENABLE_OOP_NATIVE_CODEGEN 1` in `#ifndef ENABLE_OOP_NATIVE_CODEGEN` and guards `ENABLE_JS_ETW` with `#if !defined(CHAKRACORE_LITE) && !defined(DISABLE_JS_ETW)`.
 - `tools/build/windows.zig` passes both `-DENABLE_OOP_NATIVE_CODEGEN=0` (clean in-process JIT without `midl.exe` or `JITIDL`/`JITClient`/`JITServer`) and `-DDISABLE_JS_ETW` (no `mc.exe` / `CoreManifests`), leaving **`ml64.exe`** as the sole external MSVC binary required by `zig build`, while keeping legacy MSBuild's `1` / ETW defaults `100%` intact.
-- `bin/ChakraCore/ChakraCore.def` guards `JsInitializeJITServer` and `lib/Jsrt/JsrtCommonExports.inc` guards `JsConnectJITProcess` and `JsEnableOOPJIT` with `#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN` so `.def` preprocessing omits them from `ChakraCore.dll` when `JITServer`/`JITClient` are excluded, while `lib/Jsrt/Core/JsrtCore.cpp` defines `JsEnableOOPJIT` / `JsConnectJITProcess` returning `JsErrorNotImplemented` (keeping static `ch.exe` linkable) and `bin/ch/ChakraRtInterface.cpp` / `bin/ch/ch.cpp` resolve `JsConnectJITProcess` / `JsInitializeJITServer` dynamically via `GetProcAddress`.
+- `bin/ChakraCore/ChakraCore.def` guards `JsInitializeJITServer` and `lib/Jsrt/JsrtCommonExports.inc` guards `JsConnectJITProcess` and `JsEnableOOPJIT` with `#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN` so `.def` preprocessing omits them from `ChakraCore.dll` exports when `ENABLE_OOP_NATIVE_CODEGEN == 0`; `bin/ch/ChakraRtInterface.cpp` (`GetChakraCoreSymbol`) and `bin/ch/ch.cpp` resolve `JsConnectJITProcess` / `JsInitializeJITServer` dynamically via `GetProcAddress` (never statically imported from `ChakraCore.dll`), while `lib/Jsrt/Core/JsrtCore.cpp` defines `JsEnableOOPJIT` / `JsConnectJITProcess` on `_WIN32` returning `JsErrorNotImplemented` when `ENABLE_OOP_NATIVE_CODEGEN == 0`.
 
 ### 4.4 `-Dicu=icu4c` vs `-Dicu=windows` vs `-Dicu=none` Trade-Offs
 - **`-Dicu=icu4c` (Default):** Defines `HAS_ICU=1`, `INTL_ICU=1`, `U_DISABLE_RENAMING=1` against `vcpkg` `icu:x64-windows` (`unicode/*.h`). Gives full `I1`/`I2` ECMA-402 C-API parity (`Intl.Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `supportedValuesOf`, `DurationFormat`) and modern ICU Unicode property escapes, at the cost of deploying `vcpkg` ICU DLLs.
-- **`-Dicu=windows`:** Defines `HAS_ICU=1`, `INTL_ICU=1`, `WINDOWS10_ICU=1` (`lib/Runtime/PlatformAgnostic/ChakraICU.h` includes `<icu.h>` with `NTDDI_WIN10_RS5` and links Windows inbox `icu.lib` + `delayimp.lib` / `icuuc.lib`). Avoids third-party ICU DLLs, **but** Windows inbox `<icu.h>` targets an older Redstone C API subset and OS-bundled CLDR/Unicode data that may lack newer ICU4C 74+ `I1`/`I2` APIs or match older Unicode tables depending on Windows OS version.
+- **`-Dicu=windows`:** Defines `HAS_ICU=1`, `INTL_ICU=1`, `WINDOWS10_ICU=1` (`lib/Runtime/PlatformAgnostic/ChakraICU.h` includes `<icu.h>` with `NTDDI_WIN10_RS5` and `tools/build/windows.zig` links `-licu` when `icu.lib` is present in SDK `Lib\<ver>\um\x64`, or `-licuuc -licuin` if `icu.lib` is absent). Avoids third-party ICU DLLs, **but** Windows inbox `<icu.h>` targets an older Redstone C API subset and OS-bundled CLDR/Unicode data that may lack newer ICU4C 74+ `I1`/`I2` APIs or match older Unicode tables depending on Windows OS version.
 - **`-Dicu=none`:** Omits `HAS_ICU` and `INTL_ICU`, so `lib/Common/CommonDefines.h` defines `INTL_WINGLOB=1` (`Windows.Globalization`). Legacy WinGlob `Intl` lacks `I1`/`I2` modern `INTL_ICU` constructors and ICU-backed Unicode `RegExp` property escapes.
 
 ### 4.5 `ChakraCore.def`, `libChakraNodeApi.dll`, & Windows `.node` Addons
@@ -305,7 +313,7 @@ Legacy MSBuild (`Build\Chakra.Core.sln`) defaults `ENABLE_OOP_NATIVE_CODEGEN` to
 - On `_WIN32`, `ch-nodeapi.exe` (`tools/nodeapi/ch-nodeapi.cpp`) links only `ChakraCore.lib` and resolves `libChakraNodeApi.dll` / `libChakraNodeApiStub.dll` (`napi_open_handle_scope`/`napi_close_handle_scope`/`napi_create_object` via `LoadLibrary`/`GetProcAddress`, probing beside `ch-nodeapi.exe`, `..\lib\`, and `..\bin\`) so `--provider` stub overrides work cleanly, while `.node` addons compile with `-DBUILDING_NODE_EXTENSION` and link `lib/libChakraNodeApi.lib`.
 
 ### 4.6 `test/runtests.py` Watchpoints on Windows
-- **Always pass `--x64`:** In `test/runtests.py`, on `sys.platform == 'win32'`, omitting `--x64` falls back to `os.environ.get('_BuildArch', 'x86')`, selecting `x86` exclusion tags instead of `x64`/`amd64`! Always run `python runtests.py --x64 --test -b ...` (or `--debug`).
+- **Always pass `--x64`:** In `test/runtests.py`, on `sys.platform == 'win32'`, omitting `--x64` falls back to `os.environ.get('_BuildArch', 'x86')`, selecting `x86` exclusion tags instead of `x64`/`amd64`! (`tools/build/check_regression_windows.py` always passes `--x64`, `--test`/`--debug`, and `--binary=<abs_ch>` automatically.) Always run `python runtests.py --x64 --test -b ...` (or `--debug`) when invoking manually.
 - **Always pass `-b` / `--binary`:** Without `-b`, `runtests.py` defaults to legacy `Build\VcBuild\bin\x64_Test\ch.exe` rather than `zig-out\bin\ch.exe` or `out\debug-static\bin\ch.exe`.
 - **`exclude_windows` tags in `test/Intl/rlexe.xml`:** Legacy `IntlPlatform.js`, `PluralRules.js`, and the 6 `I1`/`I2` `Intl*.js` suites currently carry `exclude_windows` (written for legacy `INTL_WINGLOB`), so `runtests.py` skips them on Windows. Run the 6 `I1`/`I2` suites explicitly under `-Dicu=icu4c` as shown in Step 4.
 - **Line endings & stdout:** `test/runtests.py` and `tools/build/check_fulljit.py` normalize CRLF when comparing `.baseline` files, and require `ch.exe` on an absolute `-b` path because `runtests.py` changes `cwd` into each suite subdirectory.

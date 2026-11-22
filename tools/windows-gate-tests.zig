@@ -119,6 +119,7 @@ test "all Phase-4 TUs, u8a_codec, 7 MASM files, 16 NodeApi TUs, and bin targets 
         "lib/wabt/chakra/wabtapi.cc",
         "lib/wabt/src/opcode-code-table.c",
         "lib/Runtime/Language/amd64/StackFrame.cpp",
+        "lib/Runtime/Language/AsmJsLink.cpp",
         "lib/Runtime/PlatformAgnostic/Platform/Windows/UnicodeText.cpp",
         "lib/Runtime/PlatformAgnostic/Platform/Common/UnicodeText.ICU.cpp",
         "lib/ZigCodec/u8a_codec.zig",
@@ -317,4 +318,71 @@ test "libChakraNodeApiStub links ChakraCore.lib without full 161-export .def" {
     const stub_src = @embedFile("nodeapi/stub/stub_provider.cpp");
     try std.testing.expect(std.mem.indexOf(u8, stub_src, "STUB_HOST_EXPORT") != null);
     try std.testing.expect(std.mem.indexOf(u8, stub_src, "__declspec(dllexport)") != null);
+}
+
+fn checkGroupExtensions(g: *const tables.Group) !void {
+    for (g.cxx) |f| {
+        if (std.mem.eql(u8, f, "lib/Parser/jserr.gen")) return error.UnexpectedJserrGen;
+        const ok = std.mem.endsWith(u8, f, ".cpp") or std.mem.endsWith(u8, f, ".cc");
+        if (!ok) {
+            std.debug.print("invalid cxx extension in Windows table: {s}\n", .{f});
+            return error.InvalidCxxExtension;
+        }
+    }
+    for (g.c) |f| {
+        if (std.mem.eql(u8, f, "lib/Parser/jserr.gen")) return error.UnexpectedJserrGen;
+        if (!std.mem.endsWith(u8, f, ".c")) {
+            std.debug.print("invalid c extension in Windows table: {s}\n", .{f});
+            return error.InvalidCExtension;
+        }
+    }
+    for (g.asm_files) |f| {
+        if (std.mem.eql(u8, f, "lib/Parser/jserr.gen")) return error.UnexpectedJserrGen;
+        if (!std.mem.endsWith(u8, f, ".asm")) {
+            std.debug.print("invalid asm extension in Windows table: {s}\n", .{f});
+            return error.InvalidAsmExtension;
+        }
+    }
+}
+
+test "strict extensions, no jserr.gen in groups, and exact non-overlapping TU counts" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const files = allTableFiles(arena_state.allocator());
+    try expectNotContains(files, "lib/Parser/jserr.gen");
+
+    var engine_cxx: usize = 0;
+    var engine_c: usize = 0;
+    var engine_asm: usize = 0;
+    for (tables.engine_groups) |g| {
+        try checkGroupExtensions(g);
+        engine_cxx += g.cxx.len;
+        engine_c += g.c.len;
+        engine_asm += g.asm_files.len;
+    }
+    try checkGroupExtensions(&tables.dll_group);
+    try checkGroupExtensions(&tables.ch_group);
+    try checkGroupExtensions(&tables.gcstress_group);
+    try std.testing.expectEqual(@as(usize, 0), tables.dll_group.c.len + tables.dll_group.asm_files.len);
+    try std.testing.expectEqual(@as(usize, 0), tables.ch_group.c.len + tables.ch_group.asm_files.len);
+    try std.testing.expectEqual(@as(usize, 0), tables.gcstress_group.c.len + tables.gcstress_group.asm_files.len);
+
+    try std.testing.expectEqual(@as(usize, 582), engine_cxx);
+    try std.testing.expectEqual(@as(usize, 1), engine_c);
+    try std.testing.expectEqual(@as(usize, 7), engine_asm);
+    try std.testing.expectEqual(@as(usize, 3), tables.dll_group.cxx.len);
+    try std.testing.expectEqual(@as(usize, 9), tables.ch_group.cxx.len);
+    try std.testing.expectEqual(@as(usize, 4), tables.gcstress_group.cxx.len);
+    try std.testing.expectEqual(@as(usize, 16), tables.nodeapi_provider_tus.len);
+
+    const engine_bin_total = engine_cxx + engine_c + engine_asm +
+        tables.dll_group.cxx.len + tables.ch_group.cxx.len + tables.gcstress_group.cxx.len;
+    try std.testing.expectEqual(@as(usize, 606), engine_bin_total);
+    try std.testing.expectEqual(@as(usize, 606 + 1 + 16), files.len);
+
+    const win_src = @embedFile("build/windows.zig");
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "ch_link.addFileArg(common_codex_lib);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "tools/build/check_regression_windows.py") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "allow-unpinned-regression") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "\"check_regression_windows.py\"") != null);
 }

@@ -27,17 +27,21 @@ Exit code: 0 iff both legs observe initialization + repeated heap walks.
 
 import errno
 import os
+import queue
 import selectors
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 try:
     import pty
 except ImportError:  # pragma: no cover - POSIX hosts always provide pty
     pty = None
+
+_KILL_SIG = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 DEFAULT_TIMEOUT = 15.0
 DEFAULT_MIN_WALKS = 2
@@ -65,28 +69,51 @@ def find_error_marker(lines):
     return None
 
 
-def _kill_process_group(proc, sig=signal.SIGTERM, wait_s=2.0):
-    """Terminate proc's process group cleanly, escalating to SIGKILL."""
+def _kill_process_group(proc, sig=signal.SIGTERM, wait_s=2.0, force=False):
+    """Terminate proc's process group cleanly, escalating to _KILL_SIG / kill()."""
     if proc.poll() is not None:
         return
+    if force:
+        if os.name == "posix":
+            try:
+                os.killpg(proc.pid, _KILL_SIG)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        else:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=wait_s)
+        except subprocess.TimeoutExpired:
+            pass
+        return
+
     if os.name == "posix":
         try:
             os.killpg(proc.pid, sig)
-        except (ProcessLookupError, PermissionError):
+        except (ProcessLookupError, PermissionError, OSError):
             pass
     else:
-        proc.terminate()
+        try:
+            proc.terminate()
+        except OSError:
+            pass
     deadline = time.monotonic() + wait_s
     while proc.poll() is None and time.monotonic() < deadline:
         time.sleep(0.05)
     if proc.poll() is None:
         if os.name == "posix":
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, _KILL_SIG)
+            except (ProcessLookupError, PermissionError, OSError):
                 pass
         else:
-            proc.kill()
+            try:
+                proc.kill()
+            except OSError:
+                pass
         proc.wait()
 
 
@@ -106,14 +133,29 @@ def _drain_fd(fd):
     return b"".join(chunks)
 
 
+def _pump_pipe(stream, out_q):
+    """Background daemon reader feeding raw pipe chunks into out_q."""
+    try:
+        while True:
+            chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(4096)
+            if not chunk:
+                break
+            out_q.put(("data", chunk))
+    except OSError as e:
+        out_q.put(("error", e))
+    finally:
+        out_q.put(("eof", None))
+
+
 def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
-                     min_walks=DEFAULT_MIN_WALKS):
+                     min_walks=DEFAULT_MIN_WALKS, use_pty=None):
     """Run one bounded GCStress leg. Returns (ok, detail, lines)."""
     if min_walks < 1:
         return (False, "min_walks must be >= 1, got %d" % min_walks, [])
     master_fd = None
     slave_fd = None
-    if pty is not None:
+    want_pty = (pty is not None) if use_pty is None else (use_pty and pty is not None)
+    if want_pty:
         try:
             master_fd, slave_fd = pty.openpty()
         except OSError:
@@ -121,12 +163,16 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
     if master_fd is not None:
         stdout_arg = slave_fd
         stderr_arg = slave_fd
+        popen_bufsize = -1
     else:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.STDOUT
+        popen_bufsize = 0
 
     proc = None
-    sel = selectors.DefaultSelector()
+    sel = None
+    reader = None
+    out_q = None
     raw_buf = bytearray()
     lines = []
     init_seen = False
@@ -135,28 +181,58 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
     deadline = time.monotonic() + timeout
     t0 = time.monotonic()
 
+    def process_bytes(data):
+        nonlocal raw_buf, init_seen, walk_starts, walk_finishes
+        if not data:
+            return None
+        raw_buf.extend(data)
+        text = raw_buf.decode("utf-8", errors="replace")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if "\n" not in text:
+            return None
+        parts = text.split("\n")
+        new_lines = parts[:-1]
+        raw_buf = bytearray(parts[-1].encode("utf-8"))
+        for line in new_lines:
+            lines.append(line)
+            if "Initialization complete" in line:
+                init_seen = True
+            if "Full heap walk starting." in line:
+                walk_starts += 1
+            if "Full heap walk finished" in line:
+                walk_finishes += 1
+        return find_error_marker(new_lines)
+
     try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=stdout_arg,
             stderr=stderr_arg,
+            bufsize=popen_bufsize,
             start_new_session=(os.name == "posix"),
             close_fds=True,
         )
         if slave_fd is not None:
             os.close(slave_fd)
             slave_fd = None
-        read_fd = master_fd if master_fd is not None else proc.stdout.fileno()
-        os.set_blocking(read_fd, False)
-        sel.register(read_fd, selectors.EVENT_READ)
+
+        if master_fd is not None:
+            os.set_blocking(master_fd, False)
+            sel = selectors.DefaultSelector()
+            sel.register(master_fd, selectors.EVENT_READ)
+        else:
+            out_q = queue.Queue()
+            reader = threading.Thread(
+                target=_pump_pipe, args=(proc.stdout, out_q), daemon=True)
+            reader.start()
 
         eof = False
         while True:
             now = time.monotonic()
             remaining = deadline - now
             if remaining <= 0:
-                _kill_process_group(proc, sig=signal.SIGKILL)
+                _kill_process_group(proc, force=True)
                 return (
                     False,
                     "[%s] timed out after %.1fs (init=%s starts=%d "
@@ -166,41 +242,55 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
                     lines,
                 )
 
-            ready = sel.select(timeout=min(remaining, 0.2))
-            if ready:
-                while True:
-                    try:
-                        chunk = os.read(read_fd, 4096)
-                    except BlockingIOError:
-                        break
-                    except OSError as e:
-                        if e.errno == errno.EIO:
+            if master_fd is not None:
+                ready = sel.select(timeout=min(remaining, 0.2))
+                if ready:
+                    chunks = []
+                    while True:
+                        try:
+                            chunk = os.read(master_fd, 4096)
+                        except BlockingIOError:
+                            break
+                        except OSError as e:
+                            if e.errno == errno.EIO:
+                                eof = True
+                                break
+                            raise
+                        if not chunk:
                             eof = True
                             break
-                        raise
-                    if not chunk:
-                        eof = True
-                        break
-                    raw_buf.extend(chunk)
-
-                # Split complete lines, normalizing PTY CR+LF.
-                text = raw_buf.decode("utf-8", errors="replace")
-                text = text.replace("\r\n", "\n").replace("\r", "\n")
-                if "\n" in text:
-                    parts = text.split("\n")
-                    new_lines = parts[:-1]
-                    raw_buf = bytearray(parts[-1].encode("utf-8"))
-                    for line in new_lines:
-                        lines.append(line)
-                        if "Initialization complete" in line:
-                            init_seen = True
-                        if "Full heap walk starting." in line:
-                            walk_starts += 1
-                        if "Full heap walk finished" in line:
-                            walk_finishes += 1
-                    err = find_error_marker(new_lines)
+                        chunks.append(chunk)
+                    err = process_bytes(b"".join(chunks))
                     if err is not None:
-                        _kill_process_group(proc, sig=signal.SIGKILL)
+                        _kill_process_group(proc, force=True)
+                        return (
+                            False,
+                            "[%s] error marker observed: %s" % (label, err),
+                            lines,
+                        )
+            else:
+                chunks = []
+                try:
+                    kind, payload = out_q.get(timeout=min(remaining, 0.2))
+                    if kind == "data":
+                        chunks.append(payload)
+                    elif kind in ("eof", "error"):
+                        eof = True
+                except queue.Empty:
+                    pass
+                while True:
+                    try:
+                        kind, payload = out_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if kind == "data":
+                        chunks.append(payload)
+                    elif kind in ("eof", "error"):
+                        eof = True
+                if chunks:
+                    err = process_bytes(b"".join(chunks))
+                    if err is not None:
+                        _kill_process_group(proc, force=True)
                         return (
                             False,
                             "[%s] error marker observed: %s" % (label, err),
@@ -220,9 +310,24 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
                         lines,
                     )
                 _kill_process_group(proc, sig=signal.SIGTERM)
-                tail = _drain_fd(read_fd)
-                if tail:
-                    tail_text = tail.decode("utf-8", errors="replace")
+                tail = b""
+                if master_fd is not None:
+                    tail = _drain_fd(master_fd)
+                else:
+                    reader.join(timeout=1.0)
+                    tail_chunks = []
+                    while True:
+                        try:
+                            kind, payload = out_q.get_nowait()
+                        except queue.Empty:
+                            break
+                        if kind == "data":
+                            tail_chunks.append(payload)
+                    tail = b"".join(tail_chunks)
+                if tail or raw_buf:
+                    tail_bytes = bytes(raw_buf) + tail
+                    raw_buf.clear()
+                    tail_text = tail_bytes.decode("utf-8", errors="replace")
                     tail_text = tail_text.replace("\r\n", "\n").replace("\r", "\n")
                     tail_lines = [ln for ln in tail_text.splitlines() if ln]
                     lines.extend(tail_lines)
@@ -243,6 +348,18 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
                 )
 
             if eof or proc.poll() is not None:
+                if master_fd is None and not eof:
+                    reader.join(timeout=1.0)
+                    rem_chunks = []
+                    while True:
+                        try:
+                            kind, payload = out_q.get_nowait()
+                        except queue.Empty:
+                            break
+                        if kind == "data":
+                            rem_chunks.append(payload)
+                    if rem_chunks:
+                        process_bytes(b"".join(rem_chunks))
                 # Drain final incomplete line before failing.
                 if raw_buf:
                     rem = raw_buf.decode("utf-8", errors="replace").strip()
@@ -261,9 +378,12 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
                     lines,
                 )
     finally:
-        sel.close()
+        if sel is not None:
+            sel.close()
         if proc is not None and proc.poll() is None:
-            _kill_process_group(proc, sig=signal.SIGKILL)
+            _kill_process_group(proc, force=True)
+        if reader is not None:
+            reader.join(timeout=2.0)
         if slave_fd is not None:
             try:
                 os.close(slave_fd)
@@ -275,10 +395,11 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
             except OSError:
                 pass
         if proc is not None and proc.stdout is not None:
-            try:
-                proc.stdout.close()
-            except OSError:
-                pass
+            if reader is None or not reader.is_alive():
+                try:
+                    proc.stdout.close()
+                except OSError:
+                    pass
 
 
 def build_legs(gcstress_path):
@@ -291,14 +412,11 @@ def build_legs(gcstress_path):
 
 
 def self_test():
-    """Positive and negative controls using hermetic stub executables."""
-    if os.name != "posix":
-        print("check_gcstress self-test: skipped on non-POSIX")
-        return 0
+    """Positive and negative controls on both PTY (POSIX) and pipe modes."""
     bad = 0
 
     def report(name, cond, detail=""):
-        print("self-test %-42s -> %s%s"
+        print("self-test %-46s -> %s%s"
               % (name, "PASS" if cond else "FAIL",
                  (" (" + detail + ")") if detail else ""))
         return 0 if cond else 1
@@ -307,106 +425,125 @@ def self_test():
         def write_stub(name, body):
             p = os.path.join(tmp, name)
             with open(p, "w", encoding="utf-8") as f:
-                f.write("#!/usr/bin/env python3\n" + body)
-            os.chmod(p, 0o755)
+                f.write(body)
             return p
 
         good = write_stub(
             "good.py",
             "import signal, sys, time\n"
             "signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))\n"
-            "print('Recycler created, initializing heap...')\n"
-            "print('Initialization complete')\n"
+            "print('Recycler created, initializing heap...', flush=True)\n"
+            "print('Initialization complete', flush=True)\n"
             "for g in range(1, 5):\n"
-            "    print('Full heap walk starting. Current generation: %12d' % g)\n"
-            "    print('Full heap walk finished')\n"
+            "    print('Full heap walk starting. Current generation: %12d' % g, flush=True)\n"
+            "    print('Full heap walk finished', flush=True)\n"
             "while True:\n"
             "    time.sleep(0.05)\n",
         )
-        ok, detail, _ = run_gcstress_leg("good", [good], timeout=5.0, min_walks=2)
-        bad += report("live loop init + 2 walks passes", ok, detail)
-
         early_rc0 = write_stub(
             "early0.py",
             "import sys\n"
-            "print('Initialization complete')\n"
-            "print('Full heap walk starting. Current generation: 2')\n"
-            "print('Full heap walk finished')\n"
+            "print('Initialization complete', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 2', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
             "sys.exit(0)\n",
         )
-        ok, detail, _ = run_gcstress_leg("early0", [early_rc0], timeout=5.0, min_walks=2)
-        bad += report("early rc=0 exit before walks is rejected", not ok, detail)
-
         exit_after_walks = write_stub(
             "exitafter.py",
             "import sys\n"
-            "print('Initialization complete')\n"
-            "print('Full heap walk starting. Current generation: 2')\n"
-            "print('Full heap walk finished')\n"
-            "print('Full heap walk starting. Current generation: 3')\n"
-            "print('Full heap walk finished')\n"
+            "print('Initialization complete', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 2', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 3', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
             "sys.exit(0)\n",
         )
-        ok, detail, _ = run_gcstress_leg("exitafter", [exit_after_walks], timeout=5.0, min_walks=2)
-        bad += report("early rc=0 exit after walks is rejected", not ok, detail)
-
-        # Use SIGUSR1 rather than SIGSEGV so the stub dies with rc < 0 without
-        # triggering macOS CrashReporter Python-*.ips logs / crash dialogs.
         crash = write_stub(
             "crash.py",
-            "import os, signal\n"
+            "import os, signal, sys\n"
             "print('Initialization complete', flush=True)\n"
-            "os.kill(os.getpid(), signal.SIGUSR1)\n",
+            "sig = getattr(signal, 'SIGUSR1', None)\n"
+            "if sig is not None:\n"
+            "    os.kill(os.getpid(), sig)\n"
+            "sys.exit(139)\n",
         )
-        ok, detail, _ = run_gcstress_leg("crash", [crash], timeout=5.0, min_walks=2)
-        bad += report("fatal signal SIGUSR1 is rejected", not ok, detail)
-
         fail_marker = write_stub(
             "marker.py",
             "import time\n"
-            "print('Initialization complete')\n"
-            "print(\"==== FAILURE: 'ok' evaluated to false.\")\n"
+            "print('Initialization complete', flush=True)\n"
+            "print(\"==== FAILURE: 'ok' evaluated to false.\", flush=True)\n"
             "while True:\n"
             "    time.sleep(0.05)\n",
         )
-        ok, detail, _ = run_gcstress_leg("marker", [fail_marker], timeout=5.0, min_walks=2)
-        bad += report("FAILURE marker is rejected", not ok, detail)
-
         invalid_flag = write_stub(
             "invflag.py",
             "import time\n"
-            "print('Invalid Flag : -off:ConcurrentCollect')\n"
-            "print('Initialization complete')\n"
-            "print('Full heap walk starting. Current generation: 2')\n"
-            "print('Full heap walk finished')\n"
-            "print('Full heap walk starting. Current generation: 3')\n"
-            "print('Full heap walk finished')\n"
+            "print('Invalid Flag : -off:ConcurrentCollect', flush=True)\n"
+            "print('Initialization complete', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 2', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 3', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
             "while True:\n"
             "    time.sleep(0.05)\n",
         )
-        ok, detail, _ = run_gcstress_leg("invflag", [invalid_flag], timeout=5.0, min_walks=2)
-        bad += report("Invalid Flag marker is rejected", not ok, detail)
-
         hang = write_stub(
             "hang.py",
             "import time\n"
-            "print('Initialization complete')\n"
-            "print('Full heap walk starting. Current generation: 2')\n"
-            "print('Full heap walk finished')\n"
+            "print('Initialization complete', flush=True)\n"
+            "print('Full heap walk starting. Current generation: 2', flush=True)\n"
+            "print('Full heap walk finished', flush=True)\n"
             "while True:\n"
             "    time.sleep(0.2)\n",
         )
-        t0 = time.monotonic()
-        ok, detail, _ = run_gcstress_leg("hang", [hang], timeout=0.6, min_walks=2)
-        dt = time.monotonic() - t0
-        bad += report("hang before min_walks times out", (not ok) and dt < 3.0, detail)
 
-        legs = build_legs("/tmp/fake/bin/GCStress")
+        modes = [("pty", None), ("pipe", False)] if pty is not None else [("pipe", False)]
+        for mode_name, use_pty in modes:
+            ok, detail, _ = run_gcstress_leg(
+                "good-" + mode_name, [sys.executable, good],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] live loop init + 2 walks passes" % mode_name, ok, detail)
+
+            ok, detail, _ = run_gcstress_leg(
+                "early0-" + mode_name, [sys.executable, early_rc0],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] early rc=0 exit before walks rejected" % mode_name, not ok, detail)
+
+            ok, detail, _ = run_gcstress_leg(
+                "exitafter-" + mode_name, [sys.executable, exit_after_walks],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] early rc=0 exit after walks rejected" % mode_name, not ok, detail)
+
+            ok, detail, _ = run_gcstress_leg(
+                "crash-" + mode_name, [sys.executable, crash],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] fatal crash/nonzero exit rejected" % mode_name, not ok, detail)
+
+            ok, detail, _ = run_gcstress_leg(
+                "marker-" + mode_name, [sys.executable, fail_marker],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] FAILURE marker rejected" % mode_name, not ok, detail)
+
+            ok, detail, _ = run_gcstress_leg(
+                "invflag-" + mode_name, [sys.executable, invalid_flag],
+                timeout=5.0, min_walks=2, use_pty=use_pty)
+            bad += report("[%s] Invalid Flag marker rejected" % mode_name, not ok, detail)
+
+            t0 = time.monotonic()
+            ok, detail, _ = run_gcstress_leg(
+                "hang-" + mode_name, [sys.executable, hang],
+                timeout=0.6, min_walks=2, use_pty=use_pty)
+            dt = time.monotonic() - t0
+            bad += report("[%s] hang before min_walks times out" % mode_name,
+                          (not ok) and dt < 3.0, detail)
+
+        fake_bin = os.path.join(tmp, "GCStress")
+        legs = build_legs(fake_bin)
         bad += report(
             "build_legs covers both GCStress modes",
             legs == [
-                ("in-thread", ["/tmp/fake/bin/GCStress", "-js", "-off:ConcurrentCollect"]),
-                ("concurrent", ["/tmp/fake/bin/GCStress", "-js"]),
+                ("in-thread", [os.path.abspath(fake_bin), "-js", "-off:ConcurrentCollect"]),
+                ("concurrent", [os.path.abspath(fake_bin), "-js"]),
             ],
         )
 

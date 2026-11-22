@@ -14,7 +14,7 @@ This fork targets the middle ground between interpreter-only embeds and heavywei
 - **`Q1.2`–`Q1.5` ES2025 Conformance Sweeps I–III:** Lifted certified ES2025 edition conformance from `98.89%` (`modernize/baseline`) through `99.06%` (`Q1.2`), `99.25%` (`Q1.4`), `99.26%` (`Q2`/`C3.1`), and `99.56%` (`Q1.5`, `+247` non-`waitAsync` fixes across `133` files with `0` JIT diffs) to **`99.57%`** (`Q3`).
 - **`Q1.3` / `Q2` / `Q3` ES2026 Waves 1–3 & `Z1` Zig Codec:** `Error.isError`, `Math.sumPrecise`, `Array.fromAsync`, `Uint8Array` Base64/Hex backed by `lib/ZigCodec/u8a_codec.zig` (`Z1`), `Iterator.concat`, `Map`/`WeakMap` `getOrInsert*`, `JSON.rawJSON`/`isRawJSON`/`context.source`, `Iterator.{zip,zipKeyed}`, `Iterator.prototype.{chunks,windows,includes,join}`, and `Promise.{allKeyed,allSettledKeyed}` (`+578` broad Test262 in `Q3` with `622/0` JIT parity).
 - **`I1` / `I2` Modern ECMA-402 over C ICU4C:** `Intl.{Locale,ListFormat,RelativeTimeFormat,DisplayNames,Segmenter,getCanonicalLocales,supportedValuesOf,DurationFormat}` implemented strictly in C++ over C ICU4C APIs (`Intl.js` and `JsBuiltIn*.bc.*.h` untouched).
-- **`P1`, `C3.1`, `ARM64 WB`, & `Pre-Q1.5` Hardening:** Pathological JIT bailout/ReJIT and ARM64 asm.js tier-up fixes (`1.453x` 64-test geomean vs baseline JIT; `Kraken/audio-fft.js` `65.94x`), Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262), ARM64 JIT software write-barrier fix under `ConcurrentCollect`, and `Pre-Q1.5` hardening (`29/29` JIT+WASM ASan & UBSan clean under `halt_on_error=1`, `-ParserStateCache` `ImmutableList` UB, ARM64 `Math.{ceil,floor}` `-0` `44/0`, `98` build-tool tests).
+- **`P1`, `C3.1`, `ARM64 WB`, & `Pre-Q1.5` Hardening:** Pathological JIT bailout/ReJIT and ARM64 asm.js tier-up fixes (`1.453x` 64-test geomean vs baseline JIT; `Kraken/audio-fft.js` `65.94x`), Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262), ARM64 JIT software write-barrier fix under `ConcurrentCollect`, and `Pre-Q1.5` hardening (`29/29` JIT+WASM ASan & UBSan clean under `halt_on_error=1`, `-ParserStateCache` `ImmutableList` UB, ARM64 `Math.{ceil,floor}` `-0` `44/0`, `108` build-tool tests).
 
 See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for Phase-4 tracking (`G0-phase4`, `B6`, `I3`, `H1`) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
 
@@ -90,14 +90,14 @@ Run from an **x64 Native Tools Command Prompt for VS 2022** with Zig `0.17.0` an
 zig test tools/windows-gate-tests.zig
 zig build                                           # ChakraCore.dll/.lib + ch.exe + GCStress.exe -> zig-out\
 zig build check-smoke check-metadata verify-bytecode check-jit check-selftest
-zig build check
-zig build -Djit=false check-smoke check-metadata verify-bytecode
-zig build -Dprofile=debug-static check-smoke check-metadata verify-bytecode
-zig build -Dprofile=release-shared libChakraNodeApi ch-nodeapi check-nodeapi check-package
+zig build -Dallow-unpinned-regression=true check    # first-run B6 bootstrap before pinning RECORDED_BASELINE
+zig build -Djit=false check-smoke check-metadata verify-bytecode check-gcstress
+zig build -Dprofile=debug-static check-smoke check-metadata verify-bytecode check-gcstress
+zig build -Dprofile=release-shared check-metadata check-jit libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package
 zig build check-wasm check-fulljit check-gcstress
 ```
 
-Windows x64 options: `-Dprofile=test|debug-static|release-shared` (`test` -> `zig-out/`, `debug-static` -> `out/debug-static/`, `release-shared` -> `out/release-shared/`), `-Djit=true|false` (`false` sets `-DDISABLE_JIT=1`), `-Dicu=icu4c|windows|none` (default `icu4c` for full `I1`/`I2` ECMA-402 parity; `windows` selects `WINDOWS10_ICU`; `none` omits ICU), `-Dicu-include=<dir>`, `-Dicu-libdir=<dir>`, `-Dml64=<path>`, and `-Dwin-sdk-um=<dir>`.
+Windows x64 options: `-Dprofile=test|debug-static|release-shared` (`test` -> `zig-out/`, `debug-static` -> `out/debug-static/`, `release-shared` -> `out/release-shared/`), `-Djit=true|false` (`false` sets `-DDISABLE_JIT=1`), `-Dicu=icu4c|windows|none` (default `icu4c` for full `I1`/`I2` ECMA-402 parity; `windows` selects `WINDOWS10_ICU`; `none` omits ICU), `-Dicu-include=<dir>`, `-Dicu-libdir=<dir>`, `-Dml64=<path>`, `-Dwin-sdk-um=<dir>`, and `-Dallow-unpinned-regression=true|false` (first-run `B6` bootstrap for `check-regression`/`check` before pinning `RECORDED_BASELINE` in `tools/build/check_regression_windows.py`).
 
 > **Legacy MSBuild & CMake (Historical Reference):** Legacy `Build\Chakra.Core.sln` (`test\ci.buildone.cmd`) on Windows and `build.sh` / `cmake` on Unix remain in the tree solely as historical references for upstream comparisons (see [doc/build.md](doc/build.md); legacy scripts do not build `libChakraNodeApi` or `ch-nodeapi` and do not include all Phase-4 Zig tooling).
 

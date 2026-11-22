@@ -7,8 +7,9 @@
 #     u8a_codec.zig) + Python build/package tool unit tests & gate self-tests;
 #   - zig (test): default native x86_64-windows-msvc build (`zig build`) +
 #     check-build-tools, check-metadata (PE32+ & COFF .lib), verify-bytecode,
-#     libChakraNodeApi (`161` PE32+ exports), ch-nodeapi, check-nodeapi,
-#     check-smoke (`ch.exe` + `ch-nodeapi.exe`), and check-package;
+#     check-jit, check-gcstress, libChakraNodeApi (`161` PE32+ exports),
+#     ch-nodeapi, check-nodeapi, check-smoke (`ch.exe` + `ch-nodeapi.exe`),
+#     and check-package;
 #   - zig-variants: parameterized Windows build matrix (-Djit=false,
 #     -Dprofile=release-shared, -Dprofile=debug-static);
 #   - record: assembles per-leg tallies and inputs into windows-evidence.
@@ -88,6 +89,10 @@ jobs:
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/package/test_package_tools.py")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_metadata_windows.py", "--self-test")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_smoke_windows.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_regression_windows.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_jit.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_fulljit.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_gcstress.py", "--self-test")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_nodeapi.py", "--self-test")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/gen_nodeapi_exports.py", "--check")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/test_edition_policy.py")
@@ -194,14 +199,14 @@ jobs:
           }
           zig build 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
           if ($LASTEXITCODE -ne 0) { throw "zig build failed ($LASTEXITCODE)" }
-      - name: Core PE32+ metadata & bytecode gates (check-metadata, verify-bytecode)
+      - name: Core PE32+ metadata, bytecode, JIT, & GCStress gates (check-metadata, verify-bytecode, check-jit, check-gcstress)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          foreach ($step in @("check-metadata", "verify-bytecode")) {
+          foreach ($step in @("check-metadata", "verify-bytecode", "check-jit", "check-gcstress")) {
             Write-Host "=== zig build $step ==="
             zig build $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
             if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
@@ -223,6 +228,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not (Select-String -Path ci-evidence/check-jit.log -Pattern 'check_jit: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_jit: PASS' in ci-evidence/check-jit.log"
+          }
+          if (-not (Select-String -Path ci-evidence/check-gcstress.log -Pattern 'check_gcstress: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_gcstress: PASS' in ci-evidence/check-gcstress.log"
+          }
           if (-not (Select-String -Path ci-evidence/check-nodeapi.log -Pattern 'check_nodeapi: PASS' -SimpleMatch -Quiet)) {
             throw "Missing 'check_nodeapi: PASS' in ci-evidence/check-nodeapi.log"
           }
@@ -232,7 +243,7 @@ jobs:
           if (-not (Select-String -Path ci-evidence/check-package.log -Pattern 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' -SimpleMatch -Quiet)) {
             throw "Missing 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' in ci-evidence/check-package.log"
           }
-          $line = "windows-test: build=PASS smoke=PASS metadata=PASS bytecode=PASS nodeapi=PASS package=PASS"
+          $line = "windows-test: build=PASS smoke=PASS metadata=PASS bytecode=PASS jit=PASS gcstress=PASS nodeapi=PASS package=PASS"
           $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
           "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "- $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -253,13 +264,13 @@ jobs:
         include:
           - name: nojit
             flags: "-Djit=false"
-            checks: "check-smoke check-metadata verify-bytecode"
+            checks: "check-smoke check-metadata verify-bytecode check-gcstress"
           - name: release-shared
             flags: "-Dprofile=release-shared"
-            checks: "check-metadata libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package"
+            checks: "check-metadata check-jit libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package"
           - name: debug-static
             flags: "-Dprofile=debug-static"
-            checks: "check-smoke check-metadata verify-bytecode"
+            checks: "check-smoke check-metadata verify-bytecode check-gcstress"
     outputs:
       tally: ${{ steps.tally.outputs.tally }}
     steps:

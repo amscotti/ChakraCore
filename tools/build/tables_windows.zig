@@ -359,7 +359,6 @@ pub const parser_group = Group{
         "lib/Parser/TextbookBoyerMoore.cpp",
         "lib/Parser/ptree.cpp",
         "lib/Parser/BGParseManager.cpp",
-        "lib/Parser/jserr.gen",
     },
     .extra_includes = &.{
         "lib/Backend",
@@ -597,6 +596,7 @@ pub const rt_language_group = Group{
         "lib/Runtime/Language/AsmJsEncoder.cpp",
         "lib/Runtime/Language/AsmJs.cpp",
         "lib/Runtime/Language/AsmJsByteCodeGenerator.cpp",
+        "lib/Runtime/Language/AsmJsLink.cpp",
         "lib/Runtime/Language/AsmJsModule.cpp",
         "lib/Runtime/Language/AsmJsTypes.cpp",
         "lib/Runtime/Language/AsmJsUtils.cpp",

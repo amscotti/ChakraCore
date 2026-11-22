@@ -45,7 +45,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    mise exec -- zig test doc/examples/owned-bytes.zig
    mise exec -- zig test lib/ZigCodec/u8a_codec.zig
    ```
-   Expected: `check-build-tools` (`test_build_tools.py`) `104` tests OK; `test_package_tools.py` (`12/12`), `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`10/10` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptError.cpp` [`SuppressedError`], `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
+   Expected: `check-build-tools` (`test_build_tools.py`) `108` tests OK; `test_package_tools.py` (`12/12`), `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`10/10` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptError.cpp` [`SuppressedError`], `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
 
 3. **Step 3 — Default `test` Build, Core Gates, Phase-4 Slices, & `RECORDED_BASELINE` Re-Pin:**
    ```sh
@@ -72,7 +72,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
          Date/date_set_es2025.js Function/toString_es2025_and_arrow_ub.js)
        ```
    - **How to audit & re-pin `RECORDED_BASELINE` in `tools/build/check_regression_linux.py`:**
-     - `G0` (`modernize/baseline`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}` (`tools/build/check_regression_linux.py:66`).
+     - `G0` (`modernize/baseline`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}` (`tools/build/check_regression_linux.py:72`).
      - `modernize/phase4` adds new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, and `C3.1` tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2098/2150`, `+34` non-JIT tests; Linux also executes JIT/AsmJs suites).
      - Run `mise exec -- zig build check-regression`: confirm **`0` failures** in both `interpreted` and `dynapogo`, reconcile the exact `passed` delta against `git diff modernize/baseline -- 'test/*/rlexe.xml'`, update `RECORDED_BASELINE` and its docstring in `tools/build/check_regression_linux.py` (plus any matching `test_build_tools.py` pin tests), and run full `mise exec -- zig build check` to confirm exit `0`.
    - Confirm `check_metadata_linux` passes cleanly with zero leaked `zig_u8a_*` symbols and `verify-bytecode` exits `0`.

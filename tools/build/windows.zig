@@ -14,6 +14,7 @@
 //!   * -Djit=true|false
 //!   * -Dicu=icu4c|windows|none (plus -Dicu-include / -Dicu-libdir)
 //!   * -Dml64=<path> and -Dwin-sdk-um=<dir>
+//!   * -Dallow-unpinned-regression=true|false
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -760,6 +761,7 @@ pub fn build(b: *std.Build) void {
     const profile = gateProfile(b);
     gateOptimize(b, profile);
     const jit = b.option(bool, "jit", "Enable JIT backend (default: true; false defines -DDISABLE_JIT=1)") orelse true;
+    const allow_unpinned_regression = b.option(bool, "allow-unpinned-regression", "Pass --allow-unpinned to check_regression_windows.py during B6 bootstrap") orelse false;
     const icu = gateIcu(b);
     const icu_paths = resolveIcu(b, icu);
     const ml64_exe = resolveMl64(b);
@@ -854,6 +856,7 @@ pub fn build(b: *std.Build) void {
     var engine_group_libs: std.ArrayList(std.Build.LazyPath) = .empty;
     var gcstress_dep_libs: std.ArrayList(std.Build.LazyPath) = .empty;
     var heap_op_obj_opt: ?std.Build.LazyPath = null;
+    var common_codex_lib_opt: ?std.Build.LazyPath = null;
     var static_engine_items: std.ArrayList(std.Build.LazyPath) = .empty;
 
     for (tables.engine_groups) |g| {
@@ -887,6 +890,9 @@ pub fn build(b: *std.Build) void {
 
         const lib_name = b.fmt("grp-{d}.lib", .{group_idx});
         const grp_lib_all = archiveWithLib(b, b.graph.zig_exe, lib_name, grp_objs_all.items);
+        if (g == &tables.common_codex_group) {
+            common_codex_lib_opt = grp_lib_all;
+        }
         if (is_static) {
             static_engine_items.append(arena, grp_lib_all) catch @panic("OOM");
         } else {
@@ -906,6 +912,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const heap_op_obj = heap_op_obj_opt orelse fail("missing {s} object", .{tables.heap_allocator_operators_tu});
+    const common_codex_lib = common_codex_lib_opt orelse fail("missing common_codex_group archive", .{});
 
     // Z1 leaf Zig SIMD codec compiled directly to x86_64-windows-msvc COFF.
     const u8a_codec_obj = b.addObject(.{
@@ -983,7 +990,9 @@ pub fn build(b: *std.Build) void {
     } else {
         ch_link.addFileArg(b.path("bin/ch/ch.def"));
         ch_link.addFileArg(dll_res.?.implib);
+        ch_link.addFileArg(common_codex_lib);
         addWinLibs(ch_link, tables.ch_win_libs);
+        addIcuLinkFlags(&ctx, ch_link);
     }
     const ch_bin = ch_link.addPrefixedOutputFileArg("-o", "ch.exe");
     if (dll_res) |dr| ch_link.step.dependOn(&dr.link.step);
@@ -1266,6 +1275,7 @@ pub fn build(b: *std.Build) void {
         "check_smoke_windows.py",
         "check_metadata_windows.py",
         "check_regression.py",
+        "check_regression_windows.py",
         "check_jit.py",
         "check_nodeapi.py",
         "gen_nodeapi_exports.py",
@@ -1327,14 +1337,17 @@ pub fn build(b: *std.Build) void {
         verify_bc_step = &verify_bc.step;
 
         const regression = b.addSystemCommand(&.{python});
-        regression.addFileArg(b.path("tools/build/check_regression.py"));
+        regression.addFileArg(b.path("tools/build/check_regression_windows.py"));
         regression.addFileArg(b.path("test/runtests.py"));
         addBinArg(b, regression, side_name, prefix_dir, "bin/ch.exe", ch_bin, artifacts_ready, null);
         regression.addArg("--select");
         regression.addArg(if (is_static) "debug" else "test");
+        if (!jit) regression.addArg("--no-jit");
+        if (icu == .none) regression.addArg("--no-icu");
+        if (allow_unpinned_regression) regression.addArg("--allow-unpinned");
         addIcuRuntimePath(&ctx, regression, icu_bin_prefix);
         regression.stdio = .inherit;
-        const regression_top = b.step("check-regression", "Run regression suite against ch.exe");
+        const regression_top = b.step("check-regression", "Run Windows x64 regression suite against ch.exe");
         regression_top.dependOn(&regression.step);
         regression_step = &regression.step;
     }

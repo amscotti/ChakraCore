@@ -25,7 +25,7 @@ it can run against every profile. This gate is JIT-specific:
   3. `verify_bytecode_pure.py --jit --verify` (run as a separate build step)
      checks the JIT builtin bytecode headers consumed by this profile.
 
-Usage: check_jit.py <ch>
+Usage: check_jit.py <ch> [--self-test]
 Exit code: 0 iff every sub-check passes.
 """
 
@@ -34,8 +34,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import check_metadata_windows
 import common
 
 SCRIPT = """\
@@ -67,22 +69,77 @@ WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28",
         "jit-class-new 7,true", "jit-class-derived true,true,Anon"]
 
 
+def _is_pe_binary(path):
+    """True for a valid PE32+ image (MZ + PE\\x00\\x00 + magic 0x020B)."""
+    try:
+        check_metadata_windows.parse_pe(path)
+        return True
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+
+
 def _is_native_binary(path):
-    """True for an ELF or Mach-O executable; false for test stubs/scripts."""
+    """True for an ELF, Mach-O, or PE32+ binary; false for test stubs/scripts."""
     try:
         with open(path, "rb") as f:
             magic = f.read(4)
     except OSError:
         return False
     # ELF, Mach-O 32/64 little-endian, and universal/fat Mach-O.
-    return magic in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
-                     b"\xca\xfe\xba\xbe")
+    if magic in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                 b"\xca\xfe\xba\xbe"):
+        return True
+    if magic[:2] == b"MZ":
+        return _is_pe_binary(path)
+    return False
+
+
+def is_pe_target(ch):
+    """Return True if ch targets Windows/PE32+ (win32 host or PE binary/DLL)."""
+    if sys.platform == "win32":
+        return True
+    ch_dir = os.path.dirname(os.path.abspath(ch))
+    win_dll = os.path.join(ch_dir, "ChakraCore.dll")
+    if os.path.isfile(win_dll) and _is_pe_binary(win_dll):
+        return True
+    if _is_pe_binary(ch):
+        return True
+    try:
+        with open(ch, "rb") as f:
+            return f.read(2) == b"MZ"
+    except OSError:
+        return False
 
 
 def check_symbols(ch):
+    ch_dir = os.path.dirname(os.path.abspath(ch))
+    win_dll = os.path.join(ch_dir, "ChakraCore.dll")
+    if is_pe_target(ch) or os.path.isfile(win_dll):
+        expect_dll = os.path.isfile(win_dll)
+        target = win_dll if expect_dll else ch
+        try:
+            info = check_metadata_windows.parse_pe(target)
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            return "PE32+ validation failed for %s: %s" % (target, e)
+        if info["machine"] != check_metadata_windows.IMAGE_FILE_MACHINE_AMD64:
+            return ("%s: expected AMD64 machine 0x%04x, got 0x%04x"
+                    % (target, check_metadata_windows.IMAGE_FILE_MACHINE_AMD64,
+                       info["machine"]))
+        chars = info["characteristics"]
+        if not (chars & check_metadata_windows.IMAGE_FILE_EXECUTABLE_IMAGE):
+            return "%s: missing IMAGE_FILE_EXECUTABLE_IMAGE" % target
+        is_dll = bool(chars & check_metadata_windows.IMAGE_FILE_DLL)
+        if expect_dll and not is_dll:
+            return "%s: expected IMAGE_FILE_DLL characteristic" % target
+        if not expect_dll and is_dll:
+            return "%s: unexpected IMAGE_FILE_DLL on executable" % target
+        print("check_jit: PE32+ AMD64 target verified (%s)"
+              % os.path.basename(target))
+        return None
+
     dylib_name = ("libChakraCore.dylib" if sys.platform == "darwin"
                   else "libChakraCore.so")
-    dylib = os.path.join(os.path.dirname(os.path.abspath(ch)), dylib_name)
+    dylib = os.path.join(ch_dir, dylib_name)
     # Static profiles link the backend into ch and have no sibling dylib.
     # Inspect the executable itself in that case; a stripped binary without
     # the symbol still fails closed.
@@ -110,6 +167,31 @@ def flaglist_supported(ch):
     return "not supported in Release builds" not in (out + err)
 
 
+def check_backend_trace(ch, script_path=None):
+    """Verify native codegen executes via -trace:BackEnd (fails closed on DISABLE_JIT)."""
+    tmp = None
+    try:
+        if script_path is None:
+            tmp = tempfile.mkdtemp(prefix="check-jit-trace-")
+            script_path = os.path.join(tmp, "smoke.js")
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(SCRIPT)
+        rc, out, err = common.run_capture(
+            [ch, "-mic:1", "-bgjit-", "-trace:BackEnd", script_path]
+        )
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+    combined = out + err
+    if rc != 0:
+        return "-trace:BackEnd exited %d (err=%r)" % (rc, err)
+    if "BeginBackEnd" not in combined or "EndBackEnd" not in combined:
+        return ("%s did not emit BeginBackEnd/EndBackEnd under -trace:BackEnd "
+                "(DISABLE_JIT build?)" % ch)
+    print("check_jit: BackEnd trace verified (%s)" % os.path.basename(ch))
+    return None
+
+
 def check_run(ch, flags, script_path):
     label = " ".join(flags) if flags else "<default>"
     rc, out, err = common.run_capture([ch] + flags + [script_path])
@@ -122,15 +204,181 @@ def check_run(ch, flags, script_path):
     return None
 
 
+def self_test():
+    """Positive and negative controls for PE32+/ELF/Mach-O, trace, and run."""
+    bad = 0
+
+    def report(name, cond, detail=""):
+        print("self-test %-48s -> %s%s"
+              % (name, "PASS" if cond else "FAIL",
+                 (" (" + detail + ")") if detail else ""))
+        return 0 if cond else 1
+
+    with tempfile.TemporaryDirectory(prefix="check-jit-selftest-") as tmp:
+        pe_exe = os.path.join(tmp, "ch.exe")
+        with open(pe_exe, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=False))
+        elf_bin = os.path.join(tmp, "ch.elf")
+        with open(elf_bin, "wb") as f:
+            f.write(b"\x7fELF" + b"\x00" * 60)
+        macho_bin = os.path.join(tmp, "ch.macho")
+        with open(macho_bin, "wb") as f:
+            f.write(b"\xcf\xfa\xed\xfe" + b"\x00" * 60)
+        script_stub = os.path.join(tmp, "ch.sh")
+        with open(script_stub, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\necho ok\n")
+        pe32_exe = os.path.join(tmp, "x86.exe")
+        with open(pe32_exe, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(
+                is_dll=False, magic=0x10B))
+        corrupt_mz = os.path.join(tmp, "corrupt.exe")
+        with open(corrupt_mz, "wb") as f:
+            f.write(b"MZ" + b"\x00" * 128)
+
+        bad += report("PE32+ detected by _is_pe_binary & _is_native",
+                      _is_pe_binary(pe_exe) and _is_native_binary(pe_exe))
+        bad += report("ELF accepted by _is_native, not _is_pe",
+                      _is_native_binary(elf_bin) and not _is_pe_binary(elf_bin))
+        bad += report("Mach-O accepted by _is_native, not _is_pe",
+                      _is_native_binary(macho_bin) and not _is_pe_binary(macho_bin))
+        bad += report("shell script rejected by both",
+                      not _is_native_binary(script_stub)
+                      and not _is_pe_binary(script_stub))
+        bad += report("PE32 (0x10B) & corrupt MZ rejected",
+                      not _is_pe_binary(pe32_exe)
+                      and not _is_native_binary(pe32_exe)
+                      and not _is_pe_binary(corrupt_mz)
+                      and not _is_native_binary(corrupt_mz))
+
+        # Static PE validation vs sibling ChakraCore.dll PE validation.
+        static_dir = os.path.join(tmp, "static_win")
+        os.makedirs(static_dir)
+        static_ch = os.path.join(static_dir, "ch.exe")
+        with open(static_ch, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=False))
+        bad += report("static PE ch.exe passes check_symbols",
+                      check_symbols(static_ch) is None)
+
+        bad_static_ch = os.path.join(static_dir, "bad_dll_bit.exe")
+        with open(bad_static_ch, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=True))
+        bad += report("static exe with DLL bit fails check_symbols",
+                      check_symbols(bad_static_ch) is not None)
+
+        arm_static_ch = os.path.join(static_dir, "arm64.exe")
+        with open(arm_static_ch, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(
+                is_dll=False, machine=0xAA64))
+        bad += report("ARM64 PE fails check_symbols",
+                      check_symbols(arm_static_ch) is not None)
+
+        shared_dir = os.path.join(tmp, "shared_win")
+        os.makedirs(shared_dir)
+        shared_ch = os.path.join(shared_dir, "ch.exe")
+        shared_dll = os.path.join(shared_dir, "ChakraCore.dll")
+        with open(shared_ch, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=False))
+        with open(shared_dll, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=True))
+        bad += report("shared sibling ChakraCore.dll passes check_symbols",
+                      check_symbols(shared_ch) is None)
+
+        with open(shared_dll, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=False))
+        bad += report("ChakraCore.dll without DLL bit fails check_symbols",
+                      check_symbols(shared_ch) is not None)
+        with open(shared_dll, "wb") as f:
+            f.write(check_metadata_windows.build_synthetic_pe(is_dll=True))
+
+        smoke_js = os.path.join(tmp, "smoke.js")
+        with open(smoke_js, "w", encoding="utf-8") as f:
+            f.write(SCRIPT)
+        want_out = "\n".join(WANT) + "\n"
+
+        # BackEnd trace probe controls.
+        with mock.patch.object(
+            common, "run_capture",
+            return_value=(0, "---BeginBackEnd: add---\n---EndBackEnd---\n" + want_out, ""),
+        ):
+            bad += report("check_backend_trace accepts BeginBackEnd/EndBackEnd",
+                          check_backend_trace(shared_ch, smoke_js) is None)
+        with mock.patch.object(
+            common, "run_capture",
+            return_value=(0, want_out, ""),
+        ):
+            bad += report("check_backend_trace rejects DISABLE_JIT (no trace)",
+                          check_backend_trace(shared_ch, smoke_js) is not None)
+        with mock.patch.object(
+            common, "run_capture",
+            return_value=(0, "---BeginBackEnd: add---\n" + want_out, ""),
+        ):
+            bad += report("check_backend_trace rejects missing EndBackEnd",
+                          check_backend_trace(shared_ch, smoke_js) is not None)
+        with mock.patch.object(
+            common, "run_capture",
+            return_value=(1, "---BeginBackEnd: add---\n---EndBackEnd---\n", "crash"),
+        ):
+            bad += report("check_backend_trace rejects nonzero rc",
+                          check_backend_trace(shared_ch, smoke_js) is not None)
+
+        # check_run positive & negative controls.
+        with mock.patch.object(common, "run_capture", return_value=(0, want_out, "")):
+            bad += report("check_run accepts exact WANT output",
+                          check_run(shared_ch, ["-mic:1", "-bgjit-"], smoke_js) is None)
+        with mock.patch.object(common, "run_capture", return_value=(0, "wrong\n", "")):
+            bad += report("check_run rejects wrong stdout",
+                          check_run(shared_ch, ["-mic:1", "-bgjit-"], smoke_js) is not None)
+        with mock.patch.object(common, "run_capture", return_value=(1, want_out, "err")):
+            bad += report("check_run rejects nonzero rc",
+                          check_run(shared_ch, [], smoke_js) is not None)
+
+        # End-to-end main() on PE target: debug-flaglist fails closed on DISABLE_JIT,
+        # passes with BackEnd trace, and Release PE passes without debug flaglist.
+        def fake_debug_jit(cmd, **_kw):
+            if "-?" in cmd:
+                return 0, "Usage: ch [flaglist] <source file>\n", ""
+            if "-trace:BackEnd" in cmd:
+                return 0, "---BeginBackEnd: add---\n---EndBackEnd---\n" + want_out, ""
+            return 0, want_out, ""
+
+        def fake_disable_jit(cmd, **_kw):
+            if "-?" in cmd:
+                return 0, "Usage: ch [flaglist] <source file>\n", ""
+            return 0, want_out, ""
+
+        def fake_release_jit(cmd, **_kw):
+            if "-?" in cmd:
+                return 0, "Note: [flaglist] is not supported in Release builds.\n", ""
+            return 0, want_out, ""
+
+        with mock.patch.object(common, "run_capture", side_effect=fake_debug_jit):
+            bad += report("main() passes PE debug/test JIT build",
+                          main(["check_jit.py", shared_ch]) == 0)
+        with mock.patch.object(common, "run_capture", side_effect=fake_disable_jit):
+            bad += report("main() fails closed on PE DISABLE_JIT build",
+                          main(["check_jit.py", shared_ch]) == 1)
+        with mock.patch.object(common, "run_capture", side_effect=fake_release_jit):
+            bad += report("main() passes PE Release build w/ default flags",
+                          main(["check_jit.py", shared_ch]) == 0)
+
+    print("check_jit self-test: %s"
+          % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
+             else "%d CONTROL(S) MISBEHAVE" % bad))
+    return 1 if bad else 0
+
+
 def main(argv):
+    if "--self-test" in argv[1:]:
+        return self_test()
     if len(argv) != 2:
-        print("usage: check_jit.py <ch>", file=sys.stderr)
+        print("usage: check_jit.py <ch> [--self-test]", file=sys.stderr)
         return 2
     ch = argv[1]
     if not os.path.isfile(ch):
         print("check_jit: missing ch %r" % ch, file=sys.stderr)
         return 2
 
+    pe_mode = is_pe_target(ch)
     failure = check_symbols(ch)
     if failure:
         print("check_jit: FAIL: %s" % failure, file=sys.stderr)
@@ -146,8 +394,13 @@ def main(argv):
     tmp = tempfile.mkdtemp(prefix="check-jit-")
     try:
         script_path = os.path.join(tmp, "smoke.js")
-        with open(script_path, "w") as f:
+        with open(script_path, "w", encoding="utf-8") as f:
             f.write(SCRIPT)
+        if pe_mode and has_flaglist:
+            failure = check_backend_trace(ch, script_path)
+            if failure:
+                print("check_jit: FAIL: %s" % failure, file=sys.stderr)
+                return 1
         for flags in flag_sets:
             failure = check_run(ch, flags, script_path)
             if failure:
@@ -165,8 +418,9 @@ def main(argv):
             pass
 
     if not has_flaglist:
-        print("check_jit: PASS (release build: symbol + default-flags runtime "
-              "verified; debug flaglist skipped)")
+        kind = "PE32+ validation" if pe_mode else "symbol"
+        print("check_jit: PASS (release build: %s + default-flags runtime "
+              "verified; debug flaglist skipped)" % kind)
     else:
         print("check_jit: PASS")
     return 0
