@@ -75,11 +75,13 @@ fn gateToolchain() void {
         fail("requires Zig 0.17.0 (mise.toml pin); running {f}", .{builtin.zig_version});
     }
     // B4.3: the Linux x86_64 graph (tools/build/linux.zig) runs natively
-    // in-container; the Mac graph below keeps its ARM64 macOS requirement.
+    // in-container; the Windows x86_64 graph (tools/build/windows.zig) runs
+    // natively on x86_64-windows-msvc; the Mac graph below keeps ARM64 macOS.
     const is_mac = builtin.os.tag == .macos and builtin.cpu.arch == .aarch64;
     const is_linux = builtin.os.tag == .linux and builtin.cpu.arch == .x86_64;
-    if (!is_mac and !is_linux) {
-        fail("profile is native-only: build machine must be ARM64 macOS or x86_64 Linux for native run probes, have {t}-{t}", .{ builtin.cpu.arch, builtin.os.tag });
+    const is_win = builtin.os.tag == .windows and builtin.cpu.arch == .x86_64;
+    if (!is_mac and !is_linux and !is_win) {
+        fail("profile is native-only: build machine must be ARM64 macOS, x86_64 Linux, or x86_64 Windows for native run probes, have {t}-{t}", .{ builtin.cpu.arch, builtin.os.tag });
     }
 }
 
@@ -766,6 +768,10 @@ pub fn build(b: *std.Build) void {
     // B4.3: Linux builds dispatch to the Linux graph (own gates inside).
     if (builtin.os.tag == .linux) {
         @import("tools/build/linux.zig").build(b);
+        return;
+    }
+    if (builtin.os.tag == .windows) {
+        @import("tools/build/windows.zig").build(b);
         return;
     }
     const profile = gateProfile(b);

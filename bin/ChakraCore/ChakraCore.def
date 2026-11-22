@@ -54,7 +54,9 @@ JsModuleEvaluation
 JsSetModuleHostInfo
 JsGetModuleHostInfo
 JsGetModuleNamespace
+#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN
 JsInitializeJITServer
+#endif
 
 JsCreateSharedArrayBufferWithSharedContent
 JsGetSharedArrayBufferContent

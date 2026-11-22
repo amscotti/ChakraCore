@@ -186,7 +186,9 @@
 #define SYSINFO_IMAGE_BASE_AVAILABLE 1
 #define SUPPORT_WIN32_SLIST 1
 #ifndef CHAKRACORE_LITE
+#ifndef DISABLE_JS_ETW
 #define ENABLE_JS_ETW                               // ETW support
+#endif
 #endif
 #else
 #define SYSINFO_IMAGE_BASE_AVAILABLE 0
@@ -318,7 +320,9 @@
 
 #if ENABLE_NATIVE_CODEGEN
 #ifdef _WIN32
+#ifndef ENABLE_OOP_NATIVE_CODEGEN
 #define ENABLE_OOP_NATIVE_CODEGEN 1     // Out of process JIT
+#endif
 #endif
 
 // ToDo (SaAgarwa): Disable VirtualTypedArray on ARM64 till we make sure it works correctly

@@ -3809,7 +3809,7 @@ bool NativeCodeGenerator::TryAggressiveInlining(Js::FunctionBody *const topFunct
     return true;
 }
 
-#if _WIN32
+#if defined(_WIN32) && ENABLE_OOP_NATIVE_CODEGEN
 bool
 JITManager::HandleServerCallResult(HRESULT hr, RemoteCallType callType)
 {

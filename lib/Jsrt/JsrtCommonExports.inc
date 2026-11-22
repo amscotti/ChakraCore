@@ -107,7 +107,9 @@
 #ifndef NTBUILD
     JsAllocRawData
     JsCloneObject
+#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN
     JsConnectJITProcess
+#endif
     JsCopyPropertyId
     JsCopyString
     JsCopyStringOneByte
@@ -123,7 +125,9 @@
     JsCreateWeakReference
     JsDetachArrayBuffer
     JsGetArrayBufferExtraInfo
+#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN
     JsEnableOOPJIT
+#endif
     JsExternalizeArrayBuffer
     JsGetAndClearExceptionWithMetadata
     JsGetArrayBufferFreeFunction

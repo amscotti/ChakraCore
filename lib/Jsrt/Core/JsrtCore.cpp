@@ -1559,7 +1559,7 @@ JsDiscardBackgroundParse_Experimental(
 CHAKRA_API
 JsEnableOOPJIT()
 {
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     JITManager::GetJITManager()->EnableOOPJIT();
     return JsNoError;
 #else
@@ -1570,7 +1570,7 @@ JsEnableOOPJIT()
 CHAKRA_API
 JsConnectJITProcess(_In_ HANDLE processHandle, _In_opt_ void* serverSecurityDescriptor, _In_ UUID connectionId)
 {
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     JITManager::GetJITManager()->EnableOOPJIT();
     ThreadContext::SetJITConnectionInfo(processHandle, serverSecurityDescriptor, connectionId);
     return JsNoError;

@@ -94,7 +94,7 @@ private:
     /* ------private helpers -----------*/
     bool NewThunkBlock();
 
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     bool NewOOPJITThunkBlock();
 #endif
 

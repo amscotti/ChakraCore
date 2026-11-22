@@ -18,7 +18,7 @@ enum class RemoteCallType
     MemFree
 };
 
-#if _WIN32 || ENABLE_OOP_NATIVE_CODEGEN
+#if (!defined(ENABLE_OOP_NATIVE_CODEGEN) && _WIN32) || ENABLE_OOP_NATIVE_CODEGEN
 class JITManager
 {
 public:

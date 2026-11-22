@@ -348,7 +348,7 @@ bool InterpreterThunkEmitter::NewThunkBlock()
         return false;
     }
 
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     if (CONFIG_FLAG(ForceStaticInterpreterThunk))
     {
         return false;
@@ -419,7 +419,7 @@ bool InterpreterThunkEmitter::NewThunkBlock()
     return true;
 }
 
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
 bool InterpreterThunkEmitter::NewOOPJITThunkBlock()
 {
     PSCRIPTCONTEXT_HANDLE remoteScriptContext = this->scriptContext->GetRemoteScriptAddr();
@@ -819,7 +819,7 @@ DWORD InterpreterThunkEmitter::CopyWithAlignment(
 bool
 InterpreterThunkEmitter::IsInHeap(void* address)
 {
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     if (JITManager::GetJITManager()->IsOOPJITEnabled())
     {
         PSCRIPTCONTEXT_HANDLE remoteScript = this->scriptContext->GetRemoteScriptAddr(false);
@@ -862,7 +862,7 @@ void InterpreterThunkEmitter::Close()
     this->thunkBlocks.Clear(allocator);
     this->freeListedThunkBlocks.Clear(allocator);
 
-#ifdef ENABLE_OOP_NATIVE_CODEGEN
+#if ENABLE_OOP_NATIVE_CODEGEN
     if (JITManager::GetJITManager()->IsOOPJITEnabled())
     {
         PSCRIPTCONTEXT_HANDLE remoteScript = this->scriptContext->GetRemoteScriptAddr(false);
