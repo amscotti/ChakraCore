@@ -509,6 +509,10 @@ DWORD __cdecl CharUpperBuffW(const char16* lpsz, DWORD  cchLength);
 #define _TYPENAME typename
 #endif
 
+// zig c++ uses libc++ headers, which define _NOEXCEPT_ as a function-like
+// macro (_NOEXCEPT_(...)); this codebase uses it as an object-like token,
+// so normalize it before defining.
+#undef _NOEXCEPT_
 #if (defined(_MSC_VER) && _MSC_VER < 1900) || defined(NTBUILD)
 // "noexcept" not supported before VS 2015
 #define _NOEXCEPT_ throw()

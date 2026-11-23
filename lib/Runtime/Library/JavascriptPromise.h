@@ -551,8 +551,10 @@ namespace Js
         }
 
         Field(JavascriptPromiseCapability*) capability;
-        Field(JsUtil::List<const PropertyRecord*, Recycler>*) keys;
-        Field(JsUtil::List<Var, Recycler>*) values;
+        typedef JsUtil::List<const PropertyRecord*, Recycler> PropertyRecordList;
+        typedef JsUtil::List<Var, Recycler> VarList;
+        Field(PropertyRecordList*) keys;
+        Field(VarList*) values;
         Field(uint32) remainingElements;
         Field(bool) isAllSettled;
     };

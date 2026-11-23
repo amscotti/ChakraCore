@@ -513,11 +513,11 @@ namespace UnifiedRegex
                     }
                     if (U_FAILURE(ec))
                         break;
-                    uset_applyPropertyAlias(set, _u("Script_Extensions"), -1, nameBuffer, n, &ec);
+                    uset_applyPropertyAlias(set, reinterpret_cast<const UChar*>(_u("Script_Extensions")), -1, nameBuffer, n, &ec);
                     break;
                 }
                 case Assigned:
-                    uset_applyPropertyAlias(set, _u("Assigned"), -1, _u(""), 0, &ec);
+                    uset_applyPropertyAlias(set, reinterpret_cast<const UChar*>(_u("Assigned")), -1, reinterpret_cast<const UChar*>(_u("")), 0, &ec);
                     break;
                 default:
                     ec = U_ILLEGAL_ARGUMENT_ERROR;
@@ -538,7 +538,7 @@ namespace UnifiedRegex
             USet* set = uset_open(1, 0); // empty
             // ICU resolves these with an empty value ("[:Basic_Emoji:]" in
             // UnicodeSet pattern terms).
-            uset_applyPropertyAlias(set, stringPropertyNames[resolved.value], -1, NULL, 0, &ec);
+            uset_applyPropertyAlias(set, reinterpret_cast<const UChar*>(stringPropertyNames[resolved.value]), -1, NULL, 0, &ec);
             bool ok = U_SUCCESS(ec);
             if (ok)
             {
@@ -572,7 +572,7 @@ namespace UnifiedRegex
                     else if (strLen > 0)
                     {
                         if (collector != nullptr)
-                            collector->Add(str, strLen);
+                            collector->Add(reinterpret_cast<const char16*>(str), strLen);
                     }
                 }
             }

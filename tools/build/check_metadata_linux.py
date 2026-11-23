@@ -88,6 +88,7 @@ Exit code: 0 iff every sub-check passes.
 
 import hashlib
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -419,7 +420,10 @@ def check_header(prefix_rel, src_rel, prefix):
 
 
 def check_archive(path, want_members):
-    rc, out, err = common.run_capture(["ar", "t", path])
+    try:
+        rc, out, err = common.run_capture(["ar", "t", path])
+    except OSError as e:
+        return "ar t %s failed (%s)" % (path, e)
     if rc != 0:
         return "ar t %s failed (rc=%d err=%r)" % (path, rc, err)
     members = [line for line in out.splitlines() if line.strip()]
@@ -433,7 +437,10 @@ def check_archive(path, want_members):
 
 def check_archive_contains(path, required_members=REQUIRED_STATIC_ARCHIVE_MEMBERS):
     """Archive must contain each expected member object basename (e.g. u8a_codec.o)."""
-    rc, out, err = common.run_capture(["ar", "t", path])
+    try:
+        rc, out, err = common.run_capture(["ar", "t", path])
+    except OSError as e:
+        return "ar t %s failed (%s)" % (path, e)
     if rc != 0:
         return "ar t %s failed (rc=%d err=%r)" % (path, rc, err)
     basenames = {
@@ -598,8 +605,8 @@ def self_test():
                                         "libstdc++.so.6"]) is not None)
         # File-bytes pins.
         p_cfg = os.path.join(tmp, "wabt.h")
-        with open(p_cfg, "w") as f:
-            f.write("#define HAVE_SNPRINTF 1\n")
+        with open(p_cfg, "wb") as f:
+            f.write(b"#define HAVE_SNPRINTF 1\n")
         want = hashlib.sha256(b"#define HAVE_SNPRINTF 1\n").hexdigest()
         bad += report("matching sha passes bytes gate",
                       check_file_bytes(p_cfg, want_sha=want) is None)
@@ -645,23 +652,33 @@ def self_test():
         # member count; a non-archive fails outright. The member
         # count is observed via `ar t` itself (the tool the gate
         # already assumes), so no count convention is hard-coded.
+        # Archive pins need the POSIX `ar` binary; skip them where absent.
+        have_ar = shutil.which("ar") is not None
+        p_member = p_ar = None
+        rc_ar = 1
         bad += report("text file fails archive gate",
                       check_archive(p_txt, 1) is not None)
-        p_member = os.path.join(tmp, "member.o")
-        with open(p_member, "wb") as f:
-            f.write(good)
-        p_ar = os.path.join(tmp, "synthetic.a")
-        rc_ar, _, _ = common.run_capture(["ar", "rc", p_ar, p_member])
-        rc_t, out_t, _ = ((common.run_capture(["ar", "t", p_ar])
-                           if rc_ar == 0 else (1, "", "")))
-        n_members = len([line for line in out_t.splitlines()
-                         if line.strip()])
-        bad += report("synthetic archive passes at its member count",
-                      rc_ar == 0 and rc_t == 0 and n_members > 0
-                      and check_archive(p_ar, n_members) is None)
-        bad += report("archive count mismatch fails archive gate",
-                      rc_ar == 0 and rc_t == 0
-                      and check_archive(p_ar, n_members + 1) is not None)
+        if have_ar:
+            p_member = os.path.join(tmp, "member.o")
+            with open(p_member, "wb") as f:
+                f.write(good)
+            p_ar = os.path.join(tmp, "synthetic.a")
+            rc_ar, _, _ = common.run_capture(["ar", "rc", p_ar, p_member])
+            rc_t, out_t, _ = ((common.run_capture(["ar", "t", p_ar])
+                               if rc_ar == 0 else (1, "", "")))
+            n_members = len([line for line in out_t.splitlines()
+                             if line.strip()])
+            bad += report("synthetic archive passes at its member count",
+                          rc_ar == 0 and rc_t == 0 and n_members > 0
+                          and check_archive(p_ar, n_members) is None)
+            bad += report("archive count mismatch fails archive gate",
+                          rc_ar == 0 and rc_t == 0
+                          and check_archive(p_ar, n_members + 1) is not None)
+        else:
+            print("self-test synthetic archive passes at its member count"
+                  "  -> SKIP (no ar)")
+            print("self-test archive count mismatch fails archive gate"
+                  "  -> SKIP (no ar)")
         # Header pins against a real lib/ source: identical staged
         # bytes pass, tampered or missing staged bytes fail.
         staged_rel, src_rel = HEADERS[0]
@@ -786,12 +803,18 @@ def self_test():
         p_u8a = os.path.join(tmp, "u8a_codec.o")
         with open(p_u8a, "wb") as f:
             f.write(good)
-        p_ar_u8a = os.path.join(tmp, "static_with_u8a.a")
-        rc_ar_u8a, _, _ = common.run_capture(["ar", "rcS", p_ar_u8a, p_member, p_u8a])
-        bad += report("archive with u8a_codec.o passes member-presence gate",
-                      rc_ar_u8a == 0 and check_archive_contains(p_ar_u8a) is None)
-        bad += report("archive without u8a_codec.o fails member-presence gate",
-                      rc_ar == 0 and check_archive_contains(p_ar) is not None)
+        if have_ar:
+            p_ar_u8a = os.path.join(tmp, "static_with_u8a.a")
+            rc_ar_u8a, _, _ = common.run_capture(["ar", "rcS", p_ar_u8a, p_member, p_u8a])
+            bad += report("archive with u8a_codec.o passes member-presence gate",
+                          rc_ar_u8a == 0 and check_archive_contains(p_ar_u8a) is None)
+            bad += report("archive without u8a_codec.o fails member-presence gate",
+                          rc_ar == 0 and check_archive_contains(p_ar) is not None)
+        else:
+            print("self-test archive with u8a_codec.o passes member-presence"
+                  " gate  -> SKIP (no ar)")
+            print("self-test archive without u8a_codec.o fails"
+                  " member-presence gate  -> SKIP (no ar)")
         bad += report("zig_u8a_* leak prefix detected",
                       find_forbidden_symbol_prefixes(["JsCreateRuntime", "zig_u8a_encode_base64"])
                       == ["zig_u8a_encode_base64"])
@@ -804,7 +827,6 @@ def self_test():
         bad += report("nodeapi_exports.txt fails at mismatched count 160",
                       check_nodeapi_exports_ref(NODEAPI_EXPORTS, 160) is not None)
     finally:
-        import shutil
         shutil.rmtree(tmp, ignore_errors=True)
 
     print("check_metadata_linux self-test: %s"

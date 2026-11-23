@@ -196,10 +196,16 @@ def exported_t_symbols(dylib: str, force_pe: bool = False) -> set:
             return set(read_pe_exports(dylib))
         except (OSError, ValueError, UnicodeDecodeError) as e:
             raise RuntimeError("PE export parse failed for %s: %s" % (dylib, e))
-    rc, out, err = common.run_capture(["nm", "-gU", dylib])
+    try:
+        rc, out, err = common.run_capture(["nm", "-gU", dylib])
+    except OSError as e:
+        raise RuntimeError("nm failed: %s" % e)
     if rc != 0:
         # Linux fallback: nm -g without -U (no underscore prefix).
-        rc, out, err = common.run_capture(["nm", "-g", "--defined-only", dylib])
+        try:
+            rc, out, err = common.run_capture(["nm", "-g", "--defined-only", dylib])
+        except OSError as e:
+            raise RuntimeError("nm failed: %s" % e)
         if rc != 0:
             raise RuntimeError("nm failed (rc=%d err=%r)" % (rc, err[:200]))
     syms = set()

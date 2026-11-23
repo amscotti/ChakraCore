@@ -129,7 +129,7 @@ namespace Js
             size_t len = value->GetLength();
             for (size_t i = 0; i < count; ++i)
             {
-                if (PAL_wcslen(values[i]) == len && wmemcmp(sz, values[i], len) == 0)
+                if (wcslen(values[i]) == len && wmemcmp(sz, values[i], len) == 0)
                 {
                     return i;
                 }

@@ -117,21 +117,23 @@ class PackagingToolsTest(unittest.TestCase):
         manifest_path = os.path.join(staging_dir, "MANIFEST.json")
         self.assertTrue(os.path.isfile(manifest_path))
 
-        # Check binary modes
+        # Check binary modes (POSIX only; Windows has no exec-bit semantics)
         for b in ("bin/ch", "bin/ch-nodeapi"):
             p = os.path.join(staging_dir, b)
             self.assertTrue(os.path.isfile(p))
-            st = os.stat(p)
-            self.assertTrue(st.st_mode & stat.S_IXUSR)
-            self.assertTrue(st.st_mode & stat.S_IXGRP)
-            self.assertTrue(st.st_mode & stat.S_IXOTH)
+            if os.name != "nt":
+                st = os.stat(p)
+                self.assertTrue(st.st_mode & stat.S_IXUSR)
+                self.assertTrue(st.st_mode & stat.S_IXGRP)
+                self.assertTrue(st.st_mode & stat.S_IXOTH)
 
-        # Check libraries exist with 0755
+        # Check libraries exist with 0755 (POSIX only)
         for lib in (self.core_lib, self.nodeapi_lib):
             p = os.path.join(staging_dir, "lib", lib)
             self.assertTrue(os.path.isfile(p))
-            st = os.stat(p)
-            self.assertTrue(st.st_mode & stat.S_IXUSR)
+            if os.name != "nt":
+                st = os.stat(p)
+                self.assertTrue(st.st_mode & stat.S_IXUSR)
 
         # Check docs exist
         for doc in ("LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "README.md"):
@@ -199,6 +201,7 @@ class PackagingToolsTest(unittest.TestCase):
         self.assertTrue(any("Unexpected file found in package: unmanifested.txt" in e for e in errs),
                         "Expected unexpected file error for unmanifested.txt in: {}".format(errs))
 
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits; verify skips them on Windows")
     def test_verify_detects_permissions_error(self):
         staging_dir = os.path.join(self.out_dir, "chakracore-perms")
         build_package.stage_package(self.prefix, staging_dir, self.repo_root, "1.13.0", "test-plat")
@@ -229,6 +232,7 @@ class PackagingToolsTest(unittest.TestCase):
         v_rc = verify_package.main(["--tarball", tarball])
         self.assertEqual(v_rc, 0)
 
+    @unittest.skipIf(os.name == "nt", "fake binaries are POSIX shell scripts (#!/bin/sh)")
     def test_test_package_smoke_runner(self):
         staging_dir = os.path.join(self.out_dir, "chakracore-smoke-test")
         build_package.stage_package(self.prefix, staging_dir, self.repo_root, "1.13.0", "test-plat")

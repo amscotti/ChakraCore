@@ -709,7 +709,7 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
         {
             PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(
                 modernIntlProps[i],
-                static_cast<charcount_t>(PAL_wcslen(modernIntlProps[i])));
+                static_cast<charcount_t>(wcslen(modernIntlProps[i])));
             if (Js::JavascriptOperators::HasProperty(intlObject, pid))
             {
                 intlObject->DeleteProperty(pid, Js::PropertyOperationFlags::PropertyOperation_None);

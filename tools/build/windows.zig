@@ -499,6 +499,11 @@ fn resolveWinSdkUm(b: *std.Build) []const u8 {
     );
     for (env_cands) |cand| {
         if (fileExists(io, joinNativeOrSlash(arena, cand, "ksamd64.inc"))) return cand;
+        // SDK 26100+ moved ksamd64.inc from um\ to shared\.
+        if (std.fs.path.dirname(cand)) |parent| {
+            const shared = joinNativeOrSlash(arena, parent, "shared");
+            if (fileExists(io, joinNativeOrSlash(arena, shared, "ksamd64.inc"))) return shared;
+        }
     }
 
     if (comptime builtin.os.tag == .windows) {
@@ -508,6 +513,9 @@ fn resolveWinSdkUm(b: *std.Build) []const u8 {
                 const ver_dir = joinNativeOrSlash(arena, inc, trimPathTrailingSep(w10.version));
                 const um = joinNativeOrSlash(arena, ver_dir, "um");
                 if (fileExists(io, joinNativeOrSlash(arena, um, "ksamd64.inc"))) return um;
+                // SDK 26100+ moved ksamd64.inc from um\ to shared\.
+                const shared = joinNativeOrSlash(arena, ver_dir, "shared");
+                if (fileExists(io, joinNativeOrSlash(arena, shared, "ksamd64.inc"))) return shared;
             }
         } else |_| {}
     }
@@ -614,6 +622,14 @@ fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lan
     }
 
     for (tables.global_includes) |dir| run.addArg(b.fmt("-I{s}", .{dir}));
+    // SDK 26100+ ships Windows.Globalization.h (WinRT) under winrt\, which
+    // zig c++ does not add to the MSVC include path; add it when present.
+    if (std.fs.path.dirname(ctx.win_sdk_um)) |ver_dir| {
+        const winrt = joinNativeOrSlash(arena, ver_dir, "winrt");
+        if (fileExists(b.graph.io, winrt)) {
+            run.addArg(b.fmt("-I{s}", .{winrt}));
+        }
+    }
     if (g == &tables.wabt_group or g == &tables.rt_library_group) {
         if (ctx.wabt_dir) |wd| run.addPrefixedDirectoryArg("-I", wd);
     }
@@ -1089,6 +1105,7 @@ pub fn build(b: *std.Build) void {
             if (profile != .release_shared) tu.addArg("-g");
             tu.addArgs(&.{
                 "-DNAPI_VERSION=10",
+                "-DNOMINMAX",
                 "-Ilib/Jsrt",
                 "-Iinclude/nodeapi",
                 "-Ilib/NodeApi",

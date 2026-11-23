@@ -46,6 +46,13 @@ pub const engine_base_defines: []const []const u8 = &.{
 pub const clang_msvc_warnings: []const []const u8 = &.{
     "-Wno-unknown-pragmas",
     "-Wno-writable-strings",
+    // zig c++ injects -nostdinc++ for the MSVC target, which this Clang
+    // reports as unused; -Werror would fail every TU without this.
+    "-Wno-unused-command-line-argument",
+    // SDK winrt headers include each other with different-case names
+    // (Windows.Globalization.h vs windows.globalization.h); Windows is
+    // case-insensitive for includes, so this is benign.
+    "-Wno-nonportable-include-path",
     "-Wno-int-to-void-pointer-cast",
     "-Wno-unused-parameter",
     "-Wno-switch",

@@ -358,7 +358,7 @@ namespace Js
             charcount_t len = value->GetLength();
             for (size_t i = 0; i < _countof(entries); ++i)
             {
-                if (len == PAL_wcslen(entries[i].name) && wmemcmp(sz, entries[i].name, len) == 0)
+                if (len == wcslen(entries[i].name) && wmemcmp(sz, entries[i].name, len) == 0)
                 {
                     *out = entries[i].granularity;
                     return true;
