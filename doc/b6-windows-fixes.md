@@ -128,8 +128,12 @@ before definition as a non-standard extension**, clang rejects it.
 **Why missed:** only ever compiled by MSVC (legacy) — the macOS "verification"
 ran Python gates, not a full C++ build.
 **Fix:** header now declares `extern template` (valid without a visible
-definition); the 4 instantiation definitions moved to the end of
-`Windows/`, `POSIX/`, and `Common/UnicodeText.ICU.cpp`.
+definition); the 4 instantiation definitions moved into each implementing
+`.cpp`, immediately after the template definition. A follow-up correction:
+in `Windows/UnicodeText.cpp` the template definition lives inside an
+`#ifndef HAS_ICU` block, so the instantiations were initially appended at EOF
+— which fails when `HAS_ICU=1` (no visible definition). They were moved
+inside that guard, just before `#endif // HAS_ICU`.
 
 ### 11. 5 Intl files — `PAL_wcslen` does not exist on Windows
 
