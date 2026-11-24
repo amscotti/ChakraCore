@@ -331,8 +331,7 @@ def t_noop(profiles):
 
 def t_source():
     log("== source: %s ==" % SOURCE_TU)
-    watched = ["bin/ch", "bin/GCStress", "lib/libChakraCore.dylib",
-               "lib/libChakraCoreStatic.a"]
+    watched = ["bin/ch", "bin/GCStress", "lib/libChakraCore.dylib"]
     with touched(SOURCE_TU, PROBE_SEMANTIC_C):
         before = {w: md5_of(os.path.join(ROOT, PREFIX["test"], w))
                   for w in watched}

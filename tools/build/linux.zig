@@ -183,10 +183,102 @@ pub fn isValidIcuMajor(v: []const u8) bool {
     return nonzero;
 }
 
+pub fn parseUvernumMajorNum(bytes: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (!std.mem.startsWith(u8, line, "#")) continue;
+        const rest = std.mem.trimStart(u8, line[1..], " \t");
+        if (!std.mem.startsWith(u8, rest, "define")) continue;
+        const after_def = std.mem.trimStart(u8, rest["define".len..], " \t");
+        if (!std.mem.startsWith(u8, after_def, "U_ICU_VERSION_MAJOR_NUM")) continue;
+        const tail = after_def["U_ICU_VERSION_MAJOR_NUM".len..];
+        if (tail.len == 0 or (tail[0] != ' ' and tail[0] != '\t')) continue;
+        const val = std.mem.trimStart(u8, tail, " \t");
+        var end: usize = 0;
+        while (end < val.len and val[end] >= '0' and val[end] <= '9') : (end += 1) {}
+        if (end > 0) return val[0..end];
+    }
+    return null;
+}
+
 pub fn uvernumMatchesMajor(bytes: []const u8, icu_major: []const u8) bool {
+    if (parseUvernumMajorNum(bytes)) |hdr_num| {
+        if (!std.mem.eql(u8, hdr_num, icu_major)) return false;
+    }
     var buf: [64]u8 = undefined;
     const needle = std.fmt.bufPrint(&buf, "U_ICU_VERSION_SHORT \"{s}\"", .{icu_major}) catch return false;
     return std.mem.indexOf(u8, bytes, needle) != null;
+}
+
+pub fn sonameMatchesMajor(soname: []const u8, stem: []const u8, icu_major: []const u8) bool {
+    if (!std.mem.startsWith(u8, soname, stem)) return false;
+    const after_stem = soname[stem.len..];
+    if (!std.mem.startsWith(u8, after_stem, ".so.")) return false;
+    const after_so = after_stem[".so.".len..];
+    var end: usize = 0;
+    while (end < after_so.len and after_so[end] >= '0' and after_so[end] <= '9') : (end += 1) {}
+    if (end == 0) return false;
+    return std.mem.eql(u8, after_so[0..end], icu_major);
+}
+
+pub fn parseElf64SonameFromSlice(ehdr_bytes: []const u8, shdrs_bytes: []const u8, dyn_bytes: []const u8, dynstr_bytes: []const u8) ?[]const u8 {
+    if (ehdr_bytes.len < @sizeOf(std.elf.Elf64_Ehdr)) return null;
+    const ehdr: *align(1) const std.elf.Elf64_Ehdr = @ptrCast(ehdr_bytes[0..@sizeOf(std.elf.Elf64_Ehdr)]);
+    if (!std.mem.eql(u8, ehdr.e_ident[0..4], std.elf.MAGIC)) return null;
+    if (ehdr.e_ident[std.elf.EI_CLASS] != std.elf.ELFCLASS64) return null;
+    if (ehdr.e_ident[std.elf.EI_DATA] != std.elf.ELFDATA2LSB) return null;
+    if (shdrs_bytes.len < ehdr.e_shnum * @sizeOf(std.elf.Elf64_Shdr)) return null;
+    const dyn_cnt = dyn_bytes.len / @sizeOf(std.elf.Elf64_Dyn);
+    var i: usize = 0;
+    while (i < dyn_cnt) : (i += 1) {
+        const off = i * @sizeOf(std.elf.Elf64_Dyn);
+        const dyn: *align(1) const std.elf.Elf64_Dyn = @ptrCast(dyn_bytes[off..][0..@sizeOf(std.elf.Elf64_Dyn)]);
+        if (dyn.d_tag == std.elf.DT_NULL) break;
+        if (dyn.d_tag == std.elf.DT_SONAME) {
+            if (dyn.d_val >= dynstr_bytes.len) return null;
+            const tail = dynstr_bytes[dyn.d_val..];
+            const nul = std.mem.indexOfScalar(u8, tail, 0) orelse return null;
+            return tail[0..nul];
+        }
+    }
+    return null;
+}
+
+fn readElfSoname(io: std.Io, arena: std.mem.Allocator, lib_path: []const u8) ?[]const u8 {
+    const f = std.Io.Dir.openFileAbsolute(io, lib_path, .{}) catch return null;
+    defer f.close(io);
+    var ehdr_buf: [@sizeOf(std.elf.Elf64_Ehdr)]u8 = undefined;
+    const n_ehdr = f.readPositionalAll(io, &ehdr_buf, 0) catch return null;
+    if (n_ehdr < @sizeOf(std.elf.Elf64_Ehdr)) return null;
+    const ehdr: *align(1) const std.elf.Elf64_Ehdr = @ptrCast(&ehdr_buf);
+    if (!std.mem.eql(u8, ehdr.e_ident[0..4], std.elf.MAGIC)) return null;
+    if (ehdr.e_ident[std.elf.EI_CLASS] != std.elf.ELFCLASS64) return null;
+    if (ehdr.e_ident[std.elf.EI_DATA] != std.elf.ELFDATA2LSB) return null;
+    if (ehdr.e_shoff == 0 or ehdr.e_shnum == 0 or ehdr.e_shnum > 4096 or ehdr.e_shentsize != @sizeOf(std.elf.Elf64_Shdr)) return null;
+    const sh_bytes_len = @as(usize, ehdr.e_shnum) * @sizeOf(std.elf.Elf64_Shdr);
+    const sh_buf = arena.alloc(u8, sh_bytes_len) catch @panic("OOM");
+    const n_sh = f.readPositionalAll(io, sh_buf, ehdr.e_shoff) catch return null;
+    if (n_sh < sh_bytes_len) return null;
+    var i: usize = 0;
+    while (i < ehdr.e_shnum) : (i += 1) {
+        const sh_off = i * @sizeOf(std.elf.Elf64_Shdr);
+        const sh: *align(1) const std.elf.Elf64_Shdr = @ptrCast(sh_buf[sh_off..][0..@sizeOf(std.elf.Elf64_Shdr)]);
+        if (sh.sh_type != std.elf.SHT_DYNAMIC) continue;
+        if (sh.sh_link >= ehdr.e_shnum) return null;
+        if (sh.sh_size == 0 or sh.sh_size > (4 << 20)) return null;
+        const dyn_buf = arena.alloc(u8, @intCast(sh.sh_size)) catch @panic("OOM");
+        const n_dyn = f.readPositionalAll(io, dyn_buf, sh.sh_offset) catch return null;
+        if (n_dyn < sh.sh_size) return null;
+        const str_off = @as(usize, sh.sh_link) * @sizeOf(std.elf.Elf64_Shdr);
+        const str_sh: *align(1) const std.elf.Elf64_Shdr = @ptrCast(sh_buf[str_off..][0..@sizeOf(std.elf.Elf64_Shdr)]);
+        if (str_sh.sh_size == 0 or str_sh.sh_size > (16 << 20)) return null;
+        const dynstr_buf = arena.alloc(u8, @intCast(str_sh.sh_size)) catch @panic("OOM");
+        const n_str = f.readPositionalAll(io, dynstr_buf, str_sh.sh_offset) catch return null;
+        if (n_str < str_sh.sh_size) return null;
+        return parseElf64SonameFromSlice(&ehdr_buf, sh_buf, dyn_buf, dynstr_buf);
+    }
+    return null;
 }
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
@@ -345,7 +437,27 @@ fn gateIcu(b: *std.Build) struct { include: []const u8, libdir: []const u8, majo
     const bytes = vfr.interface.allocRemaining(arena, .limited(1 << 20)) catch
         fail("cannot read {s}: ICU version unverifiable (need major {s})", .{ uvernum, major });
     if (!uvernumMatchesMajor(bytes, major))
-        fail("{s}: ICU major unverifiable (need U_ICU_VERSION_SHORT \"{s}\", pass -Dicu-major=<N> to override)", .{ uvernum, major });
+        fail("{s}: ICU major unverifiable or mismatched (need U_ICU_VERSION_SHORT \"{s}\" and matching U_ICU_VERSION_MAJOR_NUM; pass -Dicu-major=<N> to override)", .{ uvernum, major });
+    const lib_checks = [_]struct { file: []const u8, stem: []const u8 }{
+        .{ .file = "libicuuc.so", .stem = "libicuuc" },
+        .{ .file = "libicui18n.so", .stem = "libicui18n" },
+    };
+    for (lib_checks) |chk| {
+        const p = std.fmt.allocPrint(arena, "{s}/{s}", .{ libdir, chk.file }) catch @panic("OOM");
+        if (readElfSoname(io, arena, p)) |soname| {
+            if (!sonameMatchesMajor(soname, chk.stem, major)) {
+                fail("ICU header/library version skew: {s} declares major {s}, but {s} has DT_SONAME '{s}' (pass matching -Dicu-include, -Dicu-libdir, and -Dicu-major)", .{ uvernum, major, p, soname });
+            }
+        } else {
+            var link_buf: [1024]u8 = undefined;
+            if (std.Io.Dir.readLinkAbsolute(io, p, &link_buf)) |target_len| {
+                const target_base = std.fs.path.basename(link_buf[0..target_len]);
+                if (std.mem.indexOf(u8, target_base, ".so.") != null and !sonameMatchesMajor(target_base, chk.stem, major)) {
+                    fail("ICU header/library version skew: {s} declares major {s}, but {s} points to '{s}' (pass matching -Dicu-include, -Dicu-libdir, and -Dicu-major)", .{ uvernum, major, p, target_base });
+                }
+            } else |_| {}
+        }
+    }
     return .{ .include = icu, .libdir = libdir, .major = major };
 }
 
@@ -1066,6 +1178,7 @@ pub fn build(b: *std.Build) void {
     const artifacts_ready: *std.Build.Step = if (copy_out) |cp| &cp.step else install;
 
     // Node-API provider, check-nodeapi, and ch-nodeapi (shared profiles only).
+    var prov_step_opt: ?*std.Build.Step = null;
     var nodeapi_step_opt: ?*std.Build.Step = null;
     if (so_res) |sr| {
         const so_bin = sr.bin;
@@ -1123,6 +1236,7 @@ pub fn build(b: *std.Build) void {
         prov_link.step.dependOn(&sr.link.step);
 
         const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (not part of the default build)");
+        prov_step_opt = prov_step;
         if (side_name == null) {
             install.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
             prov_step.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
@@ -1390,7 +1504,7 @@ pub fn build(b: *std.Build) void {
         registerFailStep(b, python, "check-jit", "Not applicable when -Djit=false", "-Djit=false built without lib/Backend; check-jit requires JIT enabled");
     }
 
-    // (4c) Wasm P1 gate (requires JIT + non-release profile).
+    // (4c) Wasm P1 gate (requires JIT + non-release profile): interpreted + native JIT tier-up.
     if (supportsWasmGate(profile, jit)) {
         const wasm_gate = b.addSystemCommand(&.{python});
         wasm_gate.addFileArg(b.path("tools/build/check_wasm_p1.py"));
@@ -1399,8 +1513,18 @@ pub fn build(b: *std.Build) void {
         wasm_gate.stdio = .inherit;
         const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (not part of the default build)");
         wasm_top.dependOn(&wasm_gate.step);
+
+        const wasm_jit_gate = b.addSystemCommand(&.{python});
+        wasm_jit_gate.addFileArg(b.path("tools/build/check_wasm_p1.py"));
+        wasm_jit_gate.addArg("--jit");
+        wasm_jit_gate.addFileArg(b.path("test/runtests.py"));
+        addBinArg(b, wasm_jit_gate, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
+        wasm_jit_gate.stdio = .inherit;
+        const wasm_jit_top = b.step("check-wasm-jit", "Verify Wasm P1 suite with native JIT tier-up (--jit dynapogo; not part of the default build)");
+        wasm_jit_top.dependOn(&wasm_jit_gate.step);
     } else {
         registerFailStep(b, python, "check-wasm", "Not applicable without -Djit=true and a non-release profile", "check-wasm requires JIT enabled and -Dprofile=test or debug-static");
+        registerFailStep(b, python, "check-wasm-jit", "Not applicable without -Djit=true and a non-release profile", "check-wasm-jit requires JIT enabled and -Dprofile=test or debug-static");
     }
 
     // (4d) Bounded GCStress heap-walk smoke gate.
@@ -1435,10 +1559,14 @@ pub fn build(b: *std.Build) void {
         san_step.addArg(prefix_dir);
         san_step.addArg("--mode");
         san_step.addArg(sanitize.name());
+        san_step.addArg("--profile");
+        san_step.addArg(profile.name());
+        san_step.addArg(if (supportsWasmGate(profile, jit)) "--expect-wasm" else "--no-expect-wasm");
         san_step.addArg("--cxx");
         san_step.addArg(ctx.host_cxx);
         san_step.addFileInput(ch_bin);
         san_step.step.dependOn(artifacts_ready);
+        if (prov_step_opt) |ps| san_step.step.dependOn(ps);
         if (nodeapi_step_opt) |ns| san_step.step.dependOn(ns);
         san_step.stdio = .inherit;
         const san_top = b.step("check-sanitize", b.fmt("Run sanitizer verification gate for -Dsanitize={s} (not part of the default build)", .{sanitize.name()}));
@@ -1476,30 +1604,40 @@ pub fn build(b: *std.Build) void {
 
     // Release Packaging & verification (b5-package)
     if (supportsPackageGate(profile)) {
+        const pkg_profile = side_name orelse "test";
+        const pkg_out_dir = b.fmt("out/package/{s}", .{pkg_profile});
+
         const pkg_cmd = b.addSystemCommand(&.{python});
         pkg_cmd.addFileArg(b.path("tools/package/build_package.py"));
         pkg_cmd.addArg("--prefix");
         pkg_cmd.addArg(prefix_dir);
+        pkg_cmd.addArg("--profile");
+        pkg_cmd.addArg(pkg_profile);
         pkg_cmd.addArg("--out-dir");
-        pkg_cmd.addArg("out/package");
+        pkg_cmd.addArg(pkg_out_dir);
         pkg_cmd.step.dependOn(artifacts_ready);
+        if (prov_step_opt) |ps| pkg_cmd.step.dependOn(ps);
         if (nodeapi_step_opt) |ns| pkg_cmd.step.dependOn(ns);
         pkg_cmd.stdio = .inherit;
         pkg_cmd.has_side_effects = true;
 
-        const pkg_top = b.step("package", "Build release archive (chakracore-<version>-<target>.tar.gz) and MANIFEST.json in out/package (not part of the default build)");
+        const pkg_top = b.step("package", b.fmt("Build release archive and MANIFEST.json in {s} (not part of the default build)", .{pkg_out_dir}));
         pkg_top.dependOn(&pkg_cmd.step);
 
         const verify_cmd = b.addSystemCommand(&.{python});
         verify_cmd.addFileArg(b.path("tools/package/verify_package.py"));
-        verify_cmd.addArg("out/package");
+        verify_cmd.addArg(pkg_out_dir);
+        verify_cmd.addArg("--profile");
+        verify_cmd.addArg(pkg_profile);
         verify_cmd.step.dependOn(&pkg_cmd.step);
         verify_cmd.stdio = .inherit;
         verify_cmd.has_side_effects = true;
 
         const test_cmd = b.addSystemCommand(&.{python});
         test_cmd.addFileArg(b.path("tools/package/test_package.py"));
-        test_cmd.addArg("out/package");
+        test_cmd.addArg(pkg_out_dir);
+        test_cmd.addArg("--profile");
+        test_cmd.addArg(pkg_profile);
         test_cmd.step.dependOn(&verify_cmd.step);
         test_cmd.stdio = .inherit;
         test_cmd.has_side_effects = true;
@@ -1513,6 +1651,33 @@ pub fn build(b: *std.Build) void {
 }
 
 test "linux sanitizer and gate helper contracts" {
+    try std.testing.expect(uvernumMatchesMajor("#define U_ICU_VERSION_MAJOR_NUM 74\n#define U_ICU_VERSION_SHORT \"74\"\n", "74"));
+    try std.testing.expect(!uvernumMatchesMajor("#define U_ICU_VERSION_MAJOR_NUM 79\n#define U_ICU_VERSION_SHORT \"74\"\n", "74"));
+    try std.testing.expect(sonameMatchesMajor("libicuuc.so.74", "libicuuc", "74"));
+    try std.testing.expect(sonameMatchesMajor("libicui18n.so.74.2", "libicui18n", "74"));
+    try std.testing.expect(!sonameMatchesMajor("libicuuc.so.79", "libicuuc", "74"));
+    try std.testing.expect(!sonameMatchesMajor("libicuuc.so.740", "libicuuc", "74"));
+
+    // Synthetic minimal ELF64 LE header + dynamic + dynstr verifying DT_SONAME parsing.
+    var ehdr = std.mem.zeroes(std.elf.Elf64_Ehdr);
+    @memcpy(ehdr.e_ident[0..4], std.elf.MAGIC);
+    ehdr.e_ident[std.elf.EI_CLASS] = std.elf.ELFCLASS64;
+    ehdr.e_ident[std.elf.EI_DATA] = std.elf.ELFDATA2LSB;
+    ehdr.e_shnum = 1;
+    var shdr = std.mem.zeroes(std.elf.Elf64_Shdr);
+    shdr.sh_type = std.elf.SHT_DYNAMIC;
+    var dyns: [2]std.elf.Elf64_Dyn = .{
+        .{ .d_tag = std.elf.DT_SONAME, .d_val = 1 },
+        .{ .d_tag = std.elf.DT_NULL, .d_val = 0 },
+    };
+    const dynstr = "\x00libicuuc.so.74\x00";
+    const parsed_soname = parseElf64SonameFromSlice(
+        std.mem.asBytes(&ehdr),
+        std.mem.asBytes(&shdr),
+        std.mem.sliceAsBytes(&dyns),
+        dynstr,
+    );
+    try std.testing.expectEqualStrings("libicuuc.so.74", parsed_soname.?);
     try std.testing.expectEqual(Sanitize.none, parseSanitize("none").?);
     try std.testing.expectEqual(Sanitize.address, parseSanitize("address").?);
     try std.testing.expectEqual(Sanitize.undefined, parseSanitize("undefined").?);

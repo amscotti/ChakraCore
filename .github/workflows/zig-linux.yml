@@ -118,6 +118,10 @@ jobs:
         run: |
           set -euo pipefail
           mise exec -- zig build check 2>&1 | tee ci-evidence/check.log
+      - name: zig build check-fulljit check-wasm check-wasm-jit check-gcstress
+        run: |
+          set -euo pipefail
+          mise exec -- zig build check-fulljit check-wasm check-wasm-jit check-gcstress 2>&1 | tee ci-evidence/jit-gates.log
       - name: Tally gate outputs
         id: tally
         run: |
@@ -126,7 +130,10 @@ jobs:
           grep -F 'check_smoke_linux: PASS' ci-evidence/check.log
           grep -F 'check_jit: PASS' ci-evidence/check.log
           grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/check.log
-          line="linux-test: build=PASS check=PASS"
+          grep -F 'check_fulljit: PASS' ci-evidence/jit-gates.log
+          test "$(grep -cF 'check_wasm_p1: PASS' ci-evidence/jit-gates.log)" = '2'
+          grep -F 'check_gcstress: PASS' ci-evidence/jit-gates.log
+          line="linux-test: build=PASS check=PASS fulljit=PASS wasm=PASS wasm-jit=PASS gcstress=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
@@ -147,13 +154,13 @@ jobs:
         include:
           - name: nojit
             flags: "-Djit=false"
-            checks: "check-smoke check-metadata verify-bytecode check-native"
+            checks: "check-smoke check-metadata verify-bytecode check-native check-gcstress"
           - name: release-shared
             flags: "-Dprofile=release-shared"
-            checks: "check-smoke check-metadata check-jit check-native check-package"
+            checks: "check-smoke check-metadata check-jit check-native check-gcstress check-package"
           - name: debug-static
             flags: "-Dprofile=debug-static -Doptimize=debug"
-            checks: "check-smoke check-metadata verify-bytecode check-native"
+            checks: "check-smoke check-metadata verify-bytecode check-native check-gcstress"
     outputs:
       tally: ${{ steps.tally.outputs.tally }}
     steps:
@@ -183,12 +190,13 @@ jobs:
         run: |
           set -euo pipefail
           grep -F 'check_metadata_linux: PASS' ci-evidence/checks.log
+          grep -F 'check_gcstress: PASS' ci-evidence/checks.log
           if [ "${{ matrix.name }}" = "release-shared" ]; then
             grep -F 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' ci-evidence/checks.log
           else
             grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/checks.log
           fi
-          line="linux-${{ matrix.name }}: build=PASS checks=PASS"
+          line="linux-${{ matrix.name }}: build=PASS checks=PASS gcstress=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
@@ -197,6 +205,50 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: zig-linux-${{ matrix.name }}
+          path: ci-evidence/
+
+  sanitize:
+    name: sanitize linux ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [address, undefined]
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - *linux-deps
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - name: zig build -Dsanitize=${{ matrix.mode }} -Djit=true
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          python3 tools/build/check_sanitize.py --self-test 2>&1 | tee ci-evidence/sanitize-selftest.log
+          mise exec -- zig build -Dsanitize=${{ matrix.mode }} -Djit=true 2>&1 | tee ci-evidence/build.log
+      - name: zig build -Dsanitize=${{ matrix.mode }} -Djit=true check-sanitize
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dsanitize=${{ matrix.mode }} -Djit=true check-sanitize 2>&1 | tee ci-evidence/sanitize.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -E "check_sanitize: PASS \([0-9]+/[0-9]+ legs clean under -Dsanitize=${{ matrix.mode }}\)" ci-evidence/sanitize.log
+          line="linux-sanitize-${{ matrix.mode }}: check-sanitize=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload zig-linux-sanitize-${{ matrix.mode }} evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-linux-sanitize-${{ matrix.mode }}
           path: ci-evidence/
 
   nodeapi:
@@ -301,7 +353,7 @@ jobs:
     name: record (assemble Linux evidence bundle)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    needs: [style, zig, zig-variants, nodeapi]
+    needs: [style, zig, zig-variants, sanitize, nodeapi]
     if: ${{ !cancelled() }}
     steps:
       - name: Download all leg evidence

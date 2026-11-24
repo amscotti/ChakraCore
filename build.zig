@@ -128,6 +128,10 @@ const Profile = enum {
     release_shared,
     /// Worktree-only ARM64 macOS JIT. Same flags as test, without DISABLE_JIT.
     jit,
+    /// Worktree-only ARM64 macOS Debug+JIT (shared, asserts enabled, backend asserts active).
+    jit_debug,
+    /// Worktree-only ARM64 macOS Release+JIT (-O3 -DNDEBUG -g0, no debug flaglist).
+    release_jit,
 
     fn name(self: Profile) []const u8 {
         return switch (self) {
@@ -135,21 +139,41 @@ const Profile = enum {
             .debug_static => "debug-static",
             .release_shared => "release-shared",
             .jit => "jit",
+            .jit_debug => "jit-debug",
+            .release_jit => "release-jit",
         };
     }
 
     fn isStatic(self: Profile) bool {
         return self == .debug_static;
     }
+
+    fn isJit(self: Profile) bool {
+        return self == .jit or self == .jit_debug or self == .release_jit;
+    }
+
+    fn isDebug(self: Profile) bool {
+        return self == .debug_static or self == .jit_debug;
+    }
+
+    fn isRelease(self: Profile) bool {
+        return self == .release_shared or self == .release_jit;
+    }
+
+    fn hasDebugFlags(self: Profile) bool {
+        return !self.isRelease();
+    }
 };
 
 fn gateProfile(b: *std.Build) Profile {
-    const raw = b.option([]const u8, "profile", "Build profile: test (default), debug-static, release-shared, jit") orelse "test";
+    const raw = b.option([]const u8, "profile", "Build profile: test (default), debug-static, release-shared, jit, jit-debug, release-jit") orelse "test";
     if (std.mem.eql(u8, raw, "test")) return .@"test";
     if (std.mem.eql(u8, raw, "debug-static")) return .debug_static;
     if (std.mem.eql(u8, raw, "release-shared")) return .release_shared;
     if (std.mem.eql(u8, raw, "jit")) return .jit;
-    fail("unsupported -Dprofile={s}: expected one of: test, debug-static, release-shared, jit", .{raw});
+    if (std.mem.eql(u8, raw, "jit-debug")) return .jit_debug;
+    if (std.mem.eql(u8, raw, "release-jit")) return .release_jit;
+    fail("unsupported -Dprofile={s}: expected one of: test, debug-static, release-shared, jit, jit-debug, release-jit", .{raw});
 }
 
 const Sanitize = enum {
@@ -211,11 +235,8 @@ fn gateOptimize(b: *std.Build, profile: Profile) std.builtin.Optimize {
     // The C/C++ -O flags are explicit on our compiler command lines; the
     // Zig mode is pinned per profile so a mode name alone can never select
     // a different engine configuration (modernization-plan.md section B3).
-    const want: std.builtin.Optimize = switch (profile) {
-        .@"test", .release_shared, .jit => .fast,
-        .debug_static => .debug,
-    };
-    const choice = b.option(std.builtin.Optimize, "optimize", "Optimization (pinned per profile: fast for test/release-shared/jit, debug for debug-static)") orelse want;
+    const want: std.builtin.Optimize = if (profile.isDebug()) .debug else .fast;
+    const choice = b.option(std.builtin.Optimize, "optimize", "Optimization (pinned per profile: fast for test/release-shared/jit/release-jit, debug for debug-static/jit-debug)") orelse want;
     if (choice == want) return choice;
     switch (profile) {
         .@"test" => fail("unsupported -Doptimize={t}: this profile (RelWithDebInfo Test, -O3 -g) supports only fast", .{choice}),
@@ -304,17 +325,128 @@ fn loadGateCounts(b: *std.Build) GateCounts {
     };
 }
 
-fn gateIcu(b: *std.Build) []const u8 {
+const IcuPaths = struct {
+    include: []const u8,
+    libdir: []const u8,
+    major: []const u8,
+};
+
+fn parseIcuHeaderMajor(arena: std.mem.Allocator, bytes: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (!std.mem.startsWith(u8, line, "#")) continue;
+        const rest = std.mem.trimStart(u8, line[1..], " \t");
+        if (!std.mem.startsWith(u8, rest, "define")) continue;
+        const after_def = std.mem.trimStart(u8, rest["define".len..], " \t");
+        if (!std.mem.startsWith(u8, after_def, "U_ICU_VERSION_MAJOR_NUM")) continue;
+        const tail = after_def["U_ICU_VERSION_MAJOR_NUM".len..];
+        if (tail.len == 0 or (tail[0] != ' ' and tail[0] != '\t')) continue;
+        const val = std.mem.trimStart(u8, tail, " \t");
+        var end: usize = 0;
+        while (end < val.len and val[end] >= '0' and val[end] <= '9') : (end += 1) {}
+        if (end > 0) return arena.dupe(u8, val[0..end]) catch @panic("OOM");
+    }
+    return null;
+}
+
+fn extractDylibMajorFromId(id_out: []const u8, stem: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, id_out, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or std.mem.endsWith(u8, line, ":")) continue;
+        const slash = std.mem.lastIndexOfScalar(u8, line, '/');
+        const base = if (slash) |idx| line[idx + 1 ..] else line;
+        if (!std.mem.startsWith(u8, base, stem)) continue;
+        const after_stem = base[stem.len..];
+        if (!std.mem.startsWith(u8, after_stem, ".")) continue;
+        const rest = after_stem[1..];
+        var end: usize = 0;
+        while (end < rest.len and rest[end] >= '0' and rest[end] <= '9') : (end += 1) {}
+        if (end > 0 and std.mem.endsWith(u8, rest[end..], ".dylib")) {
+            return rest[0..end];
+        }
+    }
+    return null;
+}
+
+fn gateIcu(b: *std.Build) IcuPaths {
     const arena = b.graph.arena;
     const io = b.graph.io;
     const icu = b.option([]const u8, "icu-include", "ICU include dir (default: " ++ default_icu_include ++ ")") orelse default_icu_include;
+    const default_libdir = std.fmt.allocPrint(arena, "{s}/../lib", .{icu}) catch @panic("OOM");
+    const libdir = b.option([]const u8, "icu-libdir", "ICU lib dir (default: <icu-include>/../lib)") orelse default_libdir;
     const uchar = std.fmt.allocPrint(arena, "{s}/unicode/uchar.h", .{icu}) catch @panic("OOM");
     std.Io.Dir.accessAbsolute(io, uchar, .{}) catch
         fail("Cannot find ICU (missing {s}). Try installing libicu-dev or the appropriate packages for your platform. Pass -Dicu-include=<icu>/include to point at ICU headers.", .{uchar});
-    const lib = std.fmt.allocPrint(arena, "{s}/../lib/libicuuc.dylib", .{icu}) catch @panic("OOM");
-    std.Io.Dir.accessAbsolute(io, lib, .{}) catch
-        fail("Cannot find ICU libraries (missing {s}). Try installing libicu-dev or the appropriate packages for your platform. Pass -Dicu-include=<icu>/include to point at the matching ICU.", .{lib});
-    return icu;
+    for ([_][]const u8{ "libicuuc.dylib", "libicui18n.dylib", "libicudata.dylib" }) |libname| {
+        const lib = std.fmt.allocPrint(arena, "{s}/{s}", .{ libdir, libname }) catch @panic("OOM");
+        std.Io.Dir.accessAbsolute(io, lib, .{}) catch
+            fail("Cannot find ICU libraries (missing {s}). Try installing libicu-dev or the appropriate packages for your platform. Pass -Dicu-include=<icu>/include or -Dicu-libdir=<icu>/lib to point at the matching ICU.", .{lib});
+    }
+    const uvernum = std.fmt.allocPrint(arena, "{s}/unicode/uvernum.h", .{icu}) catch @panic("OOM");
+    const vf = std.Io.Dir.openFileAbsolute(io, uvernum, .{}) catch
+        fail("Cannot verify ICU header version (missing {s}). Pass -Dicu-include=<icu>/include to point at valid ICU headers.", .{uvernum});
+    defer vf.close(io);
+    var vfr = vf.readerStreaming(io, &.{});
+    const uvernum_bytes = vfr.interface.allocRemaining(arena, .limited(1 << 20)) catch
+        fail("Cannot read {s} to verify ICU version.", .{uvernum});
+    const hdr_major = parseIcuHeaderMajor(arena, uvernum_bytes) orelse
+        fail("Cannot parse U_ICU_VERSION_MAJOR_NUM in {s}.", .{uvernum});
+
+    const checks = [_]struct { file: []const u8, stem: []const u8 }{
+        .{ .file = "libicuuc.dylib", .stem = "libicuuc" },
+        .{ .file = "libicui18n.dylib", .stem = "libicui18n" },
+        .{ .file = "libicudata.dylib", .stem = "libicudata" },
+    };
+    var saw_lib_major = false;
+    for (checks) |chk| {
+        const lib_path = std.fmt.allocPrint(arena, "{s}/{s}", .{ libdir, chk.file }) catch @panic("OOM");
+        const id_res = b.runFallible(&.{ "otool", "-D", lib_path }, .{});
+        const id_out: []const u8 = switch (id_res) {
+            .success => |o| o,
+            else => fail("Cannot inspect ICU library install_name via otool -D {s}.", .{lib_path}),
+        };
+        if (extractDylibMajorFromId(id_out, chk.stem)) |lib_major| {
+            saw_lib_major = true;
+            if (!std.mem.eql(u8, lib_major, hdr_major)) {
+                fail("ICU header/library version skew: {s} declares U_ICU_VERSION_MAJOR_NUM={s}, but {s} links as major {s}. Pass matching -Dicu-include and -Dicu-libdir.", .{ uvernum, hdr_major, lib_path, lib_major });
+            }
+        }
+    }
+    if (!saw_lib_major) {
+        const i18n_path = std.fmt.allocPrint(arena, "{s}/libicui18n.dylib", .{libdir}) catch @panic("OOM");
+        const deps_res = b.runFallible(&.{ "otool", "-L", i18n_path }, .{});
+        const deps_out: []const u8 = switch (deps_res) {
+            .success => |o| o,
+            else => fail("Cannot inspect ICU dependencies via otool -L {s}.", .{i18n_path}),
+        };
+        var lines = std.mem.splitScalar(u8, deps_out, '\n');
+        while (lines.next()) |raw_line| {
+            const trimmed = std.mem.trim(u8, raw_line, " \t\r");
+            const paren = std.mem.indexOf(u8, trimmed, " (compatibility") orelse continue;
+            if (extractDylibMajorFromId(trimmed[0..paren], "libicuuc")) |lib_major| {
+                saw_lib_major = true;
+                if (!std.mem.eql(u8, lib_major, hdr_major)) {
+                    fail("ICU header/library version skew: {s} declares U_ICU_VERSION_MAJOR_NUM={s}, but {s} depends on libicuuc major {s}. Pass matching -Dicu-include and -Dicu-libdir.", .{ uvernum, hdr_major, i18n_path, lib_major });
+                }
+            }
+        }
+    }
+    if (!saw_lib_major) {
+        // Fallback for unversioned custom dylibs whose LC_ID_DYLIB omits the major suffix:
+        // verify runtime major version via u_getVersion in libicuuc.
+        const py_bin = b.findProgram(.{ .names = &.{ "python3", "python" } }) orelse
+            fail("Cannot verify unversioned ICU library {s}/libicuuc.dylib against {s} (major {s}).", .{ libdir, uvernum, hdr_major });
+        const uc_path = std.fmt.allocPrint(arena, "{s}/libicuuc.dylib", .{libdir}) catch @panic("OOM");
+        const probe_src = "import ctypes, sys\nlib = ctypes.CDLL(sys.argv[1])\nfn = getattr(lib, 'u_getVersion_' + sys.argv[2], None)\nif fn is None:\n    for cand in dir(lib): pass\n    # Fall back to unversioned u_getVersion if built with --disable-renaming\n    fn = getattr(lib, 'u_getVersion', None)\n    if fn is None:\n        sys.stderr.write('missing u_getVersion_' + sys.argv[2] + ' and u_getVersion')\n        sys.exit(2)\nver = (ctypes.c_uint8 * 4)()\nfn(ver)\nif str(ver[0]) != sys.argv[2]:\n    sys.stderr.write(f'runtime major {ver[0]} != header major {sys.argv[2]}')\n    sys.exit(3)\n";
+        const probe_res = b.runFallible(&.{ py_bin, "-c", probe_src, uc_path, hdr_major }, .{});
+        switch (probe_res) {
+            .success => {},
+            else => fail("ICU header/library version skew: {s} declares U_ICU_VERSION_MAJOR_NUM={s}, which does not match {s}. Pass matching -Dicu-include and -Dicu-libdir.", .{ uvernum, hdr_major, uc_path }),
+        }
+    }
+    return .{ .include = icu, .libdir = libdir, .major = hdr_major };
 }
 
 const Ctx = struct {
@@ -387,39 +519,50 @@ fn registerPackageSteps(
     python: []const u8,
     is_supported: bool,
     prefix_dir: []const u8,
+    profile_or_side: []const u8,
     artifacts_ready: *std.Build.Step,
+    prov_step_opt: ?*std.Build.Step,
     nodeapi_step_opt: ?*std.Build.Step,
 ) void {
     if (!is_supported) {
-        registerFailStep(b, python, "package", "Not applicable on debug-static", "package requires a shared profile (test, jit, or release-shared) with dynamic libraries");
-        registerFailStep(b, python, "check-package", "Not applicable on debug-static", "check-package requires a shared profile (test, jit, or release-shared) with dynamic libraries");
+        registerFailStep(b, python, "package", "Not applicable on debug-static", "package requires a shared profile (test, release-shared, jit, jit-debug, or release-jit) with dynamic libraries");
+        registerFailStep(b, python, "check-package", "Not applicable on debug-static", "check-package requires a shared profile (test, release-shared, jit, jit-debug, or release-jit) with dynamic libraries");
         return;
     }
+
+    const out_dir = b.fmt("out/package/{s}", .{profile_or_side});
 
     const pkg_cmd = b.addSystemCommand(&.{python});
     pkg_cmd.addFileArg(b.path("tools/package/build_package.py"));
     pkg_cmd.addArg("--prefix");
     pkg_cmd.addArg(prefix_dir);
+    pkg_cmd.addArg("--profile");
+    pkg_cmd.addArg(profile_or_side);
     pkg_cmd.addArg("--out-dir");
-    pkg_cmd.addArg("out/package");
+    pkg_cmd.addArg(out_dir);
     pkg_cmd.step.dependOn(artifacts_ready);
+    if (prov_step_opt) |ps| pkg_cmd.step.dependOn(ps);
     if (nodeapi_step_opt) |ns| pkg_cmd.step.dependOn(ns);
     pkg_cmd.stdio = .inherit;
     pkg_cmd.has_side_effects = true;
 
-    const pkg_top = b.step("package", "Build release archive (chakracore-<version>-<target>.tar.gz) and MANIFEST.json in out/package (not part of the default build)");
+    const pkg_top = b.step("package", b.fmt("Build release archive and MANIFEST.json in {s} (not part of the default build)", .{out_dir}));
     pkg_top.dependOn(&pkg_cmd.step);
 
     const verify_cmd = b.addSystemCommand(&.{python});
     verify_cmd.addFileArg(b.path("tools/package/verify_package.py"));
-    verify_cmd.addArg("out/package");
+    verify_cmd.addArg(out_dir);
+    verify_cmd.addArg("--profile");
+    verify_cmd.addArg(profile_or_side);
     verify_cmd.step.dependOn(&pkg_cmd.step);
     verify_cmd.stdio = .inherit;
     verify_cmd.has_side_effects = true;
 
     const test_cmd = b.addSystemCommand(&.{python});
     test_cmd.addFileArg(b.path("tools/package/test_package.py"));
-    test_cmd.addArg("out/package");
+    test_cmd.addArg(out_dir);
+    test_cmd.addArg("--profile");
+    test_cmd.addArg(profile_or_side);
     test_cmd.step.dependOn(&verify_cmd.step);
     test_cmd.stdio = .inherit;
     test_cmd.has_side_effects = true;
@@ -470,11 +613,12 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
         // jit reuses the test tables and drops DISABLE_JIT so every TU,
         // PAL included, is compiled with native codegen enabled.
         .@"test", .jit => if (g.pal) tables.pal_defines else tables.engine_defines,
-        .debug_static => if (g.pal) tables.pal_defines_debug_static else tables.engine_defines_debug_static,
-        .release_shared => if (g.pal) tables.pal_defines_release else tables.engine_defines_release,
+        .debug_static, .jit_debug => if (g.pal) tables.pal_defines_debug_static else tables.engine_defines_debug_static,
+        .release_shared, .release_jit => if (g.pal) tables.pal_defines_release else tables.engine_defines_release,
     };
     for (defines) |d| {
-        if (ctx.profile == .jit and std.mem.eql(u8, d, "-DDISABLE_JIT=1")) continue;
+        if (ctx.profile.isJit() and std.mem.eql(u8, d, "-DDISABLE_JIT=1")) continue;
+        if (!ctx.profile.isStatic() and std.mem.eql(u8, d, "-DCHAKRA_STATIC_LIBRARY=1")) continue;
         run.addArg(d);
     }
     if (g.target_define) |d| run.addArg(d);
@@ -491,7 +635,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
     // is on (lib/Runtime/Language/CMakeLists.txt, Library/CMakeLists.txt).
     // arm64_Thunks.S emits the dynamic-interpreter entry points only
     // under this define.
-    if (ctx.profile == .jit and (g == &tables.language_group or g == &tables.library_group))
+    if (ctx.profile.isJit() and (g == &tables.language_group or g == &tables.library_group))
         run.addArg("-D_ENABLE_DYNAMIC_THUNKS=1");
 
     const is_ch = g == &tables.ch_group;
@@ -512,15 +656,13 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             run.addArg(b.fmt("-I{s}", .{dir}));
     }
     if (g.pal) run.addArg("-Ipal/src/include");
-    run.addArg("-isystem");
-    run.addArg("/usr/local/include");
 
     switch (lang) {
         .cxx => {
             for (tables.warnings) |w| run.addArg(w);
             for ([_][]const u8{ "-fno-omit-frame-pointer", "-fdelayed-template-parsing" }) |f| run.addArg(f);
             if (ctx.sanitize != .none) {
-                if (ctx.profile == .debug_static) {
+                if (ctx.profile.isDebug()) {
                     run.addArg("-g");
                 } else {
                     for ([_][]const u8{ "-O1", "-g" }) |f| run.addArg(f);
@@ -540,8 +682,8 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
                 // category as -UNDEBUG/-fno-sanitize below.
                 switch (ctx.profile) {
                     .@"test", .jit => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
-                    .debug_static => run.addArg("-g"),
-                    .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG", "-g0" }) |f| run.addArg(f),
+                    .debug_static, .jit_debug => run.addArg("-g"),
+                    .release_shared, .release_jit => for ([_][]const u8{ "-O3", "-DNDEBUG", "-g0" }) |f| run.addArg(f),
                 }
             }
             run.addArg("-std=gnu++17");
@@ -558,11 +700,14 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
                 // Host Apple clang with -isysroot handles SDK C++ stdlib and
                 // system framework resolution directly; -mcpu uses hyphen.
                 run.addArg("-mcpu=apple-m1");
-                if (ctx.profile != .release_shared) run.addArg("-UNDEBUG");
+                if (!ctx.profile.isRelease()) run.addArg("-UNDEBUG");
                 if (is_ch and ctx.sanitize == .address) {
                     run.addArg("-include");
                     run.addArg("tools/build/asan_apple_prefix.h");
                 }
+                // Place /usr/local/include strictly after SDK system includes (B-14).
+                run.addArg("-idirafter");
+                run.addArg("/usr/local/include");
             } else {
                 // Build-required additions: the SDK C++ headers
                 // (-isystem, absolute) and SDK frameworks (-F, sysroot-
@@ -572,8 +717,8 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
                 // promotes __DATE__/__TIME__; pilot finding). The c++ driver
                 // injects no NDEBUG, matching the reference C++ (contract
                 // quirk Q4); -UNDEBUG is a defensive no-op, kept for every
-                // profile except release-shared (whose -DNDEBUG above is real).
-                // -fno-sanitize=undefined on debug-static: `zig c++` with no
+                // profile except release-shared/release-jit (whose -DNDEBUG above is real).
+                // -fno-sanitize=undefined on debug-static/jit-debug: `zig c++` with no
                 // -O flag defaults to a UBSan-instrumented build (80 ubsan
                 // symbols observed in ch, trapping on engine null+offset
                 // arithmetic), while legacy AppleClang instruments nothing;
@@ -581,11 +726,14 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
                 // symbols). Probed: the spelling removes all ubsan refs.
                 run.addArg("-isystem");
                 run.addArg(ctx.sdk_isystem);
+                // B-14: /usr/local/include follows SDK system includes so stale host headers cannot shadow SDK headers.
+                run.addArg("-isystem");
+                run.addArg("/usr/local/include");
                 run.addArg("-F");
                 run.addArg("/System/Library/Frameworks");
                 run.addArg("-mcpu=apple_m1");
-                if (ctx.profile != .release_shared) run.addArg("-UNDEBUG");
-                if (ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+                if (!ctx.profile.isRelease()) run.addArg("-UNDEBUG");
+                if (ctx.profile.isDebug()) run.addArg("-fno-sanitize=undefined");
             }
             run.addArg("-Wno-date-time");
         },
@@ -593,13 +741,13 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             if (lang == .c) run.addArg("-std=gnu99");
             if (ctx.sanitize != .none) {
                 if (lang == .c) {
-                    if (ctx.profile != .debug_static) run.addArg("-O1");
+                    if (!ctx.profile.isDebug()) run.addArg("-O1");
                     run.addArg("-g");
                     run.addArg("-fno-omit-frame-pointer");
                     run.addArg(ctx.sanitize.fsanitizeFlag());
-                if (ctx.sanitize == .undefined) {
-                    run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
-                }
+                    if (ctx.sanitize == .undefined) {
+                        run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
+                    }
                 } else {
                     run.addArg("-g");
                 }
@@ -611,13 +759,13 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
                 // otherwise - same driver-default correction as C++ above).
                 const opt_flag: ?[]const u8 = switch (ctx.profile) {
                     .@"test", .jit => "-O2",
-                    .debug_static => null,
-                    .release_shared => "-O3",
+                    .debug_static, .jit_debug => null,
+                    .release_shared, .release_jit => "-O3",
                 };
                 if (opt_flag) |f| run.addArg(f);
-                run.addArg(if (ctx.profile == .release_shared) "-g0" else "-g");
+                run.addArg(if (ctx.profile.isRelease()) "-g0" else "-g");
             }
-            if (ctx.profile != .debug_static) run.addArg("-DNDEBUG");
+            if (!ctx.profile.isDebug()) run.addArg("-DNDEBUG");
             for ([_][]const u8{ "-fasm-blocks", "-fms-extensions", "-fwrapv" }) |f| run.addArg(f);
             if (g.pal) {
                 for ([_][]const u8{ "-fstack-protector", "-fno-builtin", "-fPIC" }) |f| run.addArg(f);
@@ -626,15 +774,20 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             }
             if (ctx.sanitize != .none) {
                 run.addArg("-mcpu=apple-m1");
+                run.addArg("-idirafter");
+                run.addArg("/usr/local/include");
             } else {
                 run.addArg("-isystem");
                 run.addArg(ctx.sdk_isystem);
+                // B-14: /usr/local/include follows SDK system includes.
+                run.addArg("-isystem");
+                run.addArg("/usr/local/include");
                 run.addArg("-F");
                 run.addArg("/System/Library/Frameworks");
                 run.addArg("-mcpu=apple_m1");
                 // Same UBSan default-correction as C++ (see above), C only -
                 // assembler lines take no sanitizer flags.
-                if (lang == .c and ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+                if (lang == .c and ctx.profile.isDebug()) run.addArg("-fno-sanitize=undefined");
             }
             run.addArg("-Wno-date-time");
         },
@@ -776,37 +929,41 @@ pub fn build(b: *std.Build) void {
     }
     const profile = gateProfile(b);
     const sanitize = gateSanitize(b);
-    if (sanitize != .none and profile == .release_shared) {
-        fail("-Dsanitize={s} is not supported with -Dprofile=release-shared; use test (default), debug-static, or jit", .{sanitize.name()});
+    if (sanitize != .none and profile.isRelease()) {
+        fail("-Dsanitize={s} is not supported with -Dprofile={s}; use test (default), debug-static, jit, or jit-debug", .{ sanitize.name(), profile.name() });
     }
     const target = gateTarget(b);
     const optimize = gateOptimize(b, profile);
     const sdk_path = gateSdk(b);
-    const icu_include = gateIcu(b);
+    const icu = gateIcu(b);
+    const icu_include = icu.include;
+    const icu_lib = icu.libdir;
+    const install_static_opt = b.option(bool, "install-static-archive", "Install/copy libChakraCoreStatic.a on shared profiles (default: false; always true on debug-static)") orelse false;
+    const install_static_archive = profile.isStatic() or install_static_opt;
     const python = b.findProgram(.{ .names = &.{ "python3", "python" } }) orelse
         fail("cannot find python3 or python on PATH; needed to run bin/ch/jstoc.py for DbgController.js.h", .{});
     const gates = loadGateCounts(b);
     const host_compilers = if (sanitize != .none) gateHostCompilers(b) else HostCompilers{ .cc = "", .cxx = "" };
     const side_name: ?[]const u8 = if (sanitize != .none)
-        b.fmt("sanitize-{s}", .{sanitize.name()})
+        b.fmt("{s}-sanitize-{s}", .{ profile.name(), sanitize.name() })
     else if (profile != .@"test")
         profile.name()
     else
         null;
 
-    // The test line is byte-identical to B2; other profiles and sanitizer
-    // lanes label their isolated side prefixes.
+    // The test line preserves B2 keys while exposing icu-libdir; other profiles
+    // and sanitizer lanes label their isolated side prefixes.
     if (sanitize != .none) {
-        std.debug.print("sanitize={s} profile={s}: target={s} sdk={s}@{s} icu-include={s} host-cxx={s} side prefix out/{s}\n", .{
-            sanitize.name(), profile.name(), host_clang_target, sdk_path, profile_sdk_version, icu_include, host_compilers.cxx, side_name.?,
+        std.debug.print("sanitize={s} profile={s}: target={s} sdk={s}@{s} icu-include={s} icu-libdir={s} host-cxx={s} side prefix out/{s}\n", .{
+            sanitize.name(), profile.name(), host_clang_target, sdk_path, profile_sdk_version, icu_include, icu_lib, host_compilers.cxx, side_name.?,
         });
     } else if (profile == .@"test") {
-        std.debug.print("b2 profile: target={s} sdk={s}@{s} icu-include={s} zig={f} python={s}\n", .{
-            profile_target, sdk_path, profile_sdk_version, icu_include, builtin.zig_version, python,
+        std.debug.print("b2 profile: target={s} sdk={s}@{s} icu-include={s} icu-libdir={s} zig={f} python={s}\n", .{
+            profile_target, sdk_path, profile_sdk_version, icu_include, icu_lib, builtin.zig_version, python,
         });
     } else {
-        std.debug.print("b3 profile={s}: target={s} sdk={s}@{s} icu-include={s} zig={f} python={s}\n", .{
-            profile.name(), profile_target, sdk_path, profile_sdk_version, icu_include, builtin.zig_version, python,
+        std.debug.print("b3 profile={s}: target={s} sdk={s}@{s} icu-include={s} icu-libdir={s} zig={f} python={s}\n", .{
+            profile.name(), profile_target, sdk_path, profile_sdk_version, icu_include, icu_lib, builtin.zig_version, python,
         });
         std.debug.print("b3 profile={s}: side prefix out/{s} (--prefix is ignored for this profile; only test uses the install prefix)\n", .{
             profile.name(), profile.name(),
@@ -855,9 +1012,9 @@ pub fn build(b: *std.Build) void {
     // DISABLE_JIT profile fails loudly (test/debug-static/release-shared
     // all define DISABLE_JIT, where ASMJS_PLAT/ENABLE_ASMJS are off by
     // construction). No silent gate-off.
-    const wasm = b.option(bool, "wasm", "ARM64 WebAssembly/asm.js port (jit profile only, default off)") orelse false;
-    if (wasm and profile != .jit)
-        fail("-Dwasm=true requires -Dprofile=jit (DISABLE_JIT profiles cannot enable ENABLE_WASM/ENABLE_ASMJS on ARM64)", .{});
+    const wasm = b.option(bool, "wasm", "ARM64 WebAssembly/asm.js port (jit/jit-debug/release-jit profiles only, default off)") orelse false;
+    if (wasm and !profile.isJit())
+        fail("-Dwasm=true requires a JIT profile (-Dprofile=jit, jit-debug, or release-jit; DISABLE_JIT profiles cannot enable ENABLE_WASM/ENABLE_ASMJS on ARM64)", .{});
 
     // Build-owned wabt config.h (fixed-by-profile substitution of
     // lib/wabt/src/config.h.in, same generator as the Linux graph).
@@ -985,7 +1142,7 @@ pub fn build(b: *std.Build) void {
         // Jsrt.Core (before Common.Common), matching lib/CMakeLists.txt:21-28.
         // Non-jit profiles skip this block so their numbering and archive
         // layout remain unchanged.
-        if (profile == .jit and g == &tables.jsrt_core_group) {
+        if (profile.isJit() and g == &tables.jsrt_core_group) {
             const bg = &tables.backend_group;
             backend_expected = @intCast(bg.cxx.len + bg.c.len + bg.asm_files.len);
             // A source added to backend_group must be reflected here.
@@ -1063,7 +1220,7 @@ pub fn build(b: *std.Build) void {
     // fails with "failed to write: Unexpected" (the partial file is a
     // zero-filled multi-gigabyte blob). libtool writes that archive,
     // and sanitizer lanes also use libtool directly.
-    const static_archive: LinkedArtifact = if (profile == .jit or sanitize != .none) blk: {
+    const static_archive: LinkedArtifact = if (profile.isJit() or sanitize != .none) blk: {
         break :blk createLibtoolArchive(b, "ChakraCoreStatic", static_objs.items);
     } else blk: {
         const static_mod = createLinkModule(&ctx);
@@ -1072,7 +1229,6 @@ pub fn build(b: *std.Build) void {
         break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraCoreStatic" };
     };
 
-    const icu_lib = b.fmt("{s}/../lib", .{icu_include});
     // libChakraCore.dylib (contract section 5.6, shared profiles only):
     // 3 objects plus every engine TU linked directly - the equivalent
     // of the reference -force_load of the static archive (Zig's Mach-O
@@ -1086,6 +1242,7 @@ pub fn build(b: *std.Build) void {
             "-dynamiclib",
             "-Wl,-compatibility_version,1.0.0",
             "-Wl,-current_version,1.0.0",
+            "-Wl,-x",
             "-install_name",
             "@rpath/libChakraCore.dylib",
         });
@@ -1120,6 +1277,7 @@ pub fn build(b: *std.Build) void {
         });
         lib.install_name = "@rpath/libChakraCore.dylib";
         lib.headerpad_max_install_names = true;
+        lib.discard_local_symbols = true;
         break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraCore" };
     };
 
@@ -1254,7 +1412,7 @@ pub fn build(b: *std.Build) void {
                 c.addArg("-isysroot");
                 c.addArg(ctx.sdk_path);
                 c.addArg("-std=gnu++17");
-                if (profile != .debug_static) c.addArg("-O1");
+                if (!profile.isDebug()) c.addArg("-O1");
                 c.addArgs(&.{ "-g", "-fno-omit-frame-pointer", sanitize.fsanitizeFlag() });
                 break :cmd_blk c;
             } else cmd_blk: {
@@ -1350,7 +1508,13 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(ch.compile.?);
         b.installArtifact(gs.compile.?);
         if (dylib) |lib| b.installArtifact(lib.compile.?);
-        b.installArtifact(static_archive.compile.?);
+        if (install_static_archive) {
+            if (static_archive.compile) |c| {
+                b.installArtifact(c);
+            } else {
+                b.getInstallStep().dependOn(&b.addInstallFile(static_archive.bin, "lib/libChakraCoreStatic.a").step);
+            }
+        }
         for (singular_libs.items) |lib| b.installArtifact(lib.compile.?);
         // Co-location edge (contract sections 5.6-5.7, shared profiles only): the
         // reference POST_BUILD copies both ch and libChakraCore.dylib to the
@@ -1407,7 +1571,9 @@ pub fn build(b: *std.Build) void {
                 cp.addPrefixedFileArg(b.fmt("--map={s}=", .{hdr}), b.path(b.fmt("include/nodeapi/{s}", .{std.fs.path.basename(hdr)})));
             }
         }
-        cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive.bin);
+        if (install_static_archive) {
+            cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive.bin);
+        }
         for (singular_libs.items) |lib| {
             cp.addPrefixedFileArg(b.fmt("--map=lib/lib{s}.a=", .{lib.name}), lib.bin);
         }
@@ -1440,8 +1606,10 @@ pub fn build(b: *std.Build) void {
     // host's default provider lookup) plus the vendored headers to
     // <prefix>/include/nodeapi/ (N5.5 consumer builds need both);
     // side-prefix builds copy dylib + headers to out/<side_name>/ via copy_out.
+    var prov_step_opt: ?*std.Build.Step = null;
     if (prov_lib) |lib| {
-        const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (shared profiles test + jit; not part of the default build)");
+        const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (shared profiles; not part of the default build)");
+        prov_step_opt = prov_step;
         if (side_name == null) {
             prov_step.dependOn(&b.addInstallFile(lib.bin, "lib/libChakraNodeApi.dylib").step);
             for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
@@ -1504,7 +1672,7 @@ pub fn build(b: *std.Build) void {
             fn call(context: *const Ctx, cmd: *std.Build.Step.Run) void {
                 if (context.sanitize != .none) {
                     cmd.addArgs(&.{ "-target", host_clang_target, "-isysroot", context.sdk_path, "-std=gnu++17" });
-                    if (context.profile != .debug_static) cmd.addArg("-O1");
+                    if (!context.profile.isDebug()) cmd.addArg("-O1");
                     cmd.addArgs(&.{ "-g", "-fno-omit-frame-pointer", context.sanitize.fsanitizeFlag() });
                 } else {
                     cmd.addArgs(&.{ "-target", profile_target, "--sysroot", context.sdk_path, "-std=gnu++17", "-O3", "-g" });
@@ -1644,9 +1812,10 @@ pub fn build(b: *std.Build) void {
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the B1-B3 verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 
-    // Wasm P1 gate: requires -Dprofile=jit -Dwasm=true; fails loudly otherwise.
+    // Wasm P1 gate: requires -Dprofile=jit|jit-debug -Dwasm=true; fails loudly otherwise.
     var jit_wasm_step: ?*std.Build.Step = null;
-    if (profile == .jit and ctx.wasm) {
+    var jit_wasm_jit_step: ?*std.Build.Step = null;
+    if (profile.isJit() and profile.hasDebugFlags() and ctx.wasm) {
         const jit_wasm = b.addSystemCommand(&.{python});
         jit_wasm.addFileArg(b.path("tools/build/check_wasm_p1.py"));
         jit_wasm.addFileArg(b.path("test/runtests.py"));
@@ -1654,11 +1823,24 @@ pub fn build(b: *std.Build) void {
         jit_wasm.addFileInput(ch.bin);
         jit_wasm.step.dependOn(&copy_out.?.step);
         jit_wasm.stdio = .inherit;
-        const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (-Dprofile=jit -Dwasm=true; not part of the default build)");
+        const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (-Dprofile=jit|jit-debug -Dwasm=true; not part of the default build)");
         wasm_top.dependOn(&jit_wasm.step);
         jit_wasm_step = &jit_wasm.step;
+
+        const jit_wasm_jit = b.addSystemCommand(&.{python});
+        jit_wasm_jit.addFileArg(b.path("tools/build/check_wasm_p1.py"));
+        jit_wasm_jit.addArg("--jit");
+        jit_wasm_jit.addFileArg(b.path("test/runtests.py"));
+        jit_wasm_jit.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
+        jit_wasm_jit.addFileInput(ch.bin);
+        jit_wasm_jit.step.dependOn(&copy_out.?.step);
+        jit_wasm_jit.stdio = .inherit;
+        const wasm_jit_top = b.step("check-wasm-jit", "Verify Wasm P1 suite with native JIT tier-up (--jit dynapogo; -Dprofile=jit|jit-debug -Dwasm=true; not part of the default build)");
+        wasm_jit_top.dependOn(&jit_wasm_jit.step);
+        jit_wasm_jit_step = &jit_wasm_jit.step;
     } else {
-        registerFailStep(b, python, "check-wasm", "Not applicable without -Dprofile=jit -Dwasm=true", "check-wasm requires -Dprofile=jit -Dwasm=true");
+        registerFailStep(b, python, "check-wasm", "Not applicable without -Dprofile=jit|jit-debug -Dwasm=true", "check-wasm requires -Dprofile=jit or jit-debug with -Dwasm=true");
+        registerFailStep(b, python, "check-wasm-jit", "Not applicable without -Dprofile=jit|jit-debug -Dwasm=true", "check-wasm-jit requires -Dprofile=jit or jit-debug with -Dwasm=true");
     }
 
     // Bounded GCStress smoke gate (in-thread + concurrent full heap walks).
@@ -1678,19 +1860,23 @@ pub fn build(b: *std.Build) void {
         gc_top.dependOn(&gc_step.step);
     }
 
-    // No-profile FullJit correctness gate (B4-JIT-05): requires JIT (-Dprofile=jit).
-    if (profile == .jit) {
+    // No-profile FullJit correctness gate (B4-JIT-05): requires JIT with debug/test flags (-Dprofile=jit|jit-debug).
+    var jit_fulljit_step: ?*std.Build.Step = null;
+    if (profile.isJit() and profile.hasDebugFlags()) {
         const fj_step = b.addSystemCommand(&.{python});
         fj_step.addFileArg(b.path("tools/build/check_fulljit.py"));
         fj_step.addFileArg(b.path("test/runtests.py"));
         fj_step.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
+        fj_step.addArg("--select");
+        fj_step.addArg(if (profile.isDebug()) "debug" else "test");
         fj_step.addFileInput(ch.bin);
         fj_step.step.dependOn(&copy_out.?.step);
         fj_step.stdio = .inherit;
-        const fj_top = b.step("check-fulljit", "Run no-profile FullJit regression suites (-Dprofile=jit; not part of the default build)");
+        const fj_top = b.step("check-fulljit", "Run no-profile FullJit regression suites (-Dprofile=jit|jit-debug; not part of the default build)");
         fj_top.dependOn(&fj_step.step);
+        jit_fulljit_step = &fj_step.step;
     } else {
-        registerFailStep(b, python, "check-fulljit", "Not applicable without -Dprofile=jit", "check-fulljit requires -Dprofile=jit (JIT must be enabled with debug/test flags)");
+        registerFailStep(b, python, "check-fulljit", "Not applicable without -Dprofile=jit|jit-debug", "check-fulljit requires -Dprofile=jit or -Dprofile=jit-debug (JIT must be enabled with debug/test flags)");
     }
 
     // Sanitizer verification gate: requires -Dsanitize=address|undefined.
@@ -1700,12 +1886,16 @@ pub fn build(b: *std.Build) void {
         san_step.addArg(b.fmt("out/{s}", .{side_name.?}));
         san_step.addArg("--mode");
         san_step.addArg(sanitize.name());
+        san_step.addArg("--profile");
+        san_step.addArg(profile.name());
+        san_step.addArg(if (ctx.wasm) "--expect-wasm" else "--no-expect-wasm");
         san_step.addArg("--cxx");
         san_step.addArg(ctx.host_cxx);
         san_step.addArg("--sdk-path");
         san_step.addArg(ctx.sdk_path);
         san_step.addFileInput(ch.bin);
         san_step.step.dependOn(&copy_out.?.step);
+        if (prov_step_opt) |ps| san_step.step.dependOn(ps);
         if (nodeapi_step_opt) |ns| san_step.step.dependOn(ns);
         san_step.stdio = .inherit;
         const san_top = b.step("check-sanitize", b.fmt("Run ASan/UBSan verification gate for -Dsanitize={s} (not part of the default build)", .{sanitize.name()}));
@@ -1729,10 +1919,11 @@ pub fn build(b: *std.Build) void {
     // out/release-shared strings (the side prefix is fixed, not
     // --prefix-relative); each step depends on the copy-out (ordering)
     // and fingerprints the pre-copy emitted artifacts (same bytes).
-    if (profile == .release_shared) {
+    if (profile.isRelease()) {
         const cp_step = &copy_out.?.step;
-        const rel_ch_str = "out/release-shared/bin/ch";
-        const rel_prefix_str = "out/release-shared";
+        const sname = side_name.?;
+        const rel_ch_str = b.fmt("out/{s}/bin/ch", .{sname});
+        const rel_prefix_str = b.fmt("out/{s}", .{sname});
         const rel_cc = b.findProgram(.{ .names = &.{"clang"} }) orelse "clang";
         const rel_cxx = b.findProgram(.{ .names = &.{"clang++"} }) orelse "clang++";
 
@@ -1747,7 +1938,7 @@ pub fn build(b: *std.Build) void {
         rel_native.addArg("Release");
         rel_native.step.dependOn(cp_step);
         rel_native.stdio = .inherit;
-        const rel_native_top = b.step("check-native", "Run the shared embedding tests against release-shared artifacts (legacy-exact Release argv; not part of the default build)");
+        const rel_native_top = b.step("check-native", b.fmt("Run the shared embedding tests against {s} artifacts (legacy-exact Release argv; not part of the default build)", .{sname}));
         rel_native_top.dependOn(&rel_native.step);
 
         const rel_smoke = b.addSystemCommand(&.{python});
@@ -1758,7 +1949,7 @@ pub fn build(b: *std.Build) void {
         rel_smoke.addArg("release-shared");
         rel_smoke.step.dependOn(cp_step);
         rel_smoke.stdio = .inherit;
-        const rel_smoke_top = b.step("check-smoke", "Assert release-shared ch version/silent-flag/snippet/hello.js output text (not part of the default build)");
+        const rel_smoke_top = b.step("check-smoke", b.fmt("Assert {s} ch version/silent-flag/snippet/hello.js output text (not part of the default build)", .{sname}));
         rel_smoke_top.dependOn(&rel_smoke.step);
 
         const rel_metadata = b.addSystemCommand(&.{python});
@@ -1767,34 +1958,62 @@ pub fn build(b: *std.Build) void {
         rel_metadata.addFileInput(ch.bin);
         rel_metadata.addFileInput(config_h);
         rel_metadata.addArg("--profile");
-        rel_metadata.addArg("release-shared");
+        rel_metadata.addArg(sname);
         rel_metadata.step.dependOn(cp_step);
         rel_metadata.stdio = .inherit;
-        const rel_metadata_top = b.step("check-metadata", "Assert release-shared artifact metadata: minos, 8MiB stacks (direct otool), headers, exports (not part of the default build)");
+        const rel_metadata_top = b.step("check-metadata", b.fmt("Assert {s} artifact metadata: minos, 8MiB stacks (direct otool), headers, exports (not part of the default build)", .{sname}));
         rel_metadata_top.dependOn(&rel_metadata.step);
 
-        const rel_check_top = b.step("check", "Full legacy-equivalent verification for release-shared: smoke gate (hello.js + version/flag/snippet), shared native embedding, metadata (not part of the default build)");
+        const rel_check_top = b.step("check", b.fmt("Verification for {s}: smoke gate, shared native embedding, metadata{s} (not part of the default build)", .{
+            sname,
+            if (profile == .release_jit) ", JIT symbols/smoke, JIT bytecode" else "",
+        }));
         rel_check_top.dependOn(&rel_smoke.step);
         rel_check_top.dependOn(&rel_native.step);
         rel_check_top.dependOn(&rel_metadata.step);
         rel_check_top.dependOn(selftest_top);
 
-        // No regression/bytecode legs: the legacy Release check has
-        // neither (test/CMakeLists.txt:23-45), so neither does this
-        // profile - loud failures, not silent skips.
-        const no_regression = b.addSystemCommand(&.{python});
-        no_regression.addArg("-c");
-        no_regression.addArg("import sys; sys.exit('-Dprofile=release-shared: no regression leg - the legacy Release check is a smoke gate only (test/CMakeLists.txt:23-45), not the full suite')");
-        no_regression.stdio = .inherit;
-        const no_regression_top = b.step("check-regression", "Not applicable: legacy Release check has no regression leg (smoke gate only)");
-        no_regression_top.dependOn(&no_regression.step);
-        const no_verify_bc = b.addSystemCommand(&.{python});
-        no_verify_bc.addArg("-c");
-        no_verify_bc.addArg("import sys; sys.exit('-Dprofile=release-shared: no bytecode leg - the legacy Release check has no bytecode-check (test/CMakeLists.txt:23-45)')");
-        no_verify_bc.stdio = .inherit;
-        const no_verify_bc_top = b.step("verify-bytecode", "Not applicable: legacy Release check has no bytecode leg");
-        no_verify_bc_top.dependOn(&no_verify_bc.step);
-        registerPackageSteps(b, python, true, rel_prefix_str, cp_step, nodeapi_step_opt);
+        if (profile == .release_jit) {
+            const rel_jit = b.addSystemCommand(&.{python});
+            rel_jit.addFileArg(b.path("tools/build/check_jit.py"));
+            rel_jit.addArg(rel_ch_str);
+            rel_jit.addFileInput(ch.bin);
+            rel_jit.step.dependOn(cp_step);
+            rel_jit.stdio = .inherit;
+            const rel_jit_top = b.step("check-jit", "Verify Release+JIT backend symbols and non-flaglist hot-call JIT execution (not part of the default build)");
+            rel_jit_top.dependOn(&rel_jit.step);
+            rel_check_top.dependOn(&rel_jit.step);
+
+            const rel_verify_bc = b.addSystemCommand(&.{python});
+            rel_verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
+            rel_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
+            rel_verify_bc.addArg("--jit");
+            rel_verify_bc.addArg("--verify");
+            rel_verify_bc.addArg(b.fmt("--binary={s}", .{rel_ch_str}));
+            rel_verify_bc.addFileInput(ch.bin);
+            rel_verify_bc.step.dependOn(cp_step);
+            rel_verify_bc.stdio = .inherit;
+            const rel_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the release-jit ch (pure scratch-tree check; not part of the default build)");
+            rel_verify_bc_top.dependOn(&rel_verify_bc.step);
+            rel_check_top.dependOn(&rel_verify_bc.step);
+        } else {
+            registerFailStep(
+                b,
+                python,
+                "verify-bytecode",
+                "Not applicable: legacy Release check has no bytecode leg",
+                "-Dprofile=release-shared: no bytecode leg - the legacy Release check has no bytecode-check (test/CMakeLists.txt:23-45)",
+            );
+        }
+
+        registerFailStep(
+            b,
+            python,
+            "check-regression",
+            b.fmt("Not applicable for {s}: check_regression.py targets disable_jit test/debug pins", .{sname}),
+            b.fmt("-Dprofile={s}: no regression leg (Release builds omit debug config flaglist)", .{sname}),
+        );
+        registerPackageSteps(b, python, true, rel_prefix_str, sname, cp_step, prov_step_opt, nodeapi_step_opt);
         return;
     }
 
@@ -1881,7 +2100,7 @@ pub fn build(b: *std.Build) void {
         dbg_metadata.addFileInput(ch.bin);
         dbg_metadata.addFileInput(config_h);
         dbg_metadata.addArg("--profile");
-        dbg_metadata.addArg("debug-static");
+        dbg_metadata.addArg(sname);
         dbg_metadata.step.dependOn(cp_step);
         dbg_metadata.stdio = .inherit;
         const dbg_metadata_top = b.step("check-metadata", "Assert debug-static artifact metadata: minos, stacksize 0, headers, no dylib, archive, self-containment (not part of the default build)");
@@ -1894,17 +2113,19 @@ pub fn build(b: *std.Build) void {
         dbg_check_top.dependOn(&dbg_smoke.step);
         dbg_check_top.dependOn(&dbg_metadata.step);
         dbg_check_top.dependOn(selftest_top);
-        registerPackageSteps(b, python, false, "", cp_step, null);
+        registerPackageSteps(b, python, false, "", sname, cp_step, null, null);
         return;
     }
 
-    // Worktree ARM64 macOS JIT. The interpreter contract stays on the
-    // default test profile. This check is a smoke of out/jit/bin/ch;
-    // the regression suite is not a gate of this profile.
-    if (profile == .jit) {
+    // ARM64 macOS JIT profiles with debug/test flaglist (jit and jit-debug).
+    if (profile.isJit() and profile.hasDebugFlags()) {
         const cp_step = &copy_out.?.step;
         const sname = side_name.?;
+        const jit_prefix_str = b.fmt("out/{s}", .{sname});
         const jit_ch_str = b.fmt("out/{s}/bin/ch", .{sname});
+        const jit_cc = b.findProgram(.{ .names = &.{"clang"} }) orelse "clang";
+        const jit_cxx = b.findProgram(.{ .names = &.{"clang++"} }) orelse "clang++";
+
         const jit_smoke = b.addSystemCommand(&.{python});
         jit_smoke.addFileArg(b.path("tools/build/check_smoke.py"));
         jit_smoke.addArg(jit_ch_str);
@@ -1913,24 +2134,21 @@ pub fn build(b: *std.Build) void {
         jit_smoke.addArg("test");
         jit_smoke.step.dependOn(cp_step);
         jit_smoke.stdio = .inherit;
-        const jit_smoke_top = b.step("check-smoke", "Assert jit ch version/flag/snippet output (not part of the default build)");
+        const jit_smoke_top = b.step("check-smoke", b.fmt("Assert {s} ch version/flag/snippet output (not part of the default build)", .{sname}));
         jit_smoke_top.dependOn(&jit_smoke.step);
 
-        // JIT-specific runtime smoke: require the native backend symbol and
-        // execute a hot call/rest/apply script under both -mic and
-        // -forceNative. check_smoke.py alone is interpreter-only.
+        // JIT-specific runtime smoke: require the native backend symbol,
+        // backend trace execution, and hot call/rest/apply under -mic/-forceNative.
         const jit_runtime = b.addSystemCommand(&.{python});
         jit_runtime.addFileArg(b.path("tools/build/check_jit.py"));
         jit_runtime.addArg(jit_ch_str);
         jit_runtime.addFileInput(ch.bin);
         jit_runtime.step.dependOn(cp_step);
         jit_runtime.stdio = .inherit;
-        const jit_runtime_top = b.step("check-jit", "Require the ARM64 JIT backend symbol and run a JIT hot-call/rest/apply smoke (not part of the default build)");
+        const jit_runtime_top = b.step("check-jit", "Require the ARM64 JIT backend symbol, trace compilation, and hot-call/rest/apply smoke (not part of the default build)");
         jit_runtime_top.dependOn(&jit_runtime.step);
 
-        // The JIT profile consumes the checked-in JIT builtin bytecode
-        // headers. Verify them with the just-installed ch; the no-JIT
-        // headers are a separate check on the default profile.
+        // The JIT profiles consume the checked-in JIT builtin bytecode headers.
         const jit_verify_bc = b.addSystemCommand(&.{python});
         jit_verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
         jit_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
@@ -1940,15 +2158,52 @@ pub fn build(b: *std.Build) void {
         jit_verify_bc.addFileInput(ch.bin);
         jit_verify_bc.step.dependOn(cp_step);
         jit_verify_bc.stdio = .inherit;
-        const jit_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the just-built jit ch (pure scratch-tree check; not part of the default build)");
+        const jit_verify_bc_top = b.step("verify-bytecode", b.fmt("Verify checked-in JIT built-in bytecode with the just-built {s} ch (pure scratch-tree check; not part of the default build)", .{sname}));
         jit_verify_bc_top.dependOn(&jit_verify_bc.step);
 
-        const jit_check_top = b.step("check", "Full ARM64 macOS JIT smoke: generic smoke, native backend symbol, JIT hot-call/rest/apply, and JIT bytecode verification");
+        const jit_native = b.addSystemCommand(&.{python});
+        jit_native.addFileArg(b.path("tools/build/check_native.py"));
+        jit_native.addFileArg(b.path("test/native-tests/test_native.sh"));
+        jit_native.addArg(jit_ch_str);
+        jit_native.addFileInput(ch.bin);
+        jit_native.addArg(jit_cc);
+        jit_native.addArg(jit_cxx);
+        jit_native.step.dependOn(cp_step);
+        jit_native.stdio = .inherit;
+        const jit_native_top = b.step("check-native", b.fmt("Run the shared embedding tests against {s} artifacts (not part of the default build)", .{sname}));
+        jit_native_top.dependOn(&jit_native.step);
+
+        const jit_metadata = b.addSystemCommand(&.{python});
+        jit_metadata.addFileArg(b.path("tools/build/check_metadata.py"));
+        jit_metadata.addArg(jit_prefix_str);
+        jit_metadata.addFileInput(ch.bin);
+        jit_metadata.addFileInput(config_h);
+        jit_metadata.addArg("--profile");
+        jit_metadata.addArg(sname);
+        jit_metadata.step.dependOn(cp_step);
+        jit_metadata.stdio = .inherit;
+        const jit_metadata_top = b.step("check-metadata", b.fmt("Assert {s} artifact metadata: minos, 8MiB stacks, headers, exports (not part of the default build)", .{sname}));
+        jit_metadata_top.dependOn(&jit_metadata.step);
+
+        registerFailStep(
+            b,
+            python,
+            "check-regression",
+            "Not applicable on JIT profiles: check_regression.py targets disable_jit pins; use check-fulljit",
+            b.fmt("-Dprofile={s}: check_regression.py pins --variants=disable_jit only; use zig build -Dprofile={s} check-fulljit", .{ sname, sname }),
+        );
+
+        const jit_check_top = b.step("check", "Full ARM64 macOS JIT verification: smoke, JIT trace/runtime, JIT bytecode, native embedding, metadata, FullJIT, and Wasm/Wasm-JIT (when -Dwasm=true)");
         jit_check_top.dependOn(&jit_smoke.step);
         jit_check_top.dependOn(&jit_runtime.step);
         jit_check_top.dependOn(&jit_verify_bc.step);
+        jit_check_top.dependOn(&jit_native.step);
+        jit_check_top.dependOn(&jit_metadata.step);
+        if (jit_fulljit_step) |fjs| jit_check_top.dependOn(fjs);
         if (jit_wasm_step) |ws| jit_check_top.dependOn(ws);
-        registerPackageSteps(b, python, true, jit_ch_str[0 .. jit_ch_str.len - "/bin/ch".len], cp_step, nodeapi_step_opt);
+        if (jit_wasm_jit_step) |wjs| jit_check_top.dependOn(wjs);
+        jit_check_top.dependOn(selftest_top);
+        registerPackageSteps(b, python, true, jit_prefix_str, sname, cp_step, prov_step_opt, nodeapi_step_opt);
         return;
     }
 
@@ -2054,6 +2309,8 @@ pub fn build(b: *std.Build) void {
         metadata.addArg(b.fmt("out/{s}", .{sname}));
         metadata.addFileInput(ch.bin);
         metadata.addFileInput(config_h);
+        metadata.addArg("--profile");
+        metadata.addArg(sname);
     } else {
         metadata.addDirectoryArg(.{ .relative = .{ .base = .install_prefix } });
     }
@@ -2071,5 +2328,6 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(selftest_top);
 
     const test_prefix_str = if (side_name) |sname| b.fmt("out/{s}", .{sname}) else "zig-out";
-    registerPackageSteps(b, python, true, test_prefix_str, default_install_step, nodeapi_step_opt);
+    const test_pkg_profile = side_name orelse "test";
+    registerPackageSteps(b, python, true, test_prefix_str, test_pkg_profile, default_install_step, prov_step_opt, nodeapi_step_opt);
 }

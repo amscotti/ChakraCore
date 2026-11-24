@@ -221,10 +221,23 @@ jobs:
           if [ '${{ matrix.profile }}' != 'test' ]; then args="-Dprofile=${{ matrix.profile }}"; fi
           # shellcheck disable=SC2086
           mise exec -- zig build check-selftest $args 2>&1 | tee ci-evidence/selftest.log
+      - name: zig build check-gcstress
+        run: |
+          set -euo pipefail
+          args=""
+          if [ '${{ matrix.profile }}' != 'test' ]; then args="-Dprofile=${{ matrix.profile }}"; fi
+          # shellcheck disable=SC2086
+          mise exec -- zig build $args check-gcstress 2>&1 | tee ci-evidence/gcstress.log
+      - name: zig build -Dprofile=release-shared check-package
+        if: matrix.profile == 'release-shared'
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=release-shared check-package 2>&1 | tee ci-evidence/package.log
       - name: Tally gate outputs
         id: tally
         run: |
           set -euo pipefail
+          grep -F 'check_gcstress: PASS' ci-evidence/gcstress.log
           case '${{ matrix.profile }}' in
             test)
               grep -E 'Bytecode is up to date' ci-evidence/check.log
@@ -232,12 +245,12 @@ jobs:
               # Regression pin single-sourced from tools/build/gate_counts.json:
               # the python one-liner both asserts the Total line and builds
               # the tally from the same pins (no literal counts here).
-              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['test']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('test: regression=%d/%d bytecode=up-to-date native=shared-PASS' % (c['passed'], c['failed']))")"
+              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['test']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('test: regression=%d/%d bytecode=up-to-date native=shared-PASS gcstress=PASS' % (c['passed'], c['failed']))")"
               ;;
             debug-static)
               grep -E 'Bytecode is up to date' ci-evidence/check.log
               test "$(grep -cE 'test-static-.* : PASS' ci-evidence/check.log)" = '8'
-              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['debug']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('debug-static: regression=%d/%d bytecode=up-to-date native=8x-static-PASS' % (c['passed'], c['failed']))")"
+              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['debug']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('debug-static: regression=%d/%d bytecode=up-to-date native=8x-static-PASS gcstress=PASS' % (c['passed'], c['failed']))")"
               ;;
             release-shared)
               # The hello leg is logged as a one-line repr, not raw
@@ -245,7 +258,8 @@ jobs:
               grep -F "check_smoke: hello -> rc=0 out='hello world\\nPASS" ci-evidence/check.log
               grep -F 'check_smoke: PASS: version + silent invalid-flag + snippet + hello.js outputs match' ci-evidence/check.log
               grep -E 'test-shared-basic : PASS' ci-evidence/check.log
-              line="release-shared: hello=PASS native=shared-PASS"
+              grep -F 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' ci-evidence/package.log
+              line="release-shared: hello=PASS native=shared-PASS gcstress=PASS package=PASS"
               ;;
           esac
           # Expected count derived from the check-selftest script list in
@@ -264,7 +278,7 @@ jobs:
           path: ci-evidence/
 
   jit-wasm:
-    name: zig jit + wasm (build + jit check + wasm P1)
+    name: zig jit + wasm (build + fulljit + wasm + wasm-jit + gcstress)
     runs-on: macos-26
     timeout-minutes: 90
     outputs:
@@ -285,6 +299,7 @@ jobs:
           mise exec -- zig version > ci-evidence/zig-version.txt
           mise exec -- zig env > ci-evidence/zig-env.txt
           python3 tools/build/check_wasm_p1.py --self-test 2>&1 | tee ci-evidence/wasm-selftest.log
+          python3 tools/build/check_fulljit.py --self-test 2>&1 | tee ci-evidence/fulljit-selftest.log
       - name: zig build -Dprofile=jit -Dwasm=true
         run: |
           set -euo pipefail
@@ -293,18 +308,27 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/build/ci_record.py manifest --prefix out/jit --out ci-evidence --label jit-wasm
-      - name: zig build -Dprofile=jit -Dwasm=true check (smoke, jit, bytecode, check-wasm)
+      - name: zig build -Dprofile=jit -Dwasm=true check (smoke, jit, bytecode, native, metadata, fulljit, check-wasm, check-wasm-jit)
         run: |
           set -euo pipefail
           mise exec -- zig build -Dprofile=jit -Dwasm=true check 2>&1 | tee ci-evidence/check.log
+      - name: zig build -Dprofile=jit -Dwasm=true check-gcstress
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit -Dwasm=true check-gcstress 2>&1 | tee ci-evidence/gcstress.log
       - name: Tally gate outputs
         id: tally
         run: |
           set -euo pipefail
           grep -F 'check_smoke: PASS' ci-evidence/check.log
           grep -F 'check_jit: PASS' ci-evidence/check.log
-          grep -F 'check_wasm_p1: PASS' ci-evidence/check.log
-          line="jit-wasm: smoke=PASS jit=PASS bytecode=PASS check-wasm=PASS"
+          grep -F 'Bytecode is up to date' ci-evidence/check.log
+          grep -F 'test-shared-basic : PASS' ci-evidence/check.log
+          grep -F 'check_metadata: PASS' ci-evidence/check.log
+          grep -F 'check_fulljit: PASS' ci-evidence/check.log
+          test "$(grep -cF 'check_wasm_p1: PASS' ci-evidence/check.log)" = '2'
+          grep -F 'check_gcstress: PASS' ci-evidence/gcstress.log
+          line="jit-wasm: smoke=PASS jit=PASS bytecode=PASS native=PASS metadata=PASS fulljit=PASS wasm=PASS wasm-jit=PASS gcstress=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
@@ -313,6 +337,112 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: jit-wasm
+          path: ci-evidence/
+
+  jit-debug:
+    name: zig jit-debug + wasm (assert JIT + fulljit + wasm-jit)
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - *xcode
+      - *icu
+      - name: Record inputs
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py inputs --profile jit-debug --out ci-evidence
+      - name: zig build -Dprofile=jit-debug -Dwasm=true
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit-debug -Dwasm=true 2>&1 | tee ci-evidence/build.log
+      - name: Record artifact manifest
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py manifest --prefix out/jit-debug --out ci-evidence --label jit-debug
+      - name: zig build -Dprofile=jit-debug -Dwasm=true check-smoke check-jit check-metadata check-fulljit check-wasm-jit
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit-debug -Dwasm=true check-smoke check-jit check-metadata check-fulljit check-wasm-jit 2>&1 | tee ci-evidence/check.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -F 'check_smoke: PASS' ci-evidence/check.log
+          grep -F 'check_jit: PASS' ci-evidence/check.log
+          grep -F 'check_metadata: PASS' ci-evidence/check.log
+          grep -F 'check_fulljit: PASS' ci-evidence/check.log
+          grep -F 'check_wasm_p1: PASS' ci-evidence/check.log
+          line="jit-debug: smoke=PASS jit=PASS metadata=PASS fulljit=PASS wasm-jit=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload jit-debug evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: jit-debug
+          path: ci-evidence/
+
+  sanitize:
+    name: zig sanitize ${{ matrix.mode }} (jit + wasm + metadata)
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [address, undefined]
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - *xcode
+      - *icu
+      - name: Record inputs
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          mise exec -- zig version > ci-evidence/zig-version.txt
+          mise exec -- zig env > ci-evidence/zig-env.txt
+          python3 tools/build/check_sanitize.py --self-test 2>&1 | tee ci-evidence/sanitize-selftest.log
+      - name: zig build -Dprofile=jit -Dwasm=true -Dsanitize=${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit -Dwasm=true -Dsanitize=${{ matrix.mode }} 2>&1 | tee ci-evidence/build.log
+      - name: Record artifact manifest
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py manifest --prefix out/jit-sanitize-${{ matrix.mode }} --out ci-evidence --label jit-sanitize-${{ matrix.mode }}
+      - name: zig build -Dprofile=jit -Dwasm=true -Dsanitize=${{ matrix.mode }} check-sanitize check-metadata
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit -Dwasm=true -Dsanitize=${{ matrix.mode }} check-sanitize check-metadata 2>&1 | tee ci-evidence/sanitize.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -E "check_sanitize: PASS \([0-9]+/[0-9]+ legs clean under -Dsanitize=${{ matrix.mode }}\)" ci-evidence/sanitize.log
+          grep -F 'check_metadata: PASS' ci-evidence/sanitize.log
+          line="sanitize-${{ matrix.mode }}: check-sanitize=PASS metadata=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload sanitize-${{ matrix.mode }} evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sanitize-${{ matrix.mode }}
           path: ci-evidence/
 
   b1-contract:
@@ -507,7 +637,7 @@ jobs:
     # macos-26 for runner uniformity with the legs (validated); ubuntu-latest is a future cost option -- this job is download+bash only.
     runs-on: macos-26
     timeout-minutes: 15
-    needs: [style, zig, jit-wasm, b1-contract, incremental, nodeapi]
+    needs: [style, zig, jit-wasm, jit-debug, sanitize, b1-contract, incremental, nodeapi]
     if: ${{ !cancelled() }}
     steps:
       - name: Download all leg evidence
