@@ -128,7 +128,7 @@ namespace Js
 
         bool StringEquals(JavascriptString* str, const char16* literal)
         {
-            return PAL_wcscmp(str->GetSz(), literal) == 0;
+            return wcscmp(str->GetSz(), literal) == 0;
         }
 
         // ICU locale ids ("en_US") from a canonical BCP 47 tag ("en-US").

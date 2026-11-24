@@ -135,17 +135,20 @@ in `Windows/UnicodeText.cpp` the template definition lives inside an
 — which fails when `HAS_ICU=1` (no visible definition). They were moved
 inside that guard, just before `#endif // HAS_ICU`.
 
-### 11. 5 Intl files — `PAL_wcslen` does not exist on Windows
+### 11. 5 Intl files — `PAL_wcslen` / `PAL_wcscmp` do not exist on Windows
 
 **Error:** `use of undeclared identifier 'PAL_wcslen'` in `IntlModernShared.cpp`
 (11 sites), `IntlDisplayNames.cpp`, `IntlDurationFormat.cpp`,
-`IntlEngineInterfaceExtensionObject.cpp`, `IntlSegmenter.cpp`.
-**Root cause:** `PAL_wcslen` lives in `pal/inc/pal.h`, which `CommonPal.h`
-includes only in the non-Windows (`#else`) branch. These files were added in
-the modernize branch and verified only on the PAL path.
-**Fix:** `PAL_wcslen` → `wcslen`. Valid on both platforms: `pal.h` defines
-`wcslen` *as* `PAL_wcslen`, and on Windows `wcslen` is the CRT function
-(`Common.h` includes `<wchar.h>` when `USING_PAL_STDLIB` is off).
+`IntlEngineInterfaceExtensionObject.cpp`, `IntlSegmenter.cpp`; same for
+`PAL_wcscmp` in `IntlDurationFormat.cpp`, `IntlListFormat.cpp`,
+`IntlModernShared.cpp`, `IntlRelativeTimeFormat.cpp`.
+**Root cause:** `PAL_wcslen`/`PAL_wcscmp` live in `pal/inc/pal.h`, which
+`CommonPal.h` includes only in the non-Windows (`#else`) branch. These files
+were added in the modernize branch and verified only on the PAL path.
+**Fix:** `PAL_wcslen` → `wcslen`, `PAL_wcscmp` → `wcscmp`. Valid on both
+platforms: `pal.h` defines `wcslen`/`wcscmp` *as* `PAL_wcslen`/`PAL_wcscmp`,
+and on Windows they are the CRT functions (`Common.h` includes `<wchar.h>`
+when `USING_PAL_STDLIB` is off).
 
 ### 12. `tools/build/windows.zig` — `-DNOMINMAX`
 

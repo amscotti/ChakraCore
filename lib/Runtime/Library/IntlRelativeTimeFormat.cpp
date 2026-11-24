@@ -101,7 +101,7 @@ namespace Js
 
         bool StringEquals(JavascriptString* str, const char16* literal)
         {
-            return PAL_wcscmp(str->GetSz(), literal) == 0;
+            return wcscmp(str->GetSz(), literal) == 0;
         }
 
         // Extracts the (single-subtag) value of the "nu" keyword of the unicode extension of a
@@ -256,7 +256,7 @@ namespace Js
             const char16* sz = unit->GetSz();
             for (size_t i = 0; i < _countof(units); ++i)
             {
-                if (PAL_wcscmp(sz, units[i].singular) == 0 || PAL_wcscmp(sz, units[i].plural) == 0)
+                if (wcscmp(sz, units[i].singular) == 0 || wcscmp(sz, units[i].plural) == 0)
                 {
                     *outUnit = units[i].icu;
                     *outName = units[i].name;

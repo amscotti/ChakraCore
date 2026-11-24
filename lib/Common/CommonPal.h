@@ -98,6 +98,13 @@
 #undef Yield /* winbase.h defines this but we want to use it for Js::OpCode::Yield; it is Win16 legacy, no harm undef'ing it */
 #pragma warning(pop)
 
+// UCRT stdlib.h declares rand_s only when _CRT_RAND_S is defined before
+// stdlib.h is first included (Backend.h includes <wchar.h> before
+// CommonBasic.h's #define _CRT_RAND_S, so the gate can be missed).
+// Declare it explicitly here; a same-signature redeclaration from the CRT
+// is legal, and on x64 __cdecl is the default calling convention.
+errno_t rand_s(unsigned int* randomValue);
+
 // xplat-todo: get a better name for this macro
 #define _u(s) L##s
 #define INIT_PRIORITY(x)

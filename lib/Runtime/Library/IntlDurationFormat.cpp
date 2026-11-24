@@ -232,7 +232,7 @@ namespace Js
 
         bool StringEquals(JavascriptString* str, const char16* literal)
         {
-            return PAL_wcscmp(str->GetSz(), literal) == 0;
+            return wcscmp(str->GetSz(), literal) == 0;
         }
 
         DurationStyle ParseDurationStyle(JavascriptString* str)

@@ -2556,7 +2556,7 @@ namespace Js
             {
                 if (relevantExtensionKeys != nullptr &&
                     relevantExtensionKeys[i] != nullptr &&
-                    PAL_wcscmp(relevantExtensionKeys[i], _u("nu")) == 0)
+                    wcscmp(relevantExtensionKeys[i], _u("nu")) == 0)
                 {
                     wantNu = true;
                     break;
