@@ -616,6 +616,12 @@ fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lan
     const run = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
     run.addArg("-target");
     run.addArg(profile_target);
+    // Zig's bundled clang emits /DEFAULTLIB:libc++.lib into every C++ object
+    // unless told not to link its bundled libc++ at driver level. Without
+    // this, every object demands libc++.lib at link time (which does not
+    // exist for the windows-msvc target) even though all objects target the
+    // MSVC CRT ABI (-fms-runtime-lib=static). See doc/b6-windows-fixes.md #15.
+    if (lang == .cxx) run.addArg("-nostdlib++");
 
     for (buildCompileDefines(arena, ctx.profile, ctx.jit, ctx.icu, !isReleaseProfile(ctx.profile), g.target_define)) |d| {
         run.addArg(d);

@@ -204,6 +204,26 @@ compiles). Probes confirmed this both skips the libcxxabi build AND makes
 Documents the same failure mode for the earlier bare probe (libcxxabi +
 vcruntime conflict reproduced with plain `zig c++ -target x86_64-windows-msvc`).
 
+### 15. `tools/build/windows.zig` — `-nostdlib++` on the TU compile path too
+
+**Error:** with fix 14, links progressed past libcxxabi but then failed with
+`lld-link: error: could not open 'libc++.lib': No such file or directory`.
+**Root cause:** every already-cached `.obj` carries a baked-in
+`/DEFAULTLIB:libc++.lib` directive (confirmed with `dumpbin /DIRECTIVES`).
+Fix 14 covered only the *link* invocations — the main TU compile path
+(`addCompileCommand`, line 616, using `ctx.zig_exe`) still compiled without
+`-nostdlib++`, and Zig's clang emits the directive for C++ objects unless told
+not to link its bundled libc++. The objects reference zero libc++ symbols
+(MSVC-mangled only; verified with `dumpbin /SYMBOLS`), so the directive is
+purely vestigial — but lld-link hard-errors on a missing default lib.
+**Why missed:** fix 14's grep covered only `b.graph.zig_exe` invocations, not
+the `ctx.zig_exe` compile path.
+**Fix:** add `-nostdlib++` for `.cxx` in `addCompileCommand` (same patch style
+as fix 14), wipe `.zig-cache` (all cached objects are poisoned), rebuild.
+A stub-lib workaround (empty `libc++.lib` via `-L`) was verified to link but
+is rejected: it would mask genuine libc++ references if any future TU ever
+actually needed them, silently, instead of failing loudly.
+
 
 ## Retained / verified non-changes
 
