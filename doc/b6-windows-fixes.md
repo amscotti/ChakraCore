@@ -158,6 +158,24 @@ when `USING_PAL_STDLIB` is off).
 **Fix:** `-DNOMINMAX` in `engine_base_defines` (mirrors the legacy
 Chakra.Build.Clang.props define).
 
+### 12b. `lib/Common/CommonPal.h` — `rand_s` undeclared on Windows
+
+**Error:** `lib/Backend/Encoder.cpp:92: error: use of undeclared identifier
+'rand_s'`.
+**Root cause:** UCRT `stdlib.h` declares `rand_s` only when `_CRT_RAND_S` (or
+`_CRTBLD`) is defined before `stdlib.h` is first included (SDK stdlib.h:354).
+`CommonBasic.h:9` defines `_CRT_RAND_S`, but only *after* `Backend.h` has
+already included `<wchar.h>` — and with zig clang, libc++'s wrapper headers
+shift `stdlib.h` inclusion ordering vs MSVC, so the gate can be missed.
+The legacy MSVC build got away with it because include ordering there happened
+to reach `CommonBasic.h` first; nothing guarantees the order on first-run
+clang builds.
+**Fix:** declare `errno_t rand_s(unsigned int*);` explicitly in the `_WIN32`
+branch of `CommonPal.h` (after `windows.h`). This mirrors the identical
+declaration already present in the non-Windows branch (CommonPal.h:454).
+A same-signature redeclaration from the CRT is legal C++, and on x86_64
+`__cdecl` is the default calling convention, so there is no MSVC conflict.
+
 ### 13. `tools/build/tables_windows.zig` — `-Wno-unused-command-line-argument`
 
 **Error:** `clang: warning: '-nostdinc++': unused argument; treating as
