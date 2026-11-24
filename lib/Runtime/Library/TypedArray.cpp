@@ -68,6 +68,31 @@ namespace Js
         {
             return JavascriptNumber::ToVarWithCheck(Float16::ToDouble(buffer[index]), scriptContext);
         }
+
+        // RAII guard for SortHelper's copy buffer and mergesort scratch arena.
+        // Releases the temporary allocator back to ScriptContext on normal
+        // return as well as comparator or detach exceptions.
+        struct SortScratch
+        {
+            ScriptContext* scriptContext;
+            TempArenaAllocatorObject* temp;
+            ArenaAllocator* alloc;
+            SortScratch(ScriptContext* sc, const char16* tag)
+                : scriptContext(sc)
+                , temp(sc->GetTemporaryAllocator(tag))
+                , alloc(temp->GetAllocator())
+            {
+            }
+            ~SortScratch()
+            {
+                if (temp != nullptr)
+                {
+                    scriptContext->ReleaseTemporaryAllocator(temp);
+                }
+            }
+            SortScratch(const SortScratch&) = delete;
+            SortScratch& operator=(const SortScratch&) = delete;
+        };
     }
 
     // explicitly instantiate these function for the built in entry point FunctionInfo
@@ -2597,41 +2622,43 @@ namespace Js
             return typedArrayBase;
         }
 
-        BEGIN_TEMP_ALLOCATOR(tempAlloc, scriptContext, _u("Runtime"))
+        SortScratch scratch(scriptContext, _u("Runtime"));
+        byte* buffer = typedArrayBase->GetByteBuffer();
+
+        // Spec mandates copy before sort
+        // But it is only detectable if a compare function was provided
+        if (compareFn != nullptr)
         {
-            byte* buffer = typedArrayBase->GetByteBuffer();
-            
-            // Spec mandates copy before sort
-            // But it is only detectable if a compare function was provided
-            if (compareFn != nullptr)
+            uint32 elementSize = typedArrayBase->GetBytesPerElement();
+            uint32 byteLength = 0;
+            if (UInt32Math::Mul(length, elementSize, &byteLength))
             {
-                uint32 elementSize = typedArrayBase->GetBytesPerElement();
-                uint32 byteLength = elementSize * length;
-                byte* list = AnewArray(tempAlloc, byte, byteLength);
-                memcpy(list, buffer, byteLength);
-                // Sort the copied data
-                typedArrayBase->SortHelper(list, length, compareFn, scriptContext, tempAlloc);
-
-                // A comparison callback may have detached the buffer (throw)
-                // or shrunk it. Write only the indices that are still valid;
-                // an OOB fixed view leaves its retained bytes unchanged.
-                if (typedArrayBase->IsDetachedBuffer())
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.sort"));
-                }
-
-                uint32 currentLength = typedArrayBase->GetLength();
-                if (currentLength > 0)
-                {
-                    uint32 copyLength = min(length, currentLength);
-                    memcpy(buffer, list, copyLength * elementSize);
-                }
+                Js::Throw::FatalInternalError();
             }
-            else
+            byte* list = AnewArray(scratch.alloc, byte, byteLength);
+            memcpy(list, buffer, byteLength);
+            // Sort the copied data
+            typedArrayBase->SortHelper(list, length, compareFn, scriptContext, scratch.alloc);
+
+            // A comparison callback may have detached the buffer (throw)
+            // or shrunk it. Write only the indices that are still valid;
+            // an OOB fixed view leaves its retained bytes unchanged.
+            if (typedArrayBase->IsDetachedBuffer())
             {
-                // perform an in-place sort when no comparison method is provided
-                typedArrayBase->SortHelper(buffer, length, nullptr, scriptContext, tempAlloc);
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.sort"));
             }
+
+            uint32 currentLength = typedArrayBase->GetLength();
+            if (currentLength > 0)
+            {
+                uint32 copyLength = min(length, currentLength);
+                memcpy(buffer, list, copyLength * elementSize);
+            }
+        }
+        else
+        {
+            // perform an in-place sort when no comparison method is provided
+            typedArrayBase->SortHelper(buffer, length, nullptr, scriptContext, scratch.alloc);
         }
 
         return typedArrayBase;
@@ -2794,27 +2821,9 @@ namespace Js
 
         if (length >= 2)
         {
-            // SortHelper's mergesort allocates on this arena. Release it if comparefn throws.
-            // EntrySort's BEGIN_TEMP_ALLOCATOR has no END; this guard releases both ways.
-            struct SortScratch
-            {
-                ScriptContext* scriptContext;
-                TempArenaAllocatorObject* temp;
-                ArenaAllocator* alloc;
-                SortScratch(ScriptContext* sc)
-                    : scriptContext(sc)
-                    , temp(sc->GetTemporaryAllocator(_u("toSorted")))
-                    , alloc(temp->GetAllocator())
-                {
-                }
-                ~SortScratch()
-                {
-                    scriptContext->ReleaseTemporaryAllocator(temp);
-                }
-                SortScratch(const SortScratch&) = delete;
-                SortScratch& operator=(const SortScratch&) = delete;
-            };
-            SortScratch scratch(scriptContext);
+            // SortHelper's mergesort allocates on this arena; SortScratch releases
+            // it back to ScriptContext on both normal return and throw.
+            SortScratch scratch(scriptContext, _u("toSorted"));
             result->SortHelper(result->GetByteBuffer(), length, compareFn, scriptContext, scratch.alloc);
         }
         return result;
