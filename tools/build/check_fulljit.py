@@ -22,13 +22,15 @@ Driving `ch` directly from `rlexe.xml` exercises the genuine no-profile
 FullJit execution path cleanly.
 
 Usage: check_fulljit.py <runtests_or_test_root> <ch>
-       [--suites S1 S2 ...] [--select test|debug] [--jobs N]
-       [--timeout SECS] [--self-test]
-Exit code: 0 iff NativeCodeGenerator + flaglist are present, >0 tests
-run, and every executed test passes.
+       [--suites S1 S2 ...] [--select test|debug] [--expected-total N]
+       [--jobs N] [--timeout SECS] [--self-test]
+Exit code: 0 iff NativeCodeGenerator + flaglist + BackEnd trace are present,
+>0 tests run, every executed test passes, and passed matches expected_total
+(single-sourced from tools/build/gate_counts.json for default suites).
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import os
 import platform
 import re
@@ -54,8 +56,69 @@ FULLJIT_FLAGS = (
     "-bgJitDelay:0",
 )
 DEFAULT_TIMEOUT = 180.0
+GATE_COUNTS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "gate_counts.json"
+)
 
 _CRLF_RE = re.compile(b"[\r]+\n")
+
+
+def _validate_pin_entry(entry, path, label):
+    if (not isinstance(entry, dict)
+            or not isinstance(entry.get("passed"), int)
+            or not isinstance(entry.get("failed"), int)
+            or isinstance(entry.get("passed"), bool)
+            or isinstance(entry.get("failed"), bool)
+            or entry["passed"] < 0 or entry["failed"] < 0):
+        print("check_fulljit: FAIL: gate counts %s missing/invalid %r pin: "
+              "need {\"passed\": int >= 0, \"failed\": int >= 0}"
+              % (path, label), file=sys.stderr)
+        raise SystemExit(2)
+    return entry["passed"], entry["failed"]
+
+
+def _load_fulljit_pins(path=GATE_COUNTS_PATH):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        print("check_fulljit: FAIL: cannot read gate counts %s: %s"
+              % (path, e), file=sys.stderr)
+        raise SystemExit(2)
+    except ValueError as e:
+        print("check_fulljit: FAIL: malformed gate counts %s: %s"
+              % (path, e), file=sys.stderr)
+        raise SystemExit(2)
+    if not isinstance(data, dict):
+        print("check_fulljit: FAIL: malformed gate counts %s: root must be an object"
+              % path, file=sys.stderr)
+        raise SystemExit(2)
+    pins = {"test": _validate_pin_entry(data.get("fulljit"), path, "fulljit")}
+    variants = data.get("fulljit_variants")
+    if not isinstance(variants, dict):
+        print("check_fulljit: FAIL: gate counts %s missing/invalid "
+              "'fulljit_variants' map" % path, file=sys.stderr)
+        raise SystemExit(2)
+    for key in ("debug", "win32_test", "win32_debug"):
+        pins[key] = _validate_pin_entry(
+            variants.get(key), path, "fulljit_variants." + key)
+    return pins
+
+
+FULLJIT_PINS = _load_fulljit_pins()
+
+
+def default_expected_counts(suites=DEFAULT_SUITES, select="test", plat=None,
+                            pins=FULLJIT_PINS):
+    """Return (expected_passed, expected_failed) for default suites, else (None, 0)."""
+    if tuple(suites) != DEFAULT_SUITES:
+        return None, 0
+    plat = sys.platform if plat is None else plat
+    if plat == "win32":
+        key = "win32_debug" if select == "debug" else "win32_test"
+    else:
+        key = "debug" if select == "debug" else "test"
+    return pins[key]
 
 
 def normalize_newlines(data):
@@ -221,16 +284,15 @@ def grade_test_output(rc, norm_output, baseline_bytes=None):
 
 
 def verify_jit_binary(ch):
-    """Ensure ch carries NativeCodeGenerator and supports the debug flaglist."""
+    """Ensure ch carries NativeCodeGenerator, flaglist, and BackEnd trace."""
     err = check_jit.check_symbols(ch)
     if err is not None:
         return err
     if not check_jit.flaglist_supported(ch):
         return "%s does not support the test/debug flaglist (Release build?)" % ch
-    if sys.platform == "win32" or check_jit.is_pe_target(ch):
-        err = check_jit.check_backend_trace(ch)
-        if err is not None:
-            return err
+    err = check_jit.check_backend_trace(ch)
+    if err is not None:
+        return err
     return None
 
 
@@ -286,43 +348,66 @@ def _run_one(abs_ch, entry, default_timeout, env):
 
 
 def run_suites(test_root, ch, suites=DEFAULT_SUITES, select="test",
-               jobs=None, timeout=DEFAULT_TIMEOUT, skip_binary_probe=False):
+               jobs=None, timeout=DEFAULT_TIMEOUT, skip_binary_probe=False,
+               expected_total=None, expected_failed=0):
     """Run no-profile FullJit across suites. Returns (rc, summary_dict)."""
     abs_ch = os.path.abspath(ch)
     abs_root = os.path.abspath(test_root)
+    if expected_total is None and tuple(suites) == DEFAULT_SUITES:
+        expected_total, expected_failed = default_expected_counts(
+            suites=suites, select=select)
+
     if not skip_binary_probe:
         probe_err = verify_jit_binary(abs_ch)
         if probe_err is not None:
             print("check_fulljit: FAIL: %s" % probe_err, file=sys.stderr)
-            return 1, {"passed": 0, "failed": 0, "error": probe_err}
+            return 1, {"passed": 0, "failed": 0, "selected": 0,
+                       "skipped_suites": [], "error": probe_err}
 
     arch, arch_alias, not_tags = resolve_platform_tags(select=select)
     folder_tags = load_folder_tags(abs_root)
 
     parallel_tests = []
     sequential_tests = []
+    per_suite_selected = {}
+    skipped_suites = []
     for suite in suites:
         suite_dir = os.path.join(abs_root, suite)
         if not os.path.isfile(os.path.join(suite_dir, "rlexe.xml")):
             msg = "missing suite rlexe.xml: %s" % suite_dir
             print("check_fulljit: FAIL: %s" % msg, file=sys.stderr)
-            return 2, {"passed": 0, "failed": 0, "error": msg}
+            return 2, {"passed": 0, "failed": 0, "selected": 0,
+                       "skipped_suites": [s for s, _ in skipped_suites],
+                       "error": msg}
         ftags = (folder_tags.get(suite.lower(), set())
                  if folder_tags is not None else set())
         if not ftags.isdisjoint(not_tags):
+            matched = sorted(ftags & not_tags)
+            skipped_suites.append((suite, matched))
+            per_suite_selected[suite] = 0
+            print("check_fulljit: SKIP suite %s (matched excluded tags: %s)"
+                  % (suite, ", ".join(matched)))
             continue
         entries = parse_rlexe_suite(suite_dir, arch, arch_alias)
         selected = [e for e in entries if should_run_test(e, not_tags)]
+        per_suite_selected[suite] = len(selected)
         if "sequential" in ftags:
             sequential_tests.extend(selected)
         else:
             parallel_tests.extend(selected)
 
+    skipped_names = [s for s, _ in skipped_suites]
     total_selected = len(parallel_tests) + len(sequential_tests)
+    sel_detail = ", ".join("%s=%d" % (s, per_suite_selected[s]) for s in suites)
+    exp_str = str(expected_total) if expected_total is not None else "unpinned"
+    print("check_fulljit: selection [select=%s arch=%s]: %s (total=%d, expected=%s)"
+          % (select, arch, sel_detail, total_selected, exp_str))
+
     if total_selected == 0:
         msg = "zero tests selected for suites=%r" % (list(suites),)
         print("check_fulljit: FAIL: %s" % msg, file=sys.stderr)
-        return 1, {"passed": 0, "failed": 0, "error": msg}
+        return 1, {"passed": 0, "failed": 0, "selected": 0,
+                   "skipped_suites": skipped_names, "error": msg}
 
     if jobs is None:
         jobs = min(os.cpu_count() or 4, 8)
@@ -360,10 +445,20 @@ def run_suites(test_root, ch, suites=DEFAULT_SUITES, select="test",
     failed = sum(v[1] for v in per_suite.values())
     for s in suites:
         sp, sf = per_suite[s]
-        print("  %s: passed %d, failed %d" % (s, sp, sf))
+        print("  %s: passed %d, failed %d (selected %d)"
+              % (s, sp, sf, per_suite_selected[s]))
     print("Total: passed %d, failed %d" % (passed, failed))
 
-    if failures:
+    summary = {
+        "passed": passed,
+        "failed": failed,
+        "selected": total_selected,
+        "skipped_suites": skipped_names,
+    }
+    if expected_total is not None:
+        summary["expected_total"] = expected_total
+
+    if failures or failed != expected_failed:
         print("check_fulljit: FAIL (%d failing test(s)):" % len(failures),
               file=sys.stderr)
         for name, reason, out_text in failures[:20]:
@@ -371,11 +466,26 @@ def run_suites(test_root, ch, suites=DEFAULT_SUITES, select="test",
             if out_text:
                 for ln in out_text.splitlines()[:8]:
                     print("    | " + ln, file=sys.stderr)
-        return 1, {"passed": passed, "failed": failed}
+        if expected_total is not None and passed != expected_total:
+            print("check_fulljit: FAIL: expected total %d, got passed=%d failed=%d"
+                  % (expected_total, passed, failed), file=sys.stderr)
+        return 1, summary
+
+    if expected_total is not None and (passed != expected_total or skipped_suites):
+        skip_note = (
+            " (skipped suites: %s)" % ", ".join(
+                "%s[%s]" % (s, ",".join(t)) for s, t in skipped_suites)
+            if skipped_suites else ""
+        )
+        msg = ("count/suite mismatch: passed %d / failed %d, require passed %d / failed %d%s"
+               % (passed, failed, expected_total, expected_failed, skip_note))
+        print("check_fulljit: FAIL: %s" % msg, file=sys.stderr)
+        summary["error"] = msg
+        return 1, summary
 
     print("check_fulljit: PASS (passed %d, failed %d, no dynamic profile)"
           % (passed, failed))
-    return 0, {"passed": passed, "failed": failed}
+    return 0, summary
 
 
 def self_test():
@@ -461,6 +571,40 @@ def self_test():
             bad += report("verify_jit_binary rejects PE32+ DISABLE_JIT",
                           verify_jit_binary(pe_ch) is not None)
 
+        # Non-PE (Mach-O / ELF) verify_jit_binary must also enforce BackEnd trace (B-8).
+        macho_ch = os.path.join(pe_tmp, "ch.macho")
+        with open(macho_ch, "wb") as f:
+            f.write(b"\xcf\xfa\xed\xfe" + b"\x00" * 60)
+
+        def fake_macho_jit(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            return fake_pe_jit(cmd)
+
+        def fake_macho_nojit(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            return fake_pe_nojit(cmd)
+
+        with mock.patch.object(common, "run_capture", side_effect=fake_macho_jit):
+            bad += report("verify_jit_binary accepts non-PE with BackEnd trace",
+                          verify_jit_binary(macho_ch) is None)
+        with mock.patch.object(common, "run_capture", side_effect=fake_macho_nojit):
+            bad += report("verify_jit_binary rejects non-PE without BackEnd trace",
+                          verify_jit_binary(macho_ch) is not None)
+
+    # 2c. Gate counts & default expected count selection (B-6).
+    bad += report(
+        "gate_counts.json fulljit test pin is 634/0",
+        FULLJIT_PINS.get("test") == (634, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="darwin") == (634, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="linux") == (634, 0)
+        and default_expected_counts(DEFAULT_SUITES, "debug", plat="darwin") == (653, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="win32") == (633, 0)
+        and default_expected_counts(("S1",), "test") == (None, 0),
+        repr(FULLJIT_PINS),
+    )
+
     # 3. Grade checks.
     bad += report(
         "baseline CRLF normalization accepts LF/CRLF",
@@ -529,12 +673,66 @@ def self_test():
                 logged = lf.read()
             bad += report(
                 "stub green suite passes 2/0 without profile",
-                rc == 0 and summary == {"passed": 2, "failed": 0}
+                rc == 0 and summary["passed"] == 2 and summary["failed"] == 0
+                and summary["skipped_suites"] == []
                 and "dynamicprofile" not in logged,
                 repr(summary),
             )
 
-            # Doctored baseline fails loudly.
+            # Expected-total match passes; mismatch fails hard (B-6).
+            rc_pin_ok, summary_pin_ok = run_suites(
+                troot, stub, suites=("S1",), jobs=1, skip_binary_probe=True,
+                expected_total=2)
+            bad += report(
+                "exact expected_total=2 passes",
+                rc_pin_ok == 0 and summary_pin_ok["passed"] == 2,
+                repr(summary_pin_ok),
+            )
+            rc_pin_bad, summary_pin_bad = run_suites(
+                troot, stub, suites=("S1",), jobs=1, skip_binary_probe=True,
+                expected_total=3)
+            bad += report(
+                "expected_total=3 mismatch fails on 2-test suite",
+                rc_pin_bad == 1 and summary_pin_bad["passed"] == 2,
+                repr(summary_pin_bad),
+            )
+
+            # Skipped suite by folder tags is logged and fails against expected_total.
+            s2 = os.path.join(troot, "S2")
+            os.makedirs(s2)
+            with open(os.path.join(s2, "rlexe.xml"), "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?><regress-exe>'
+                        '<test><default><files>c.js</files></default></test>'
+                        '</regress-exe>\n')
+            with open(os.path.join(s2, "c.js"), "w", encoding="utf-8") as f:
+                f.write("pass\n")
+            with open(os.path.join(troot, "rlexedirs.xml"), "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?><dirs>'
+                        '<test><default><files>S1</files></default></test>'
+                        '<test><default><files>S2</files><tags>exclude_dynapogo</tags></default></test>'
+                        '</dirs>\n')
+            rc_skip_bad, summary_skip_bad = run_suites(
+                troot, stub, suites=("S1", "S2"), jobs=1, skip_binary_probe=True,
+                expected_total=3)
+            bad += report(
+                "skipped suite mismatch fails against expected_total",
+                rc_skip_bad == 1 and summary_skip_bad["skipped_suites"] == ["S2"],
+                repr(summary_skip_bad),
+            )
+            rc_skip_sneaky, summary_skip_sneaky = run_suites(
+                troot, stub, suites=("S1", "S2"), jobs=1, skip_binary_probe=True,
+                expected_total=2)
+            bad += report(
+                "skipped suite fails even if remaining tests match expected_total",
+                rc_skip_sneaky == 1 and summary_skip_sneaky["skipped_suites"] == ["S2"],
+                repr(summary_skip_sneaky),
+            )
+
+            # Restore rlexedirs.xml and test doctored baseline failure.
+            with open(os.path.join(troot, "rlexedirs.xml"), "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?><dirs>'
+                        '<test><default><files>S1</files></default></test>'
+                        '</dirs>\n')
             with open(os.path.join(s1, "b.baseline"), "wb") as f:
                 f.write(b"different\n")
             rc_bad, summary_bad = run_suites(
@@ -558,6 +756,7 @@ def main(argv):
 
     suites = list(DEFAULT_SUITES)
     select = "test"
+    expected_total = None
     jobs = None
     timeout = DEFAULT_TIMEOUT
     rest = []
@@ -568,6 +767,21 @@ def main(argv):
                 print("check_fulljit: --select needs a value", file=sys.stderr)
                 return 2
             select = args[i + 1]
+            i += 2
+        elif args[i] == "--expected-total":
+            if i + 1 >= len(args):
+                print("check_fulljit: --expected-total needs a value", file=sys.stderr)
+                return 2
+            try:
+                expected_total = int(args[i + 1])
+            except ValueError:
+                print("check_fulljit: bad --expected-total %r: expected positive int"
+                      % args[i + 1], file=sys.stderr)
+                return 2
+            if expected_total <= 0:
+                print("check_fulljit: bad --expected-total %d: must be > 0"
+                      % expected_total, file=sys.stderr)
+                return 2
             i += 2
         elif args[i] == "--jobs":
             if i + 1 >= len(args):
@@ -597,8 +811,8 @@ def main(argv):
         return 2
     if len(rest) != 2:
         print("usage: check_fulljit.py <runtests_or_test_root> <ch> "
-              "[--suites S1 S2 ...] [--select test|debug] [--jobs N] "
-              "[--timeout SECS] [--self-test]", file=sys.stderr)
+              "[--suites S1 S2 ...] [--select test|debug] [--expected-total N] "
+              "[--jobs N] [--timeout SECS] [--self-test]", file=sys.stderr)
         return 2
 
     target, ch = rest[0], rest[1]
@@ -610,9 +824,14 @@ def main(argv):
         return 2
 
     test_root = target if os.path.isdir(target) else os.path.dirname(os.path.abspath(target))
+    expected_failed = 0
+    if expected_total is None:
+        expected_total, expected_failed = default_expected_counts(
+            suites=tuple(suites), select=select)
     rc, _ = run_suites(
         test_root, ch, suites=tuple(suites), select=select,
-        jobs=jobs, timeout=timeout,
+        jobs=jobs, timeout=timeout, expected_total=expected_total,
+        expected_failed=expected_failed,
     )
     return rc
 

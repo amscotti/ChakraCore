@@ -515,7 +515,7 @@ class CheckJitTests(unittest.TestCase):
 
     def make_stub_ch(self, root, *, release=False, fail_run=False,
                      wrong_stdout=False, fail_forcenative=False,
-                     with_dylib=True):
+                     no_trace=False, with_dylib=True):
         bindir = root / "bin"
         bindir.mkdir(parents=True, exist_ok=True)
         if with_dylib:
@@ -537,12 +537,20 @@ class CheckJitTests(unittest.TestCase):
         elif fail_forcenative:
             run_body = (
                 "case \"$*\" in\n"
+                "  *-trace:BackEnd*) printf -- '---BeginBackEnd: add---\\n---EndBackEnd---\\n%s\\n'; exit 0 ;;\n"
                 "  *-forceNative*) printf 'wrong-jit\\n'; exit 1 ;;\n"
                 "  *) printf '%s\\n' ; exit 0 ;;\n"
-                "esac" % want_lines
+                "esac" % (want_lines, want_lines)
             )
-        else:
+        elif no_trace:
             run_body = "printf '%s\\n'\nexit 0" % want_lines
+        else:
+            run_body = (
+                "case \"$*\" in\n"
+                "  *-trace:BackEnd*) printf -- '---BeginBackEnd: add---\\n---EndBackEnd---\\n%s\\n'; exit 0 ;;\n"
+                "  *) printf '%s\\n'; exit 0 ;;\n"
+                "esac" % (want_lines, want_lines)
+            )
         ch.write_text(
             "#!/bin/sh\n"
             "printf '%s\\n' \"$*\" >> " + repr(str(log_path)) + "\n"
@@ -606,10 +614,23 @@ class CheckJitTests(unittest.TestCase):
             self.assertEqual(rc, 0, out + err)
             self.assertIn("check_jit: PASS\n", out)
             calls = log_path.read_text().splitlines()
-            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(calls), 4)
             self.assertEqual(calls[0], "-?")
-            self.assertTrue(calls[1].startswith("-mic:1 -bgjit- "))
-            self.assertTrue(calls[2].startswith("-forceNative -off:simpleJit -bgJitDelay:0 "))
+            self.assertTrue(calls[1].startswith("-mic:1 -bgjit- -trace:BackEnd "))
+            self.assertTrue(calls[2].startswith("-mic:1 -bgjit- "))
+            self.assertTrue(calls[3].startswith("-forceNative -off:simpleJit -bgJitDelay:0 "))
+
+    def test_non_pe_missing_backend_trace_fails_loudly(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-notrace-") as tmp:
+            root = Path(tmp)
+            ch, log_path = self.make_stub_ch(root, release=False, no_trace=True)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("BeginBackEnd", err)
+            self.assertNotIn("PASS", out)
+            calls = log_path.read_text().splitlines()
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(calls[1].startswith("-mic:1 -bgjit- -trace:BackEnd "))
 
     def test_debug_flaglist_detects_forcenative_failure(self):
         with tempfile.TemporaryDirectory(prefix="check-jit-dbg-fail-") as tmp:
@@ -838,13 +859,22 @@ class GateCountsTests(unittest.TestCase):
 
     def test_source_shape(self):
         data = self.load_source()
-        for select in ("test", "debug"):
+        for select in ("test", "debug", "fulljit"):
             self.assertIsInstance(data[select]["passed"], int)
             self.assertIsInstance(data[select]["failed"], int)
             self.assertNotIsInstance(data[select]["passed"], bool)
             self.assertNotIsInstance(data[select]["failed"], bool)
             self.assertGreaterEqual(data[select]["passed"], 0)
             self.assertGreaterEqual(data[select]["failed"], 0)
+        self.assertEqual(data["fulljit"], {"passed": 634, "failed": 0})
+        for key in ("debug", "win32_test", "win32_debug"):
+            entry = data["fulljit_variants"][key]
+            self.assertIsInstance(entry["passed"], int)
+            self.assertIsInstance(entry["failed"], int)
+            self.assertNotIsInstance(entry["passed"], bool)
+            self.assertNotIsInstance(entry["failed"], bool)
+            self.assertGreaterEqual(entry["passed"], 0)
+            self.assertGreaterEqual(entry["failed"], 0)
 
     def test_check_regression_follows_source(self):
         data = self.load_source()
@@ -894,6 +924,28 @@ class GateCountsTests(unittest.TestCase):
         proc = self.run_isolated_selftest('{"test": {"passed": 1}}')
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("gate_counts.json", proc.stderr)
+
+    def run_isolated_fulljit_selftest(self, gate_counts_text=None):
+        with tempfile.TemporaryDirectory(prefix="fulljit-gate-counts-") as tmp:
+            root = Path(tmp)
+            for name in ("check_fulljit.py", "check_jit.py",
+                         "check_metadata_windows.py", "common.py"):
+                shutil.copy(HERE / name, root / name)
+            if gate_counts_text is not None:
+                (root / "gate_counts.json").write_text(gate_counts_text)
+            return subprocess.run(
+                [sys.executable, str(root / "check_fulljit.py"),
+                 "--self-test"],
+                capture_output=True, text=True, timeout=60)
+
+    def test_fulljit_missing_or_malformed_source_fails_loudly(self):
+        proc_missing = self.run_isolated_fulljit_selftest()
+        self.assertEqual(proc_missing.returncode, 2)
+        self.assertIn("gate_counts.json", proc_missing.stderr)
+        proc_bad = self.run_isolated_fulljit_selftest(
+            '{"test": {"passed": 2100, "failed": 0}, "fulljit": {"passed": true, "failed": 0}}')
+        self.assertEqual(proc_bad.returncode, 2)
+        self.assertIn("gate_counts.json", proc_bad.stderr)
 
 
 class LegacyMacFloorTests(unittest.TestCase):
@@ -1855,6 +1907,242 @@ class WindowsGatePolishTests(unittest.TestCase):
                 "pipe-early", [sys.executable, str(early)],
                 timeout=5.0, min_walks=2, use_pty=False)
             self.assertFalse(ok_e, detail_e)
+
+
+class GateIntegrityWave2Tests(unittest.TestCase):
+    """Negative and positive controls for Wave 2 B-3, B-6, and B-8."""
+
+    def test_fulljit_live_selection_matches_gate_counts_pin(self):
+        with open(HERE / "gate_counts.json", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["fulljit"], {"passed": 634, "failed": 0})
+        test_root = ROOT / "test"
+        folder_tags = check_fulljit.load_folder_tags(str(test_root))
+        for select, plat, machine, want in (
+            ("test", "darwin", "arm64", data["fulljit"]["passed"]),
+            ("test", "linux", "x86_64", data["fulljit"]["passed"]),
+            ("debug", "darwin", "arm64", data["fulljit_variants"]["debug"]["passed"]),
+            ("test", "win32", "AMD64", data["fulljit_variants"]["win32_test"]["passed"]),
+            ("debug", "win32", "AMD64", data["fulljit_variants"]["win32_debug"]["passed"]),
+        ):
+            arch, alias, not_tags = check_fulljit.resolve_platform_tags(
+                select=select, plat=plat, machine=machine)
+            total = 0
+            for suite in check_fulljit.DEFAULT_SUITES:
+                ftags = folder_tags.get(suite.lower(), set())
+                self.assertTrue(ftags.isdisjoint(not_tags), suite)
+                entries = check_fulljit.parse_rlexe_suite(
+                    str(test_root / suite), arch, alias)
+                total += sum(
+                    1 for e in entries if check_fulljit.should_run_test(e, not_tags))
+            self.assertEqual(total, want, (select, plat, machine))
+
+    @unittest.skipUnless(os.name == "posix", "uses POSIX stub scripts")
+    def test_fulljit_expected_total_and_skipped_suite_fail_hard(self):
+        with tempfile.TemporaryDirectory(prefix="fulljit-b6-test-") as tmp:
+            troot = Path(tmp) / "test"
+            s1 = troot / "S1"
+            s2 = troot / "S2"
+            s1.mkdir(parents=True)
+            s2.mkdir(parents=True)
+            (troot / "rlexedirs.xml").write_text(
+                '<?xml version="1.0" encoding="utf-8"?><dirs>'
+                '<test><default><files>S1</files></default></test>'
+                '<test><default><files>S2</files><tags>exclude_dynapogo</tags></default></test>'
+                '</dirs>\n')
+            (s1 / "rlexe.xml").write_text(
+                '<?xml version="1.0" encoding="utf-8"?><regress-exe>'
+                '<test><default><files>a.js</files></default></test>'
+                '</regress-exe>\n')
+            (s2 / "rlexe.xml").write_text(
+                '<?xml version="1.0" encoding="utf-8"?><regress-exe>'
+                '<test><default><files>b.js</files></default></test>'
+                '</regress-exe>\n')
+            (s1 / "a.js").write_text("pass\n")
+            (s2 / "b.js").write_text("pass\n")
+            stub = Path(tmp) / "ch"
+            stub.write_text("#!/bin/sh\necho pass\n")
+            stub.chmod(0o755)
+
+            out_buf, err_buf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_buf), \
+                    contextlib.redirect_stderr(err_buf):
+                rc, summary = check_fulljit.run_suites(
+                    str(troot), str(stub), suites=("S1", "S2"), jobs=1,
+                    skip_binary_probe=True, expected_total=2)
+            self.assertEqual(rc, 1)
+            self.assertEqual(summary["passed"], 1)
+            self.assertEqual(summary["skipped_suites"], ["S2"])
+            self.assertIn("SKIP suite S2", out_buf.getvalue())
+            self.assertIn("count/suite mismatch", err_buf.getvalue())
+
+            self.assertEqual(
+                check_fulljit.main([
+                    "check_fulljit.py", str(troot), str(stub),
+                    "--expected-total", "0",
+                ]),
+                2,
+            )
+
+    def test_verify_jit_binary_rejects_non_pe_without_backend_trace(self):
+        with tempfile.TemporaryDirectory(prefix="fulljit-nonpe-b8-") as tmp:
+            for name, magic in (("ch.macho", b"\xcf\xfa\xed\xfe"),
+                                ("ch.elf", b"\x7fELF")):
+                ch = Path(tmp) / name
+                ch.write_bytes(magic + b"\x00" * 60)
+
+                def fake_nojit(cmd, **_kw):
+                    if os.path.basename(cmd[0]) == "nm":
+                        return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+                    if "-?" in cmd:
+                        return 0, "Usage: ch [flaglist]\n", ""
+                    return 0, "no trace\n", ""
+
+                def fake_jit(cmd, **_kw):
+                    if os.path.basename(cmd[0]) == "nm":
+                        return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+                    if "-?" in cmd:
+                        return 0, "Usage: ch [flaglist]\n", ""
+                    return 0, "---BeginBackEnd: add---\n---EndBackEnd---\n", ""
+
+                with mock.patch.object(common, "run_capture", side_effect=fake_nojit):
+                    err = check_fulljit.verify_jit_binary(str(ch))
+                    self.assertIsNotNone(err)
+                    self.assertIn("BeginBackEnd", err)
+                with mock.patch.object(common, "run_capture", side_effect=fake_jit):
+                    self.assertIsNone(check_fulljit.verify_jit_binary(str(ch)))
+
+    @unittest.skipUnless(os.name == "posix", "uses POSIX stub scripts")
+    def test_check_sanitize_wasm_diag_missing_legs_and_truncated_verdict(self):
+        # (c) Truncated leg list cannot report N/N PASS.
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            rc = check_sanitize.grade_verdict(21, 29, [], [], "address")
+        self.assertEqual(rc, 1)
+        self.assertIn("21/29", err_buf.getvalue())
+        self.assertNotIn("21/21 PASS", out_buf.getvalue())
+
+        with tempfile.TemporaryDirectory(prefix="sanitize-b3-test-") as tmp:
+            root = Path(tmp)
+            fake_root = root / "repo"
+            for rel in (
+                "test/Basics/hello.js",
+                "test/es7/weakref.js",
+                "test/es7/weakref-gc.js",
+                "test/Bugs/cdjs-mediumblock-interior-gc.js",
+                "test/es7/s6-growable-cross-agent.js",
+                "test/es7/regex-nonwritable-lastindex-jit.js",
+                "test/es7/regexp-v-flag.js",
+                "test/es7/regexp-modifiers.js",
+                "test/es7/regexp-lookbehind.js",
+                "test/UnifiedRegex/acid.js",
+                "test/UnifiedRegex/acid.baseline",
+                "test/es7/typedarray-oob-delete-and-bigint-locale.js",
+                "test/es7/float16array.js",
+                "test/es7/float16-jit-bounds.js",
+                "test/typedarray/typedarray_at.js",
+                "test/es7/setmethods.js",
+                "test/es7/setmethods-groupby-warmed.js",
+                "test/es7/number-formatting-exact.js",
+                "test/es6/taggedTemplateCookedUndefined.js",
+                "test/es6module/module-cycletdz.js",
+                "test/es6module/module-cycletdz.baseline",
+                "test/wasm/polyinline.js",
+                "test/nodeapi/probes/refs_probe.cpp",
+                "test/nodeapi/probes/wrap_probe.cpp",
+                "test/nodeapi/probes/v10_multi_addon_probe.cpp",
+            ):
+                p = fake_root / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("PASS\n")
+
+            pfx = root / "pfx"
+            (pfx / "bin").mkdir(parents=True)
+            (pfx / "lib/nodeapi-addons").mkdir(parents=True)
+            ext = "dylib" if sys.platform == "darwin" else "so"
+
+            ch = pfx / "bin/ch"
+            ch.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "args = sys.argv[1:]\n"
+                "if '-v' in args:\n"
+                "    print('ch version 1.13.0.0-beta')\n"
+                "    sys.exit(0)\n"
+                "if os.path.basename(args[-1]) == 'wasm_probe.js':\n"
+                "    mode = os.environ.get('UNIT_WASM', 'disabled')\n"
+                "    if mode == 'asan':\n"
+                "        print('==123==ERROR: AddressSanitizer: heap-buffer-overflow', file=sys.stderr)\n"
+                "        sys.exit(1)\n"
+                "    print('undefined')\n"
+                "    print('wasm-disabled')\n"
+                "    sys.exit(0)\n"
+                "if os.path.basename(args[-1]) == 'smoke.js':\n"
+                "    print('sanitize-smoke-ok 2')\n"
+                "elif os.path.basename(args[-1]) == 'hello.js':\n"
+                "    print('hello world')\n"
+                "    print('PASS')\n"
+                "else:\n"
+                "    print('PASS')\n"
+            )
+            ch.chmod(0o755)
+
+            # (a) WASM probe ASan output fails loudly instead of "WASM skipped".
+            env = check_sanitize.sanitizer_env("address")
+            env["UNIT_WASM"] = "asan"
+            with self.assertRaises(check_sanitize.WasmProbeError):
+                check_sanitize.probe_wasm_supported(str(ch), env, str(root))
+
+            with mock.patch.dict(os.environ, {"UNIT_WASM": "asan"}):
+                out_a, err_a = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out_a), contextlib.redirect_stderr(err_a):
+                    rc_a = check_sanitize.run_all(
+                        str(pfx), mode="address", profile="debug-static",
+                        root=str(fake_root))
+                self.assertEqual(rc_a, 1)
+                self.assertNotIn("WASM skipped", out_a.getvalue())
+                self.assertIn("21/22", err_a.getvalue())
+                self.assertIn("AddressSanitizer", err_a.getvalue())
+
+            # (b) Missing Node-API artifacts on shared profile fails with <passed>/<expected>.
+            out_b, err_b = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_b), contextlib.redirect_stderr(err_b):
+                rc_b = check_sanitize.run_all(
+                    str(pfx), mode="address", profile="test", root=str(fake_root))
+            self.assertEqual(rc_b, 1)
+            self.assertIn("21/29", err_b.getvalue())
+            self.assertIn("missing expected leg(s) (8)", err_b.getvalue())
+
+            # (c) --expect-wasm on disabled WASM fails loudly.
+            out_w, err_w = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_w), contextlib.redirect_stderr(err_w):
+                rc_w = check_sanitize.run_all(
+                    str(pfx), mode="address", profile="debug-static",
+                    expect_wasm=True, root=str(fake_root))
+            self.assertEqual(rc_w, 1)
+            self.assertIn("21/23", err_w.getvalue())
+
+            # (d) --expect-legs mismatch cannot report 21/21 PASS.
+            out_t, err_t = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_t), contextlib.redirect_stderr(err_t):
+                rc_t = check_sanitize.run_all(
+                    str(pfx), mode="address", profile="debug-static",
+                    expect_legs=25, root=str(fake_root))
+            self.assertEqual(rc_t, 1)
+            self.assertIn("21/25", err_t.getvalue())
+
+            # (e) Backward-compatible positional CLI (prefix_or_ch, mode) works.
+            with mock.patch.object(check_sanitize, "run_all", return_value=0) as mocked:
+                rc_cli = check_sanitize.main([
+                    "check_sanitize.py", str(pfx), "undefined",
+                    "--profile", "jit", "--expect-wasm",
+                ])
+            self.assertEqual(rc_cli, 0)
+            mocked.assert_called_once_with(
+                str(pfx), mode="undefined", cxx=None, sdk_path=None,
+                timeout=check_sanitize.DEFAULT_TIMEOUT,
+                profile="jit", expect_wasm=True, expect_legs=None,
+            )
 
 
 if __name__ == "__main__":

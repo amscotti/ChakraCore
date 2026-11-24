@@ -164,6 +164,8 @@ def check_symbols(ch):
 def flaglist_supported(ch):
     """Release builds intentionally expose no debug/test flaglist."""
     rc, out, err = common.run_capture([ch, "-?"])
+    if rc != 0:
+        return True
     return "not supported in Release builds" not in (out + err)
 
 
@@ -361,6 +363,51 @@ def self_test():
             bad += report("main() passes PE Release build w/ default flags",
                           main(["check_jit.py", shared_ch]) == 0)
 
+        # Non-PE (Mach-O / ELF) controls: check_symbols and BackEnd trace (B-8).
+        def fake_nm_with_jit(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            return fake_debug_jit(cmd)
+
+        def fake_nm_no_symbol(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T _main\n", ""
+            return fake_debug_jit(cmd)
+
+        def fake_nm_fake_nojit(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            return fake_disable_jit(cmd)
+
+        def fake_nm_release_jit(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            return fake_release_jit(cmd)
+
+        def fake_nm_bad_help_release(cmd, **_kw):
+            if os.path.basename(cmd[0]) == "nm":
+                return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
+            if "-?" in cmd:
+                return 1, "Note: [flaglist] is not supported in Release builds.\n", ""
+            return 0, want_out, ""
+
+        for kind_name, bin_path in (("Mach-O", macho_bin), ("ELF", elf_bin)):
+            with mock.patch.object(common, "run_capture", side_effect=fake_nm_no_symbol):
+                bad += report("%s missing NativeCodeGenerator fails check_symbols" % kind_name,
+                              check_symbols(bin_path) is not None)
+            with mock.patch.object(common, "run_capture", side_effect=fake_nm_with_jit):
+                bad += report("main() passes %s JIT build with BackEnd trace" % kind_name,
+                              main(["check_jit.py", bin_path]) == 0)
+            with mock.patch.object(common, "run_capture", side_effect=fake_nm_fake_nojit):
+                bad += report("main() fails closed on %s fake no-JIT (no trace)" % kind_name,
+                              main(["check_jit.py", bin_path]) == 1)
+            with mock.patch.object(common, "run_capture", side_effect=fake_nm_release_jit):
+                bad += report("main() passes %s Release JIT build w/ default flags" % kind_name,
+                              main(["check_jit.py", bin_path]) == 0)
+            with mock.patch.object(common, "run_capture", side_effect=fake_nm_bad_help_release):
+                bad += report("main() rejects %s nonzero -? claiming Release" % kind_name,
+                              main(["check_jit.py", bin_path]) == 1)
+
     print("check_jit self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
              else "%d CONTROL(S) MISBEHAVE" % bad))
@@ -396,7 +443,7 @@ def main(argv):
         script_path = os.path.join(tmp, "smoke.js")
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(SCRIPT)
-        if pe_mode and has_flaglist:
+        if has_flaglist:
             failure = check_backend_trace(ch, script_path)
             if failure:
                 print("check_jit: FAIL: %s" % failure, file=sys.stderr)
