@@ -17,8 +17,8 @@ receipts (doc/perf-baseline.md).
 
 Usage:
   tools/bench/run.py --binary out/jit/bin/ch [--tier jit|simplejit|interp]
-      [--suite SunSpider,Kraken,Octane,JetStream] [--iterations 3]
-      [--timeout 60] [--test splay] [-o results.json]
+      [--flags -ESBigInt-] [--suite SunSpider,Kraken,Octane,JetStream]
+      [--iterations 3] [--timeout 60] [--test splay] [-o results.json]
 """
 
 import argparse
@@ -26,6 +26,7 @@ import hashlib
 import json
 import platform
 import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -118,10 +119,38 @@ def median_mad(values):
     return med, mad
 
 
-def main():
+def normalize_flag_args(argv, flag_options):
+    """Rewrite `--opt -ChFlag` as `--opt=-ChFlag` so argparse keeps leading `-`."""
+    out = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if (tok in flag_options and i + 1 < len(argv)
+                and not argv[i + 1].startswith("--")
+                and argv[i + 1] not in ("-h", "-o")):
+            out.append(f"{tok}={argv[i + 1]}")
+            i += 2
+        else:
+            out.append(tok)
+            i += 1
+    return out
+
+
+def parse_flag_values(flag_strings):
+    """Split and flatten repeatable space-separated flag strings."""
+    flags = []
+    for raw in flag_strings:
+        if raw:
+            flags.extend(shlex.split(raw))
+    return flags
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--binary", required=True, help="path to ch binary")
     ap.add_argument("--tier", default="jit", choices=sorted(TIER_FLAGS))
+    ap.add_argument("--flags", action="append", default=[],
+                    help="extra space-separated ch flags (repeatable)")
     ap.add_argument("--suite", default=",".join(SUITES),
                     help="comma-separated suites (default: all)")
     ap.add_argument("--iterations", type=int, default=3)
@@ -131,14 +160,15 @@ def main():
                     help="substring filter on suite/file (e.g. splay)")
     ap.add_argument("-o", "--output", default="",
                     help="write JSON results to this path")
-    args = ap.parse_args()
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    args = ap.parse_args(normalize_flag_args(raw_argv, {"--flags"}))
 
     binary = Path(args.binary).resolve()
     if not binary.exists():
         print(f"binary not found: {binary}")
         return 2
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    flags = TIER_FLAGS[args.tier]
+    flags = list(TIER_FLAGS[args.tier]) + parse_flag_values(args.flags)
     suites = [s.strip() for s in args.suite.split(",") if s.strip()]
     unknown = [s for s in suites if s not in SUITES]
     if unknown:
