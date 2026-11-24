@@ -646,4 +646,9 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>arm64OverflowFormalsBailout.js</files>
+    </default>
+  </test>
 </regress-exe>

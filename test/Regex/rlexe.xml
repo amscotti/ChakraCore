@@ -253,4 +253,10 @@
       <files>regexCharTrieStack.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>regexp_parser_helper_regressions.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

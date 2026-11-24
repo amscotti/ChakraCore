@@ -123,6 +123,24 @@
       <compile-flags>-ESSharedArrayBuffer -Test262 -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>s6-atomics-wait-posix.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>s6-waitasync-cancel.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>s6-waitasync-settled-exit.js</files>
+      <compile-flags>-ESSharedArrayBuffer -args summary -endargs</compile-flags>
+    </default>
+  </test>
     <test>
     <default>
       <files>PromiseRejectionTracking.js</files>
@@ -784,6 +802,31 @@
     <default>
       <files>q3_iterator_zip.js</files>
       <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>weakref-keptobjects-perf.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>sab-fixed-view-noparent.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bigint-pow2-radix.js</files>
+      <compile-flags>-ESBigInt -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bigint-exponent-cap.js</files>
+      <compile-flags>-ESBigInt -args summary -endargs</compile-flags>
+      <timeout>180</timeout>
     </default>
   </test>
 </regress-exe>

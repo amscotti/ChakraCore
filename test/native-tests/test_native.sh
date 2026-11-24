@@ -90,6 +90,23 @@ fi
 
 RUN "test-shared-basic"
 
+if [[ -f "test-timer-cancel.cpp" && -f "test-shared-basic/Makefile" ]] && ! grep -q "# IGNORE_THIS_TEST" "test-shared-basic/Makefile"; then
+    TEST_PATH="test-timer-cancel"
+    echo "Testing ${TEST_PATH}"
+    printf 'include Makefile\ntimer-cancel:\n\t$(CC) ../test-timer-cancel.cpp $(CFLAGS) -std=c++11 $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(filter-out -o sample.o,$(LIBS)) -o test-timer-cancel.o\n' > test-shared-basic/Makefile.timer-cancel
+    SAFE_RUN "cd test-shared-basic && make -f Makefile.timer-cancel CC=\"${CC}\" CXX=\"${CXX}\" timer-cancel"
+    RES=$(cd test-shared-basic && ./test-timer-cancel.o)
+    timer_status=$?
+    if [[ $timer_status != 0 ]]; then
+        echo "${TEST_PATH} FAILED"
+        echo "test-timer-cancel.o exited ${timer_status}"
+        echo -e "$RES"
+        exit 1
+    fi
+    TEST "PASS"
+    SAFE_RUN "cd test-shared-basic && rm -rf ./test-timer-cancel.o ./Makefile.timer-cancel"
+fi
+
 # test python
 #RUN_CMD "test-python" "python helloWorld.py ${BUILD_TYPE} ${CH_DIR%/*}/libChakraCore.${EXTENSION}"
 

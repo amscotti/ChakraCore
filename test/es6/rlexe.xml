@@ -1563,4 +1563,11 @@
     <compile-flags>-noDeferParse -args summary -endargs</compile-flags>
   </default>
 </test>
+<test>
+  <default>
+    <files>parser_bytecode_dos_regressions.js</files>
+    <compile-flags>-args summary -endargs</compile-flags>
+    <timeout>180</timeout>
+  </default>
+</test>
 </regress-exe>

@@ -72,4 +72,16 @@
     <compile-flags> -wasm -wasmsimd</compile-flags>
   </default>
 </test>
+<test>
+  <default>
+    <files>v128CallPreservationTests.js</files>
+    <compile-flags> -wasm -wasmsimd</compile-flags>
+  </default>
+</test>
+<test>
+  <default>
+    <files>absNegZeroTests.js</files>
+    <compile-flags> -wasm -wasmsimd</compile-flags>
+  </default>
+</test>
 </regress-exe>
