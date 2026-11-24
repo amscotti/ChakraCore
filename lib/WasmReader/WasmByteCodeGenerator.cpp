@@ -604,6 +604,7 @@ void WasmBytecodeGenerator::GenerateFunction()
     AutoDisableInterrupt autoDisableInterrupt(m_scriptContext->GetThreadContext(), true);
 
 #if DBG_DUMP
+#ifdef ASMJS_PLAT
     if ((
         PHASE_DUMP(Js::WasmBytecodePhase, GetFunctionBody()) ||
         PHASE_DUMP(Js::ByteCodePhase, GetFunctionBody())
@@ -611,6 +612,7 @@ void WasmBytecodeGenerator::GenerateFunction()
     {
         Js::AsmJsByteCodeDumper::Dump(GetFunctionBody(), &mTypedRegisterAllocator, nullptr);
     }
+#endif
     if (PHASE_DUMP(Js::WasmOpCodeDistributionPhase, GetFunctionBody()))
     {
         m_module->GetReader()->PrintOps();

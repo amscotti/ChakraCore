@@ -571,7 +571,9 @@ NativeCodeGenerator::GenerateFunction(Js::FunctionBody *fn, Js::ScriptFunction *
         // Set asmjs to be true in entrypoint
         entryPointInfo->SetIsAsmJSFunction(true);
 
+#ifdef ASMJS_PLAT
         Assert(PHASE_ON1(Js::AsmJsJITTemplatePhase) || (!oldFuncObjEntryPointInfo->GetIsTJMode() && !entryPointInfo->GetIsTJMode()));
+#endif
         // this changes the address in the entrypointinfo to be the AsmJsCodgenThunk
         function->UpdateThunkEntryPoint(entryPointInfo, NativeCodeGenerator::CheckAsmJsCodeGenThunk);
 

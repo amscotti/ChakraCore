@@ -655,6 +655,10 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
         else
             run.addArg(b.fmt("-I{s}", .{dir}));
     }
+    if (is_ch and ctx.profile.isStatic() and ctx.profile.isJit()) {
+        run.addArg("-Ilib/Backend");
+        run.addArg("-Ilib/Runtime/ByteCode");
+    }
     if (g.pal) run.addArg("-Ipal/src/include");
 
     switch (lang) {
@@ -1967,7 +1971,7 @@ pub fn build(b: *std.Build) void {
 
         const rel_check_top = b.step("check", b.fmt("Verification for {s}: smoke gate, shared native embedding, metadata{s} (not part of the default build)", .{
             sname,
-            if (profile == .release_jit) ", JIT symbols/smoke, JIT bytecode" else "",
+            if (profile == .release_jit) ", JIT symbols/smoke" else "",
         }));
         rel_check_top.dependOn(&rel_smoke.step);
         rel_check_top.dependOn(&rel_native.step);
@@ -1984,28 +1988,14 @@ pub fn build(b: *std.Build) void {
             const rel_jit_top = b.step("check-jit", "Verify Release+JIT backend symbols and non-flaglist hot-call JIT execution (not part of the default build)");
             rel_jit_top.dependOn(&rel_jit.step);
             rel_check_top.dependOn(&rel_jit.step);
-
-            const rel_verify_bc = b.addSystemCommand(&.{python});
-            rel_verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
-            rel_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
-            rel_verify_bc.addArg("--jit");
-            rel_verify_bc.addArg("--verify");
-            rel_verify_bc.addArg(b.fmt("--binary={s}", .{rel_ch_str}));
-            rel_verify_bc.addFileInput(ch.bin);
-            rel_verify_bc.step.dependOn(cp_step);
-            rel_verify_bc.stdio = .inherit;
-            const rel_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the release-jit ch (pure scratch-tree check; not part of the default build)");
-            rel_verify_bc_top.dependOn(&rel_verify_bc.step);
-            rel_check_top.dependOn(&rel_verify_bc.step);
-        } else {
-            registerFailStep(
-                b,
-                python,
-                "verify-bytecode",
-                "Not applicable: legacy Release check has no bytecode leg",
-                "-Dprofile=release-shared: no bytecode leg - the legacy Release check has no bytecode-check (test/CMakeLists.txt:23-45)",
-            );
         }
+        registerFailStep(
+            b,
+            python,
+            "verify-bytecode",
+            "Not applicable: legacy Release check has no bytecode leg",
+            b.fmt("-Dprofile={s}: no bytecode leg - Release builds omit ENABLE_DEBUG_CONFIG_OPTIONS (test/CMakeLists.txt:23-45)", .{sname}),
+        );
 
         registerFailStep(
             b,
