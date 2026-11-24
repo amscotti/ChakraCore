@@ -102,6 +102,8 @@ pub const clang_msvc_warnings: []const []const u8 = &.{
     "-Wno-clang-cl-pch",
     "-Wno-unused-lambda-capture",
     "-Wno-pragma-pack",
+    // Zig 0.17.0 injects -nostdinc++ for x86_64-windows-msvc; suppress unused-arg under -Werror.
+    "-Wno-unused-command-line-argument",
 };
 
 /// Win32 system import libraries (Chakra.Build.props + per-target .vcxproj).

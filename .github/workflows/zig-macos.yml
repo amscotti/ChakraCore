@@ -1,4 +1,4 @@
-# B3.5 -- Mac Zig build CI (+ the legacy Test leg it will keep green).
+# B3.5 -- Mac Zig build CI (B3 profiles; zig build is the single maintained build system).
 #
 # What this workflow will prove on every push/PR (doc/b3-profiles.md section 11,
 # doc/modernization-plan.md sections B3/2.1):
@@ -7,8 +7,6 @@
 #     builds from a clean tree and passes its matching checks + check-selftest;
 #   - all 14 required B1 configuration checks pass (the optional local
 #     CMake-reference comparison adds a 15th check when available);
-#   - the equivalent legacy cmake leg (F0 recipe: RelWithDebInfo, shared,
-#     no-JIT, system ICU) will stay green at the gate_counts.json test pin;
 #   - every run records its inputs (zig version + full `zig env`, target,
 #     flavor, feature defines, dependency versions) and outputs (artifact
 #     manifest with sizes/hashes, gate tallies) as job outputs + artifacts.
@@ -69,10 +67,11 @@
 # Artifacts expire on GitHub's retention clock; the PERMANENT record is the
 # quoted outputs in doc/b3-profiles.md sections 10-11, not the artifact zip.
 
-name: zig-macos (B3 profiles + legacy Test leg)
+name: zig-macos (B3 profiles)
 
 on:
   push:
+    branches: [master, 'modernize/**']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -356,68 +355,6 @@ jobs:
           name: b1-contract
           path: ci-evidence/
 
-  legacy-test:
-    name: legacy cmake Test leg (F0 recipe, gate_counts.json test pin)
-    runs-on: macos-26
-    timeout-minutes: 90
-    outputs:
-      tally: ${{ steps.tally.outputs.tally }}
-    steps:
-      - *checkout
-      - *xcode
-      - *icu
-      - name: Assert cmake/ninja/clang present, record versions
-        run: |
-          set -euo pipefail
-          mkdir -p ci-evidence
-          {
-            echo '# Legacy Test leg inputs (F0 recipe)'
-            echo
-            echo 'cmake:    ' "$(cmake --version | head -1)"
-            echo 'ninja:    ' "$(ninja --version)"
-            echo 'clang:    ' "$(clang --version | head -1)"
-            echo 'python:   ' "$(python3 --version)"
-            echo 'xcode:    ' "$(xcodebuild -version | head -1)"
-            echo 'sdk:      ' "$(xcrun --show-sdk-path)"
-            echo 'icu4c:    ' "$(brew list --versions icu4c)"
-            echo 'git rev:  ' "$(git rev-parse --short HEAD) ${GITHUB_REF_NAME:-$(git branch --show-current)}"
-          } | tee ci-evidence/legacy-inputs.md
-      - name: cmake configure (F0 recipe)
-        run: |
-          set -euo pipefail
-          cmake -S . -B build-ci-test -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DDISABLE_JIT=ON -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include \
-            -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang 2>&1 | tee ci-evidence/configure.log
-      - name: ninja build
-        run: |
-          set -euo pipefail
-          ninja -C build-ci-test 2>&1 | tee ci-evidence/build.log
-      - name: ninja check
-        run: |
-          set -euo pipefail
-          ninja -C build-ci-test check 2>&1 | tee ci-evidence/check.log
-      - name: Tally gate outputs + artifact sizes
-        id: tally
-        run: |
-          set -euo pipefail
-          grep -E 'test-shared-basic : PASS' ci-evidence/check.log
-          # Regression pin single-sourced from tools/build/gate_counts.json
-          # (same one-liner shape as the zig legs above).
-          line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['test']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('legacy-test: regression=%d/%d native=shared-PASS' % (c['passed'], c['failed']))")"
-          ls -l build-ci-test/ch | tee -a ci-evidence/check.log
-          # The legacy dylib lands at the build root (observed in the
-          # B3.5 sim), not under bin/ -- both paths asserted, no `|| true`.
-          shasum -a 256 build-ci-test/ch build-ci-test/libChakraCore.dylib | tee ci-evidence/shasum.txt
-          echo "$line" | tee ci-evidence/tally.txt
-          echo "tally=$line" >> "$GITHUB_OUTPUT"
-          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload legacy-test evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: legacy-test
-          path: ci-evidence/
-
   incremental:
     name: incremental proofs (test_incremental.py ${{ inputs.incremental || 'quick' }})
     runs-on: macos-26
@@ -570,7 +507,7 @@ jobs:
     # macos-26 for runner uniformity with the legs (validated); ubuntu-latest is a future cost option -- this job is download+bash only.
     runs-on: macos-26
     timeout-minutes: 15
-    needs: [style, zig, jit-wasm, b1-contract, legacy-test, incremental, nodeapi]
+    needs: [style, zig, jit-wasm, b1-contract, incremental, nodeapi]
     if: ${{ !cancelled() }}
     steps:
       - name: Download all leg evidence
@@ -597,7 +534,6 @@ jobs:
             echo >> b3-evidence/SUMMARY.md
             for f in "$d"/inputs.md "$d"/inputs.json "$d"/zig-env.txt; do [ -f "$f" ] && cp "$f" "b3-evidence/inputs/$leg-$(basename "$f")" || true; done
             for f in "$d"/manifest-*.md "$d"/manifest-*.json; do [ -f "$f" ] && cp "$f" b3-evidence/manifests/ || true; done
-            [ -f "$d/legacy-inputs.md" ] && cp "$d/legacy-inputs.md" "b3-evidence/inputs/$leg-legacy-inputs.md" || true
           done
           echo '## Tallies' >> "$GITHUB_STEP_SUMMARY"
           for t in b3-evidence/tallies/*.txt; do [ -e "$t" ] || continue; echo "- $(cat "$t")" >> "$GITHUB_STEP_SUMMARY"; done

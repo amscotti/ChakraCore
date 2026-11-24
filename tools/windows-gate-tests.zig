@@ -230,8 +230,10 @@ test "compile define and Clang-MSVC flag builders" {
     try expectContains(cxx_flags, "-O2");
     try expectContains(cxx_flags, "-Werror");
     try expectContains(cxx_flags, "-Wno-date-time");
+    try expectContains(cxx_flags, "-Wno-unused-command-line-argument");
     try expectContains(cxx_flags, "-msse4.2");
     try expectContains(cxx_flags, "-fdelayed-template-parsing");
+    try expectContains(tables.clang_msvc_warnings, "-Wno-unused-command-line-argument");
 
     const dbg_flags = windows.buildCompilerFlags(arena, .debug_static, .cxx, true, false);
     try expectContains(dbg_flags, "-fms-runtime-lib=static_dbg");
@@ -305,6 +307,32 @@ test "windows.build entry point compiles and typechecks completely" {
     comptime {
         _ = &windows.build;
     }
+}
+
+fn expectBlockContains(src: []const u8, start_marker: []const u8, end_marker: []const u8, needle: []const u8) !void {
+    const start_idx = std.mem.indexOf(u8, src, start_marker) orelse return error.MissingBlockStart;
+    const end_idx = std.mem.indexOfPos(u8, src, start_idx, end_marker) orelse return error.MissingBlockEnd;
+    const block = src[start_idx..end_idx];
+    if (std.mem.indexOf(u8, block, needle) == null) return error.MissingNeedleInBlock;
+}
+
+test "Windows B6 first-contact compile fixes: unused-command-line-argument and Node-API NOMINMAX" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try expectContains(tables.clang_msvc_warnings, "-Wno-unused-command-line-argument");
+    for ([_]windows.Profile{ .@"test", .debug_static, .release_shared }) |profile| {
+        const flags = windows.buildCompilerFlags(arena, profile, .cxx, false, false);
+        try expectContains(flags, "-Werror");
+        try expectContains(flags, "-Wno-unused-command-line-argument");
+    }
+
+    const win_src = @embedFile("build/windows.zig");
+    try expectBlockContains(win_src, "for (tables.nodeapi_provider_tus) |src|", "const prov_link =", "\"-DNOMINMAX\"");
+    try expectBlockContains(win_src, "const nodeapi_host =", "tools/nodeapi/ch-nodeapi.cpp", "\"-DNOMINMAX\"");
+    try expectBlockContains(win_src, "const nodeapi_stub =", "tools/nodeapi/stub/stub_provider.cpp", "\"-DNOMINMAX\"");
+    try expectBlockContains(win_src, "const addon = b.addSystemCommand", "tools/nodeapi/addons/", "\"-DNOMINMAX\"");
 }
 
 test "libChakraNodeApiStub links ChakraCore.lib without full 161-export .def" {

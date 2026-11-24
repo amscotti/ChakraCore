@@ -18,6 +18,7 @@ name: zig-windows (x86_64 Windows build + check + Node-API + package)
 
 on:
   push:
+    branches: [master, 'modernize/**']
   pull_request:
   workflow_dispatch:
 
@@ -53,11 +54,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $zigVer = (& mise exec -- zig version).Trim()
+          $zigVerOut = & mise exec -- zig version
           if ($LASTEXITCODE -ne 0) { throw "mise exec -- zig version failed ($LASTEXITCODE)" }
+          $zigVer = (($zigVerOut | ForEach-Object { "$_" }) -join "`n").Trim()
           if ($zigVer -ne '0.17.0') { throw "Expected Zig 0.17.0, got '$zigVer'" }
-          $zigBin = (& mise which zig).Trim()
+          $zigBinOut = & mise which zig
           if ($LASTEXITCODE -ne 0) { throw "mise which zig failed ($LASTEXITCODE)" }
+          $zigBin = (($zigBinOut | ForEach-Object { "$_" }) -join "`n").Trim()
           (Split-Path -Parent $zigBin) | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           Write-Host "Using zig $zigVer at $zigBin"
       - name: Run Zig gate/unit tests and Python tool suites
@@ -67,20 +70,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path ci-evidence | Out-Null
           function Invoke-Logged {
-            param([string]$Log, [string]$Exe, [string[]]$Args)
-            Write-Host "=== $Exe $($Args -join ' ') ==="
+            param([string]$Log, [string]$Exe, [string[]]$CmdArgs)
+            Write-Host "=== $Exe $($CmdArgs -join ' ') ==="
             $prevPref = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
               $PSNativeCommandUseErrorActionPreference = $false
             }
             try {
-              & $Exe @Args 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $Log -Append
+              & $Exe @CmdArgs 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $Log -Append
               $rc = $LASTEXITCODE
             } finally {
               $ErrorActionPreference = $prevPref
             }
-            if ($rc -ne 0) { throw "Command failed ($rc): $Exe $($Args -join ' ')" }
+            if ($rc -ne 0) { throw "Command failed ($rc): $Exe $($CmdArgs -join ' ')" }
           }
           Invoke-Logged "ci-evidence/preflight.log" "zig" @("test", "tools/windows-gate-tests.zig")
           Invoke-Logged "ci-evidence/preflight.log" "zig" @("test", "doc/examples/owned-bytes.zig")
@@ -129,11 +132,34 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } elseif ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { "C:\vcpkg" }
-          if (-not (Test-Path "$root\vcpkg.exe")) {
-            throw "vcpkg.exe not found under '$root'"
+          # ilammy/msvc-dev-cmd runs VsDevCmd, which sets VCPKG_ROOT to Visual Studio's
+          # manifest-only VC\vcpkg directory. Prefer VCPKG_INSTALLATION_ROOT (standalone
+          # classic-mode runner install) and require both vcpkg.exe and ports/.
+          $candidates = @(
+            $env:VCPKG_INSTALLATION_ROOT
+            $env:VCPKG_ROOT
+            "C:\vcpkg"
+          ) | Where-Object { $_ -and $_.Trim() -ne '' } | Select-Object -Unique
+          $root = $null
+          foreach ($cand in $candidates) {
+            if ((Test-Path (Join-Path $cand "vcpkg.exe")) -and (Test-Path (Join-Path $cand "ports"))) {
+              $root = $cand
+              break
+            }
+          }
+          if (-not $root) {
+            foreach ($cand in $candidates) {
+              if ((Test-Path (Join-Path $cand "vcpkg.exe")) -and ($cand -notmatch '[\\/]VC[\\/]vcpkg$')) {
+                $root = $cand
+                break
+              }
+            }
+          }
+          if (-not $root) {
+            throw "Classic-mode vcpkg root (vcpkg.exe + ports/) not found. Probed: $($candidates -join ', ')"
           }
           "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $root | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           "vcpkg_root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "archives_dir=$(Join-Path $env:LOCALAPPDATA 'vcpkg\archives')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - &vcpkg-cache
@@ -153,17 +179,43 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
           $icuDir = Join-Path $env:VCPKG_ROOT "installed\x64-windows"
-          if (-not (Test-Path "$icuDir\include\unicode\uchar.h")) {
-            & $vcpkgExe install icu:x64-windows
-            if ($LASTEXITCODE -ne 0) { throw "vcpkg install icu:x64-windows failed ($LASTEXITCODE)" }
+          $icuInclude = Join-Path $icuDir "include"
+          $icuLib = Join-Path $icuDir "lib"
+          $icuBin = Join-Path $icuDir "bin"
+          if (-not (Test-Path "$icuInclude\unicode\uchar.h") -or
+              -not (Test-Path "$icuLib\icuuc.lib") -or
+              -not (Test-Path "$icuLib\icuin.lib")) {
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+              $PSNativeCommandUseErrorActionPreference = $false
+            }
+            $pushed = $false
+            try {
+              $workTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+              Push-Location $workTemp
+              $pushed = $true
+              & $vcpkgExe install icu:x64-windows --classic "--vcpkg-root=$env:VCPKG_ROOT"
+              $rc = $LASTEXITCODE
+            } finally {
+              if ($pushed) { Pop-Location }
+              $ErrorActionPreference = $prevPref
+            }
+            if ($rc -ne 0) { throw "vcpkg install icu:x64-windows failed ($rc)" }
           }
-          if (-not (Test-Path "$icuDir\include\unicode\uchar.h")) { throw "Missing $icuDir\include\unicode\uchar.h" }
-          if (-not (Test-Path "$icuDir\lib\icuuc.lib")) { throw "Missing $icuDir\lib\icuuc.lib" }
-          if (-not (Get-ChildItem "$icuDir\bin\icuuc*.dll" -ErrorAction SilentlyContinue)) {
-            throw "Missing icuuc*.dll under $icuDir\bin"
+          if (-not (Test-Path "$icuInclude\unicode\uchar.h")) { throw "Missing $icuInclude\unicode\uchar.h" }
+          if (-not (Test-Path "$icuLib\icuuc.lib")) { throw "Missing $icuLib\icuuc.lib" }
+          if (-not (Test-Path "$icuLib\icuin.lib")) { throw "Missing $icuLib\icuin.lib" }
+          if (-not (Get-ChildItem "$icuBin\icuuc*.dll" -ErrorAction SilentlyContinue)) {
+            throw "Missing icuuc*.dll under $icuBin"
+          }
+          if (-not (Get-ChildItem "$icuBin\icuin*.dll" -ErrorAction SilentlyContinue)) {
+            throw "Missing icuin*.dll under $icuBin"
           }
           "CHAKRA_ICU_DIR=$icuDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "$icuDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "ICU_INCLUDE_DIR=$icuInclude" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ICU_LIB_DIR=$icuLib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $icuBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - &record-inputs
         name: Record Windows inputs
         shell: pwsh
@@ -171,13 +223,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path ci-evidence | Out-Null
           zig version | Out-File -FilePath ci-evidence/zig-version.txt -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "zig version failed ($LASTEXITCODE)" }
           zig env | Out-File -FilePath ci-evidence/zig-env.txt -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "zig env failed ($LASTEXITCODE)" }
           @(
             "VCToolsInstallDir=$env:VCToolsInstallDir"
             "WindowsSdkDir=$env:WindowsSdkDir"
             "WindowsSDKVersion=$env:WindowsSDKVersion"
             "VCPKG_ROOT=$env:VCPKG_ROOT"
             "CHAKRA_ICU_DIR=$env:CHAKRA_ICU_DIR"
+            "ICU_INCLUDE_DIR=$env:ICU_INCLUDE_DIR"
+            "ICU_LIB_DIR=$env:ICU_LIB_DIR"
             "ml64=$((Get-Command ml64.exe).Source)"
             "python=$((Get-Command python).Source) ($(python --version 2>&1))"
           ) | Out-File -FilePath ci-evidence/inputs.txt -Encoding utf8
@@ -188,7 +244,8 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          zig build check-build-tools 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/check-build-tools.log
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
+          zig build @icuFlags check-build-tools 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/check-build-tools.log
           if ($LASTEXITCODE -ne 0) { throw "zig build check-build-tools failed ($LASTEXITCODE)" }
       - name: zig build (default test profile)
         shell: pwsh
@@ -197,7 +254,8 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          zig build 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
+          zig build @icuFlags 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
           if ($LASTEXITCODE -ne 0) { throw "zig build failed ($LASTEXITCODE)" }
       - name: Core PE32+ metadata, bytecode, JIT, & GCStress gates (check-metadata, verify-bytecode, check-jit, check-gcstress)
         shell: pwsh
@@ -206,9 +264,10 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
           foreach ($step in @("check-metadata", "verify-bytecode", "check-jit", "check-gcstress")) {
             Write-Host "=== zig build $step ==="
-            zig build $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
+            zig build @icuFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
             if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
           }
       - name: Node-API stack, Windows smoke, & package gate (libChakraNodeApi, ch-nodeapi, check-nodeapi, check-smoke, check-package)
@@ -218,9 +277,10 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
           foreach ($step in @("libChakraNodeApi", "ch-nodeapi", "check-nodeapi", "check-smoke", "check-package")) {
             Write-Host "=== zig build $step ==="
-            zig build $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
+            zig build @icuFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
             if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
           }
       - name: Tally gate outputs
@@ -289,8 +349,9 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          $flagList = '${{ matrix.flags }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-          zig build @flagList 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
+          $flagList = @('${{ matrix.flags }}' -split '\s+' | Where-Object { $_ })
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
+          zig build @flagList @icuFlags 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
           if ($LASTEXITCODE -ne 0) { throw "zig build ${{ matrix.flags }} failed ($LASTEXITCODE)" }
       - name: Run variant checks (${{ matrix.checks }})
         shell: pwsh
@@ -299,11 +360,12 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
-          $flagList = '${{ matrix.flags }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-          $checkList = '${{ matrix.checks }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          $flagList = @('${{ matrix.flags }}' -split '\s+' | Where-Object { $_ })
+          $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
+          $checkList = @('${{ matrix.checks }}' -split '\s+' | Where-Object { $_ })
           foreach ($step in $checkList) {
             Write-Host "=== zig build ${{ matrix.flags }} $step ==="
-            zig build @flagList $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/checks.log -Append
+            zig build @flagList @icuFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/checks.log -Append
             if ($LASTEXITCODE -ne 0) { throw "zig build ${{ matrix.flags }} $step failed ($LASTEXITCODE)" }
           }
       - name: Tally gate outputs
@@ -347,13 +409,14 @@ jobs:
             "## Tallies"
             ""
           )
-          $dirs = Get-ChildItem -Path evidence-in -Directory | Sort-Object Name
+          $dirs = if (Test-Path evidence-in) { Get-ChildItem -Path evidence-in -Directory | Sort-Object Name } else { @() }
           foreach ($d in $dirs) {
             $leg = $d.Name
             $summary += "### $leg"
             $tallyPath = Join-Path $d.FullName "tally.txt"
             if (Test-Path $tallyPath) {
-              $t = (Get-Content $tallyPath -Raw).Trim()
+              $raw = Get-Content $tallyPath -Raw
+              $t = if ($null -ne $raw) { $raw.Trim() } else { "" }
               $summary += $t
               Copy-Item $tallyPath "windows-evidence/tallies/$leg.txt"
               "- $t" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

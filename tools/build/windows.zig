@@ -1089,6 +1089,7 @@ pub fn build(b: *std.Build) void {
             if (profile != .release_shared) tu.addArg("-g");
             tu.addArgs(&.{
                 "-DNAPI_VERSION=10",
+                "-DNOMINMAX",
                 "-Ilib/Jsrt",
                 "-Iinclude/nodeapi",
                 "-Ilib/NodeApi",
@@ -1178,6 +1179,7 @@ pub fn build(b: *std.Build) void {
             "-O2",
             "-g",
             "-DNAPI_VERSION=10",
+            "-DNOMINMAX",
             "-Ilib/Jsrt",
             "-Iinclude/nodeapi",
             "-Ilib/NodeApi",
@@ -1200,6 +1202,7 @@ pub fn build(b: *std.Build) void {
             "-O2",
             "-g",
             "-DNAPI_VERSION=10",
+            "-DNOMINMAX",
             "-Ilib/Jsrt",
             "-Iinclude/nodeapi",
             "-Ilib/NodeApi",
@@ -1236,6 +1239,7 @@ pub fn build(b: *std.Build) void {
                 "-O2",
                 "-g",
                 "-DNAPI_VERSION=10",
+                "-DNOMINMAX",
                 "-DBUILDING_NODE_EXTENSION",
                 "-Iinclude/nodeapi",
             });

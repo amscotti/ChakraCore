@@ -16,6 +16,7 @@ name: zig-linux (x86_64 Linux build + check + Node-API)
 
 on:
   push:
+    branches: [master, 'modernize/**']
   pull_request:
   workflow_dispatch:
 
