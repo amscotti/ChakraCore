@@ -184,6 +184,27 @@ error` (warnings-as-errors).
 bundled clang reports it as unused, and `-Werror` escalates it in every TU.
 **Fix:** one-line suppression, same list as fix 7.
 
+### 14. `tools/build/windows.zig` — `-nostdlib++` on all `zig c++` link/compile invocations
+
+**Error:** after all 606 TUs compiled, the link of `ChakraCore.dll`/`GCStress.exe`
+failed: `vcruntime_typeinfo.h:137: error: target of using declaration conflicts
+with declaration already in scope` via `C:\tools\zig\lib\libcxx\include/typeinfo`.
+**Root cause:** Zig's `c++` driver, when linking C++ for `windows-msvc`, compiles
+its bundled **libcxxabi runtime from source** (`cxa_aux_runtime.cpp` et al.)
+to link into the target. Those sources include Zig's libc++ headers, and MSVC
+CRT headers (present in the same search paths) then declare `::type_info`
+twice — a hard conflict. Nothing here needs Zig's libc++ at all: every object
+was compiled against MSVC CRT headers with `-fms-runtime-lib=static`.
+**Why missed:** first Windows link of any kind.
+**Fix:** add `-nostdlib++` to every `zig c++` invocation in `windows.zig`
+(8 sites: dll/ch/gcstress/prov/nodeapi-host/stub/addon links + nodeapi TU
+compiles). Probes confirmed this both skips the libcxxabi build AND makes
+`zig cc`/link equivalent behavior match (`zig cc` alone still drags in a
+`libc++.lib` link reference; `-nostdlib++` is the suppressor that works).
+Documents the same failure mode for the earlier bare probe (libcxxabi +
+vcruntime conflict reproduced with plain `zig c++ -target x86_64-windows-msvc`).
+
+
 ## Retained / verified non-changes
 
 - Bytecode-header purity: `JnDirectFields.h`, `InternalPropertyList.h`,

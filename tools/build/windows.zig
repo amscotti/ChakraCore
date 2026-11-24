@@ -974,7 +974,7 @@ pub fn build(b: *std.Build) void {
             num += 1;
         }
 
-        const dll_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const dll_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         dll_link.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile) });
         if (profile == .@"test") dll_link.addArg("-g");
         // ChakraCore.vcxproj: HeapAllocatorOperators.obj must appear first on link line.
@@ -994,7 +994,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // Link ch.exe.
-    const ch_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+    const ch_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
     ch_link.addArgs(&.{ "-target", profile_target, msRuntimeLibFlag(profile) });
     if (profile != .release_shared) ch_link.addArg("-g");
     for (ch_objs.items) |o| ch_link.addFileArg(o);
@@ -1014,7 +1014,7 @@ pub fn build(b: *std.Build) void {
     if (dll_res) |dr| ch_link.step.dependOn(&dr.link.step);
 
     // Link GCStress.exe (mirrors bin/GCStress/GCStress.vcxproj).
-    const gs_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+    const gs_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
     gs_link.addArgs(&.{ "-target", profile_target, msRuntimeLibFlag(profile) });
     if (profile != .release_shared) gs_link.addArg("-g");
     for (gcstress_objs.items) |o| gs_link.addFileArg(o);
@@ -1094,7 +1094,7 @@ pub fn build(b: *std.Build) void {
 
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (tables.nodeapi_provider_tus) |src| {
-            const tu = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+            const tu = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
             tu.addArgs(&.{
                 "-target",
                 profile_target,
@@ -1128,7 +1128,7 @@ pub fn build(b: *std.Build) void {
             prov_objs.append(arena, out) catch @panic("OOM");
         }
 
-        const prov_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const prov_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         prov_link.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile) });
         if (profile == .@"test") prov_link.addArg("-g");
         for (prov_objs.items) |o| prov_link.addFileArg(o);
@@ -1186,7 +1186,7 @@ pub fn build(b: *std.Build) void {
         check_nodeapi_top.dependOn(&exports_check.step);
         check_nodeapi_step_opt = &exports_check.step;
 
-        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         nodeapi_host.addArgs(&.{
             "-target",
             profile_target,
@@ -1207,7 +1207,7 @@ pub fn build(b: *std.Build) void {
         nodeapi_host.step.dependOn(&dr.link.step);
         nodeapi_host_bin_opt = nodeapi_host_bin;
 
-        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         nodeapi_stub.addArgs(&.{
             "-target",
             profile_target,
@@ -1243,7 +1243,7 @@ pub fn build(b: *std.Build) void {
         }
 
         for ([_][]const u8{ "hello_world", "missing_register", "promise_probe", "return_replaces", "version_reject" }) |name| {
-            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
             addon.addArgs(&.{
                 "-target",
                 profile_target,
