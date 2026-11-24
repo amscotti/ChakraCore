@@ -17,7 +17,8 @@ prefixes, doc/b3-profiles.md section 10):
      minimum), a deliberate B2-established deviation.
   2. LC_MAIN stacksize on ch and GCStress: 8 MiB (8388608) for
      shared profiles (doc/build.md section 14 stack contract), 0
-     for debug-static — the U-B3.1-2 pin (legacy-exact: a nonzero
+     for static debug profiles (debug-static, jit-debug) — the
+     U-B3.1-2 pin (legacy-exact: a nonzero
      LC_MAIN stacksize makes RLIMIT_STACK immutable on macOS, so
      PAL_Initialize's lowering fails and the Debug _ASSERTE
      aborts; this assertion goes red if the abort recurs, in ANY
@@ -31,8 +32,9 @@ prefixes, doc/b3-profiles.md section 10):
      as dynamic text symbols (`nm -gU`: `T _Js...`) in
      libChakraCore.dylib, with a sanity floor on the total
      exported-symbol count. Static profiles: no dylib beside ch or
-     in lib/; libChakraCoreStatic.a present with the legacy-exact
-     527 members (526 C/C++ + u8a_codec.o) and the key JsRT text symbols (`nm -g`); ch links
+     in lib/; libChakraCoreStatic.a present with the expected
+     member count (default 538 for debug-static; --static-members N for
+     JIT static profiles) and the key JsRT text symbols (`nm -g`); ch links
      no libChakraCore (self-contained static executable).
   5. The `.profile` marker names this profile (B3.4 isolation pin:
      a prefix holding another profile's artifacts fails here, not
@@ -40,7 +42,8 @@ prefixes, doc/b3-profiles.md section 10):
 
 Every sub-check fails loudly with diagnostics on mismatch.
 
-Usage: check_metadata.py <prefix> [--profile <name>] [--self-test]
+Usage: check_metadata.py <prefix> [--profile <name>] [--static-members N]
+       [--self-test]
 Defaults: --profile test (the B2 assertions, unchanged).
 Supported profiles: test, debug-static, release-shared, jit, jit-debug,
 release-jit, and sanitizer side profiles <base>-sanitize-<mode> where
@@ -62,15 +65,17 @@ WANT_MINOS = "26.0"
 WANT_STACK = 8388608
 MIN_EXPORTS = 100
 # Per-profile LC_MAIN stacksize contract (see module docstring §2).
-# Shared profiles (including JIT variants) require 8 MiB; debug-static requires 0.
+# Shared profiles (test, release-shared, jit, release-jit) require 8 MiB;
+# debug static profiles (debug-static, jit-debug) require 0.
 WANT_STACK_BY_PROFILE = {
     "test": 8388608,
     "debug-static": 0,
     "release-shared": 8388608,
     "jit": 8388608,
-    "jit-debug": 8388608,
+    "jit-debug": 0,
     "release-jit": 8388608,
 }
+STATIC_PROFILES = frozenset({"debug-static", "jit-debug"})
 SANITIZE_MODES = ("address", "undefined", "thread")
 
 
@@ -229,8 +234,8 @@ def check_no_dylib(prefix):
     return failures
 
 
-def check_static_archive(path):
-    """The static archive: legacy-exact member count + JsRT symbols."""
+def check_static_archive(path, want_static_members=WANT_STATIC_MEMBERS):
+    """The static archive: expected member count + JsRT symbols."""
     failures = []
     if not os.path.isfile(path):
         return ["%s: missing static archive" % STATIC_ARCHIVE]
@@ -244,10 +249,10 @@ def check_static_archive(path):
                 % (STATIC_ARCHIVE, rc, err[:200])]
     members = [line for line in out.splitlines() if line.strip()]
     print("check_metadata: archive members -> %d" % len(members))
-    if len(members) != WANT_STATIC_MEMBERS:
-        failures.append("%s: %d members, require %d (legacy-exact)"
+    if len(members) != want_static_members:
+        failures.append("%s: %d members, require %d"
                         % (STATIC_ARCHIVE, len(members),
-                           WANT_STATIC_MEMBERS))
+                           want_static_members))
     rc, out, err = common.run_capture(["nm", "-g", path])
     if rc != 0:
         failures.append("nm -g failed on %s (rc=%d err=%r)"
@@ -369,12 +374,16 @@ def self_test():
                       == 8388608)
         bad += report("jit wants stacksize 8388608",
                       WANT_STACK_BY_PROFILE.get("jit") == 8388608)
-        bad += report("jit-debug wants stacksize 8388608",
-                      WANT_STACK_BY_PROFILE.get("jit-debug") == 8388608)
+        bad += report("jit-debug wants stacksize 0",
+                      WANT_STACK_BY_PROFILE.get("jit-debug") == 0)
+        bad += report("jit-debug is in STATIC_PROFILES",
+                      "jit-debug" in STATIC_PROFILES)
         bad += report("release-jit wants stacksize 8388608",
                       WANT_STACK_BY_PROFILE.get("release-jit") == 8388608)
         bad += report("static archive wants 538 members",
                       WANT_STATIC_MEMBERS == 538)
+        bad += report("garbage victim fails static-archive gate with custom count",
+                      check_static_archive(src, want_static_members=683) != [])
 
         # Sanitizer side-profile resolution + exact marker controls (B-5/B-7/B-9).
         bad += report("resolve jit -> (jit, None)",
@@ -422,6 +431,12 @@ def self_test():
         bad += report("CLI rejects bare sanitize-address with rc=2",
                       main(["check_metadata.py", tmp,
                             "--profile", "sanitize-address"]) == 2)
+        bad += report("CLI rejects non-positive --static-members with rc=2",
+                      main(["check_metadata.py", tmp,
+                            "--static-members", "0"]) == 2)
+        bad += report("CLI rejects non-numeric --static-members with rc=2",
+                      main(["check_metadata.py", tmp,
+                            "--static-members=abc"]) == 2)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -437,6 +452,7 @@ def main(argv):
     if "--self-test" in args:
         return self_test()
     profile = "test"
+    static_members = WANT_STATIC_MEMBERS
     rest = []
     i = 0
     while i < len(args):
@@ -447,6 +463,38 @@ def main(argv):
                 return 2
             profile = args[i + 1]
             i += 2
+        elif args[i].startswith("--profile="):
+            profile = args[i].split("=", 1)[1]
+            i += 1
+        elif args[i] == "--static-members":
+            if i + 1 >= len(args):
+                print("check_metadata: --static-members needs a value",
+                      file=sys.stderr)
+                return 2
+            try:
+                static_members = int(args[i + 1])
+            except ValueError:
+                print("check_metadata: bad --static-members %r" % args[i + 1],
+                      file=sys.stderr)
+                return 2
+            if static_members <= 0:
+                print("check_metadata: --static-members must be > 0, got %d"
+                      % static_members, file=sys.stderr)
+                return 2
+            i += 2
+        elif args[i].startswith("--static-members="):
+            raw_m = args[i].split("=", 1)[1]
+            try:
+                static_members = int(raw_m)
+            except ValueError:
+                print("check_metadata: bad --static-members %r" % raw_m,
+                      file=sys.stderr)
+                return 2
+            if static_members <= 0:
+                print("check_metadata: --static-members must be > 0, got %d"
+                      % static_members, file=sys.stderr)
+                return 2
+            i += 1
         else:
             rest.append(args[i])
             i += 1
@@ -457,7 +505,7 @@ def main(argv):
         return 2
     if len(rest) != 1:
         print("usage: check_metadata.py <prefix> "
-              "[--profile <name>]",
+              "[--profile <name>] [--static-members N]",
               file=sys.stderr)
         return 2
     prefix = os.path.abspath(rest[0])
@@ -465,7 +513,7 @@ def main(argv):
         os.path.dirname(os.path.abspath(__file__))))
     failures = []
     want_stack = WANT_STACK_BY_PROFILE[base_profile]
-    is_static = base_profile == "debug-static"
+    is_static = base_profile in STATIC_PROFILES
 
     err = check_profile_marker(prefix, profile)
     if err is not None:
@@ -493,7 +541,8 @@ def main(argv):
         if is_static:
             failures.extend(check_no_dylib(prefix))
             failures.extend(check_static_archive(
-                os.path.join(prefix, STATIC_ARCHIVE)))
+                os.path.join(prefix, STATIC_ARCHIVE),
+                want_static_members=static_members))
             ch_path = os.path.join(prefix, EXECUTABLES[0])
             if os.path.exists(ch_path):
                 err = check_self_contained(ch_path)
@@ -516,7 +565,7 @@ def main(argv):
         print("check_metadata: PASS: minos 26.0 (otool+vtool), stacksize 0, "
               "4 headers byte-identical, no dylib, static archive %d "
               "members + %d JsRT symbols, ch self-contained"
-              % (WANT_STATIC_MEMBERS, len(REQUIRED_EXPORTS)))
+              % (static_members, len(REQUIRED_EXPORTS)))
     else:
         print("check_metadata: PASS: minos 26.0 (otool+vtool), 8MiB stacks, "
               "4 headers byte-identical, %d JsRT exports present"

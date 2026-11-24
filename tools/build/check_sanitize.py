@@ -51,9 +51,9 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 
 VALID_MODES = ("address", "undefined", "thread")
 SHARED_PROFILES = frozenset({
-    "test", "jit", "jit-debug", "release-shared", "release-jit",
+    "test", "jit", "release-shared", "release-jit",
 })
-STATIC_PROFILES = frozenset({"debug-static"})
+STATIC_PROFILES = frozenset({"debug-static", "jit-debug"})
 ALL_PROFILES = SHARED_PROFILES | STATIC_PROFILES
 DEFAULT_TIMEOUT = 120.0
 

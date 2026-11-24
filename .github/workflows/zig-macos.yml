@@ -357,7 +357,13 @@ jobs:
       - name: Record inputs
         run: |
           set -euo pipefail
-          python3 tools/build/ci_record.py inputs --profile jit-debug --out ci-evidence
+          mkdir -p ci-evidence
+          mise exec -- zig version > ci-evidence/zig-version.txt
+          mise exec -- zig env > ci-evidence/zig-env.txt
+          python3 tools/build/check_jit.py --self-test 2>&1 | tee ci-evidence/jit-selftest.log
+          python3 tools/build/check_metadata.py --self-test 2>&1 | tee ci-evidence/metadata-selftest.log
+          python3 tools/build/check_fulljit.py --self-test 2>&1 | tee ci-evidence/fulljit-selftest.log
+          python3 tools/build/check_wasm_p1.py --self-test 2>&1 | tee ci-evidence/wasm-selftest.log
       - name: zig build -Dprofile=jit-debug -Dwasm=true
         run: |
           set -euo pipefail
@@ -366,20 +372,23 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/build/ci_record.py manifest --prefix out/jit-debug --out ci-evidence --label jit-debug
-      - name: zig build -Dprofile=jit-debug -Dwasm=true check-smoke check-jit check-metadata check-fulljit check-wasm-jit
+      - name: zig build -Dprofile=jit-debug -Dwasm=true verify-bytecode check-native check-smoke check-jit check-metadata check-fulljit check-wasm-jit
         run: |
           set -euo pipefail
-          mise exec -- zig build -Dprofile=jit-debug -Dwasm=true check-smoke check-jit check-metadata check-fulljit check-wasm-jit 2>&1 | tee ci-evidence/check.log
+          mise exec -- zig build -Dprofile=jit-debug -Dwasm=true verify-bytecode check-native check-smoke check-jit check-metadata check-fulljit check-wasm-jit 2>&1 | tee ci-evidence/check.log
       - name: Tally gate outputs
         id: tally
         run: |
           set -euo pipefail
+          grep -F 'Bytecode is up to date' ci-evidence/check.log
+          grep -E 'test-static-c98 : PASS' ci-evidence/check.log
+          grep -F 'check_native: PASS' ci-evidence/check.log
           grep -F 'check_smoke: PASS' ci-evidence/check.log
           grep -F 'check_jit: PASS' ci-evidence/check.log
           grep -F 'check_metadata: PASS' ci-evidence/check.log
           grep -F 'check_fulljit: PASS' ci-evidence/check.log
           grep -F 'check_wasm_p1: PASS' ci-evidence/check.log
-          line="jit-debug: smoke=PASS jit=PASS metadata=PASS fulljit=PASS wasm-jit=PASS"
+          line="jit-debug: bytecode=PASS native=static-PASS smoke=PASS jit=PASS metadata=PASS fulljit=PASS wasm-jit=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"

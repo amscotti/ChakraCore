@@ -128,7 +128,7 @@ const Profile = enum {
     release_shared,
     /// Worktree-only ARM64 macOS JIT. Same flags as test, without DISABLE_JIT.
     jit,
-    /// Worktree-only ARM64 macOS Debug+JIT (shared, asserts enabled, backend asserts active).
+    /// Worktree-only ARM64 macOS Debug+JIT (static, asserts enabled, backend asserts active).
     jit_debug,
     /// Worktree-only ARM64 macOS Release+JIT (-O3 -DNDEBUG -g0, no debug flaglist).
     release_jit,
@@ -145,7 +145,7 @@ const Profile = enum {
     }
 
     fn isStatic(self: Profile) bool {
-        return self == .debug_static;
+        return self == .debug_static or self == .jit_debug;
     }
 
     fn isJit(self: Profile) bool {
@@ -525,8 +525,8 @@ fn registerPackageSteps(
     nodeapi_step_opt: ?*std.Build.Step,
 ) void {
     if (!is_supported) {
-        registerFailStep(b, python, "package", "Not applicable on debug-static", "package requires a shared profile (test, release-shared, jit, jit-debug, or release-jit) with dynamic libraries");
-        registerFailStep(b, python, "check-package", "Not applicable on debug-static", "check-package requires a shared profile (test, release-shared, jit, jit-debug, or release-jit) with dynamic libraries");
+        registerFailStep(b, python, "package", "Not applicable on static profiles", "package requires a shared profile (test, release-shared, jit, or release-jit) with dynamic libraries");
+        registerFailStep(b, python, "check-package", "Not applicable on static profiles", "check-package requires a shared profile (test, release-shared, jit, or release-jit) with dynamic libraries");
         return;
     }
 
@@ -1289,7 +1289,7 @@ pub fn build(b: *std.Build) void {
     const ch: LinkedArtifact = if (sanitize != .none) blk: {
         const link = b.addSystemCommand(&.{ctx.host_cxx});
         addSanitizeHostLinkPrefix(&ctx, link);
-        if (profile != .debug_static) link.addArg("-Wl,-stack_size,0x800000");
+        if (!profile.isDebug()) link.addArg("-Wl,-stack_size,0x800000");
         link.addArg("-Wl,-u,_OnChakraCoreLoadedEntry");
         for (ch_objs.items) |o| link.addFileArg(o);
         if (is_static) {
@@ -1334,10 +1334,11 @@ pub fn build(b: *std.Build) void {
         // (32MB here) to 8MB; the Debug-only _ASSERTE(err == 0) therefore
         // aborts any Debug ch linked with a nonzero stacksize, while
         // non-Debug builds fail the call silently and run fine. Legacy
-        // links stacksize 0 on both executables, so debug-static sets an
-        // explicit 0 (Zig's default would be 16MB - null is NOT zero);
-        // test/release keep the B2 8MB contract (silent-failure path).
-        exe.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
+        // links stacksize 0 on both executables, so debug profiles
+        // (debug-static, jit-debug) set an explicit 0 (Zig's default would
+        // be 16MB - null is NOT zero); test/release/jit keep the B2 8MB
+        // contract (silent-failure path).
+        exe.stack_size = if (profile.isDebug()) 0 else 8 * 1024 * 1024;
         exe.step.dependOn(&jstoc.step);
         break :blk .{ .bin = exe.getEmittedBin(), .step = &exe.step, .compile = exe, .name = "ch" };
     };
@@ -1348,7 +1349,7 @@ pub fn build(b: *std.Build) void {
     const gs: LinkedArtifact = if (sanitize != .none) blk: {
         const link = b.addSystemCommand(&.{ctx.host_cxx});
         addSanitizeHostLinkPrefix(&ctx, link);
-        if (profile != .debug_static) link.addArg("-Wl,-stack_size,0x800000");
+        if (!profile.isDebug()) link.addArg("-Wl,-stack_size,0x800000");
         for (gs_objs.items) |o| link.addFileArg(o);
         link.addFileArg(static_archive.bin);
         link.addArgs(&.{ "-framework", "CoreFoundation", "-framework", "Security" });
@@ -1369,9 +1370,9 @@ pub fn build(b: *std.Build) void {
         const exe = b.addExecutable(.{ .name = "GCStress", .root_module = gs_mod });
         exe.headerpad_max_install_names = true;
         // Same U-B3.1-2 contract as ch above: GCStress links the same Debug
-        // PAL_Initialize, so debug-static stamps LC_MAIN stacksize 0 like
-        // legacy; test/release keep 8MB.
-        exe.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
+        // PAL_Initialize, so debug profiles stamp LC_MAIN stacksize 0 like
+        // legacy; test/release/jit keep 8MB.
+        exe.stack_size = if (profile.isDebug()) 0 else 8 * 1024 * 1024;
         break :blk .{ .bin = exe.getEmittedBin(), .step = &exe.step, .compile = exe, .name = "GCStress" };
     };
 
@@ -2123,6 +2124,7 @@ pub fn build(b: *std.Build) void {
         const sname = side_name.?;
         const jit_prefix_str = b.fmt("out/{s}", .{sname});
         const jit_ch_str = b.fmt("out/{s}/bin/ch", .{sname});
+        const jit_archive_str = b.fmt("out/{s}/lib/libChakraCoreStatic.a", .{sname});
         const jit_cc = b.findProgram(.{ .names = &.{"clang"} }) orelse "clang";
         const jit_cxx = b.findProgram(.{ .names = &.{"clang++"} }) orelse "clang++";
 
@@ -2131,7 +2133,7 @@ pub fn build(b: *std.Build) void {
         jit_smoke.addArg(jit_ch_str);
         jit_smoke.addFileInput(ch.bin);
         jit_smoke.addArg("--profile");
-        jit_smoke.addArg("test");
+        jit_smoke.addArg(if (profile.isDebug()) "debug-static" else "test");
         jit_smoke.step.dependOn(cp_step);
         jit_smoke.stdio = .inherit;
         const jit_smoke_top = b.step("check-smoke", b.fmt("Assert {s} ch version/flag/snippet output (not part of the default build)", .{sname}));
@@ -2168,9 +2170,14 @@ pub fn build(b: *std.Build) void {
         jit_native.addFileInput(ch.bin);
         jit_native.addArg(jit_cc);
         jit_native.addArg(jit_cxx);
+        if (is_static) {
+            jit_native.addArg("--static");
+            jit_native.addArg(b.fmt("--archive={s}", .{jit_archive_str}));
+            jit_native.addFileInput(static_archive.bin);
+        }
         jit_native.step.dependOn(cp_step);
         jit_native.stdio = .inherit;
-        const jit_native_top = b.step("check-native", b.fmt("Run the shared embedding tests against {s} artifacts (not part of the default build)", .{sname}));
+        const jit_native_top = b.step("check-native", b.fmt("Run the {s} embedding tests against {s} artifacts (not part of the default build)", .{ if (is_static) "static" else "shared", sname }));
         jit_native_top.dependOn(&jit_native.step);
 
         const jit_metadata = b.addSystemCommand(&.{python});
@@ -2180,9 +2187,14 @@ pub fn build(b: *std.Build) void {
         jit_metadata.addFileInput(config_h);
         jit_metadata.addArg("--profile");
         jit_metadata.addArg(sname);
+        if (is_static) {
+            jit_metadata.addArg("--static-members");
+            jit_metadata.addArg(b.fmt("{d}", .{static_objs.items.len}));
+            jit_metadata.addFileInput(static_archive.bin);
+        }
         jit_metadata.step.dependOn(cp_step);
         jit_metadata.stdio = .inherit;
-        const jit_metadata_top = b.step("check-metadata", b.fmt("Assert {s} artifact metadata: minos, 8MiB stacks, headers, exports (not part of the default build)", .{sname}));
+        const jit_metadata_top = b.step("check-metadata", b.fmt("Assert {s} artifact metadata: minos, {s}, headers, {s} (not part of the default build)", .{ sname, if (is_static) "stacksize 0" else "8MiB stacks", if (is_static) "no dylib, archive, self-containment" else "exports" }));
         jit_metadata_top.dependOn(&jit_metadata.step);
 
         registerFailStep(
@@ -2203,7 +2215,7 @@ pub fn build(b: *std.Build) void {
         if (jit_wasm_step) |ws| jit_check_top.dependOn(ws);
         if (jit_wasm_jit_step) |wjs| jit_check_top.dependOn(wjs);
         jit_check_top.dependOn(selftest_top);
-        registerPackageSteps(b, python, true, jit_prefix_str, sname, cp_step, prov_step_opt, nodeapi_step_opt);
+        registerPackageSteps(b, python, !is_static, if (is_static) "" else jit_prefix_str, sname, cp_step, prov_step_opt, nodeapi_step_opt);
         return;
     }
 

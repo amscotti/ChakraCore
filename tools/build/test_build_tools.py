@@ -36,6 +36,7 @@ import common
 import check_fulljit
 import check_gcstress
 import check_jit
+import check_metadata
 import check_metadata_windows
 import check_native
 import check_nodeapi
@@ -1584,6 +1585,17 @@ class Tier1GateAndSanitizerTests(unittest.TestCase):
         self.assertIn("halt_on_error=1", ubsan_env["UBSAN_OPTIONS"])
         self.assertIsNotNone(check_sanitize.find_sanitizer_diagnostic(
             "SUMMARY: UndefinedBehaviorSanitizer: runtime error"))
+
+    def test_jit_debug_static_metadata_and_sanitize_contracts(self):
+        self.assertEqual(check_metadata.self_test(), 0)
+        self.assertEqual(check_metadata.WANT_STACK_BY_PROFILE["jit-debug"], 0)
+        self.assertIn("jit-debug", check_metadata.STATIC_PROFILES)
+        self.assertIn("jit-debug", check_sanitize.STATIC_PROFILES)
+        self.assertNotIn("jit-debug", check_sanitize.SHARED_PROFILES)
+        self.assertEqual(
+            len(check_sanitize.expected_leg_names("jit-debug", True, True)),
+            23,
+        )
 
     def test_build_and_linux_zig_wire_tier1_targets(self):
         bz = (ROOT / "build.zig").read_text()
