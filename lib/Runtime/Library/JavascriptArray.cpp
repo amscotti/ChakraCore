@@ -6942,7 +6942,7 @@ Case0:
     {
         bool (*compareType)(JavascriptArray::CompareVarsInfo*, const void*, const void*) = cvInfo->compareType;
         uint32 sortedCount = 1, lowerBound = 0, insertPoint = 0, upperBound = 0;
-        T item;
+        T item = {};
         while (sortedCount < length)
         {
             item = list[sortedCount];
@@ -6976,78 +6976,100 @@ Case0:
         }
     }
 
-    // Sorting algorithm for longer arrays
+    // Shared bottom-up merge sort using a caller-owned scratch buffer.
+    // Callers with GC-traced T (Field(Var), StringItem) must supply Recycler-scanned
+    // zero-initialized storage for both list and buffer because compareType can run JS/GC.
     template<typename T>
-    void JavascriptArray::MergeSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo, ArenaAllocator* allocator)
+    void JavascriptArray::MergeSortBuffer(T* list, T* buffer, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo)
     {
         bool (*compareType)(JavascriptArray::CompareVarsInfo*, const void*, const void*) = cvInfo->compareType;
-        T* buffer = AnewArray(allocator, T, length);
-        uint32 bucketSize = 2, lastSize = 1, position = 0, left = 0, mid = 0, right = 0, i = 0, j = 0, k = 0;
-        uint32 doubleLength = length + length;
-        T rightElement, leftElement;
+        uint64 bucketSize = 2, lastSize = 1, position = 0;
+        uint64 doubleLength = static_cast<uint64>(length) + static_cast<uint64>(length);
+        uint32 left = 0, mid = 0, right = 0, i = 0, j = 0, k = 0;
+        T rightElement = {}, leftElement = {};
 
         while (bucketSize < doubleLength)
         {
             while (position < length)
             {
-                left = position;
-                mid = left + lastSize;
+                left = static_cast<uint32>(position);
+                uint64 mid64 = position + lastSize;
 
                 // perform a merge but only if it's necessary
-                if (mid < length && compareType (cvInfo, &list[mid], &list[mid - 1]))
+                if (mid64 < length)
                 {
-                    right = position + bucketSize;
-                    right = right < length ? right : length;
-                    i = mid - 1, j = 0, k = mid;
-
-                    while (k < right)
+                    mid = static_cast<uint32>(mid64);
+                    if (compareType (cvInfo, &list[mid], &list[mid - 1]))
                     {
-                        buffer[j++] = list[k++];
-                    }
-    
-                    rightElement = buffer[--j];
-                    leftElement = list[i];
+                        uint64 right64 = position + bucketSize;
+                        right = static_cast<uint32>(right64 < length ? right64 : length);
+                        i = mid - 1, j = 0, k = mid;
 
-                    for (;;)
-                    {
-                        if (compareType (cvInfo, &rightElement, &leftElement))
+                        while (k < right)
                         {
-                            list[--k] = leftElement;
-                            if (i > left)
+                            buffer[j++] = list[k++];
+                        }
+
+                        rightElement = buffer[--j];
+                        leftElement = list[i];
+
+                        for (;;)
+                        {
+                            if (compareType (cvInfo, &rightElement, &leftElement))
                             {
-                                leftElement = list[--i];
+                                list[--k] = leftElement;
+                                if (i > left)
+                                {
+                                    leftElement = list[--i];
+                                }
+                                else
+                                {
+                                    list[--k] = rightElement;
+                                    break;
+                                }
                             }
                             else
                             {
                                 list[--k] = rightElement;
-                                break;
+                                if (j > 0)
+                                {
+                                    rightElement = buffer[--j];
+                                }
+                                else
+                                {
+                                    break;
+                                }
                             }
                         }
-                        else
-                        {
-                            list[--k] = rightElement;
-                            if (j > 0)
-                            {
-                                rightElement = buffer[--j];
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                    }
 
-                    while (j > 0)
-                    {
-                        list[--k] = buffer[--j];
+                        while (j > 0)
+                        {
+                            list[--k] = buffer[--j];
+                        }
                     }
-                }  
+                }
                 position += bucketSize;
             }
             position = 0;
             lastSize = bucketSize;
             bucketSize *= 2;
         }
+    }
+
+    // Sorting algorithm for longer non-GC-traced arrays (TypedArray primitive elements)
+    template<typename T>
+    void JavascriptArray::MergeSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo, ArenaAllocator* allocator)
+    {
+        T* buffer = AnewArray(allocator, T, length);
+        MergeSortBuffer<T>(list, buffer, length, cvInfo);
+    }
+
+    // Sorting algorithm for longer GC-traced arrays (Field(Var) and StringItem)
+    template<typename T>
+    void JavascriptArray::MergeSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo, Recycler* recycler)
+    {
+        T* buffer = RecyclerNewArrayZ(recycler, T, length);
+        MergeSortBuffer<T>(list, buffer, length, cvInfo);
     }
 
     // Set and Get helpers used in JavascriptArray::SortHelper below
@@ -7059,7 +7081,7 @@ Case0:
 
     inline void SortSetHelper(StringItem* list, Var item, uint32 index, JsReentLock* jsReentLock, ScriptContext* scriptContext)
     {
-        StringItem current;
+        StringItem current = {};
         current.Value = item;
         JsReentLock lock = *jsReentLock;
         JS_REENTRANT(lock, current.StringValue = JavascriptConversion::ToString(item, scriptContext));
@@ -7113,43 +7135,39 @@ Case0:
         }
         uint32 len = static_cast<uint32>(len64);
 
-        BEGIN_TEMP_ALLOCATOR(tempAlloc, scriptContext, _u("Runtime"))
+        Recycler* recycler = scriptContext->GetRecycler();
+
+        // Spec mandates that we copy the array into a 'list' before sorting.
+        // Back list (and MergeSort's scratch buffer) with zero-initialized Recycler
+        // storage so GC traces every converted element and never scans uninitialized slots.
+        T* list = RecyclerNewArrayZ(recycler, T, len);
+
+        uint32 values = 0;
+        uint32 undefinedValues = 0;
+        uint32 holes = 0;
+        uint32 i = 0, j = 0;
+
+        for (; i < len; ++i)
         {
-            // Spec mandates that we copy the array into a 'list' before sorting
-            // This severely limits the potential for sort side-effects to alter the result
-            T* list = AnewArray(tempAlloc, T, len);
+            JS_REENTRANT(jsReentLock, BOOL hasItem = JavascriptOperators::HasItem(obj, i));
 
-            uint32 values = 0;
-            uint32 undefinedValues = 0;
-            uint32 holes = 0;
-            uint32 i = 0, j = 0;
-
-            for (; i < len; ++i)
+            if (hasItem)
             {
-                JS_REENTRANT(jsReentLock, BOOL hasItem = JavascriptOperators::HasItem(obj, i));
-                
-                if (hasItem)
+                Var item = nullptr;
+                JS_REENTRANT(jsReentLock, BOOL gotItem = JavascriptOperators::GetItem(obj, i, &item, scriptContext));
+                if (gotItem)
                 {
-                    Var item = nullptr;
-                    JS_REENTRANT(jsReentLock, BOOL gotItem = JavascriptOperators::GetItem(obj, i, &item, scriptContext));
-                    if (gotItem)
+                    TypeId type = JavascriptOperators::GetTypeId(item);
+                    if (type != TypeIds_Undefined)
                     {
-                        TypeId type = JavascriptOperators::GetTypeId(item);
-                        if (type != TypeIds_Undefined)
-                        {
-                            // If T = Var this adds item to the list
-                            // If T = StringItem this creates a StringItem from the Var and adds that to the list
-                            SortSetHelper(list, item, values, &jsReentLock, scriptContext);
-                            values++;
-                        }
-                        else
-                        {
-                            ++undefinedValues;
-                        }
+                        // If T = Var this adds item to the list
+                        // If T = StringItem this creates a StringItem from the Var and adds that to the list
+                        SortSetHelper(list, item, values, &jsReentLock, scriptContext);
+                        values++;
                     }
                     else
                     {
-                        ++holes;
+                        ++undefinedValues;
                     }
                 }
                 else
@@ -7157,43 +7175,46 @@ Case0:
                     ++holes;
                 }
             }
-
-            // Call the appropriate Sorting Algorithm
-            // Insertion sort uses less memory and is quicker on short arrays but gets less efficient as arrays get longer
-            if (values < 512)
-            {
-                JS_REENTRANT(jsReentLock, JavascriptArray::InsertionSort<T>(list, values, cvInfo));
-            }
             else
             {
-                JS_REENTRANT(jsReentLock, JavascriptArray::MergeSort<T>(list, values, cvInfo, tempAlloc));
-            }
-
-            // Write the sorted data back to the original array
-            // Undefined values and holes are placed at the end
-            TypedArrayBase* typedArray = JavascriptOperators::TryFromVar<TypedArrayBase>(obj);
-            if (values > 0 && typedArray != nullptr &&
-                IsImmutableBuffer(typedArray->GetArrayBuffer()))
-            {
-                // Array.prototype.sort on an immutable typed array reaches
-                // this point through the generic path; fail before the first
-                // Set instead of silently dropping every store.
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
-            }
-            for (i = 0; i < values; ++i)
-            {
-                JS_REENTRANT(jsReentLock, JavascriptOperators::SetItem(obj, obj, i, SortGetHelper(list, i), scriptContext, static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible)));
-            }
-            for (; j < undefinedValues; ++j, ++i)
-            {
-                JS_REENTRANT(jsReentLock, JavascriptOperators::SetItem(obj, obj, i, scriptContext->GetLibrary()->GetUndefined(), scriptContext, static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible)));
-            }
-            for (j = 0; j < holes; ++j, ++i)
-            {
-                JS_REENTRANT(jsReentLock, JavascriptOperators::DeleteItem(obj, i, PropertyOperation_ThrowOnDeleteIfNotConfig));
+                ++holes;
             }
         }
-        END_TEMP_ALLOCATOR(tempAlloc, scriptContext);
+
+        // Call the appropriate Sorting Algorithm
+        // Insertion sort uses less memory and is quicker on short arrays but gets less efficient as arrays get longer
+        if (values < 512)
+        {
+            JS_REENTRANT(jsReentLock, JavascriptArray::InsertionSort<T>(list, values, cvInfo));
+        }
+        else
+        {
+            JS_REENTRANT(jsReentLock, JavascriptArray::MergeSort<T>(list, values, cvInfo, recycler));
+        }
+
+        // Write the sorted data back to the original array
+        // Undefined values and holes are placed at the end
+        TypedArrayBase* typedArray = JavascriptOperators::TryFromVar<TypedArrayBase>(obj);
+        if (values > 0 && typedArray != nullptr &&
+            IsImmutableBuffer(typedArray->GetArrayBuffer()))
+        {
+            // Array.prototype.sort on an immutable typed array reaches
+            // this point through the generic path; fail before the first
+            // Set instead of silently dropping every store.
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+        for (i = 0; i < values; ++i)
+        {
+            JS_REENTRANT(jsReentLock, JavascriptOperators::SetItem(obj, obj, i, SortGetHelper(list, i), scriptContext, static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible)));
+        }
+        for (; j < undefinedValues; ++j, ++i)
+        {
+            JS_REENTRANT(jsReentLock, JavascriptOperators::SetItem(obj, obj, i, scriptContext->GetLibrary()->GetUndefined(), scriptContext, static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible)));
+        }
+        for (j = 0; j < holes; ++j, ++i)
+        {
+            JS_REENTRANT(jsReentLock, JavascriptOperators::DeleteItem(obj, i, PropertyOperation_ThrowOnDeleteIfNotConfig));
+        }
 
         // if the Array is not just an array-like object but an actual array we clear the Segment map
         // optimised access CC generates for arrays that may have been mangled by sorting

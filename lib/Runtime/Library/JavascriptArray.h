@@ -666,6 +666,8 @@ namespace Js
     private:
         template<typename T> static void InsertionSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo);
         template<typename T> static void MergeSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo, ArenaAllocator* allocator);
+        template<typename T> static void MergeSort(T* list, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo, Recycler* recycler);
+        template<typename T> static void MergeSortBuffer(T* list, T* buffer, uint32 length, JavascriptArray::CompareVarsInfo* cvInfo);
         template<typename T> static Var SortHelper(Var array, JavascriptArray::CompareVarsInfo* cvInfo);
 
         template <typename Fn>
