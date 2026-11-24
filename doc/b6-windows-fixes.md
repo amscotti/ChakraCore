@@ -224,6 +224,27 @@ A stub-lib workaround (empty `libc++.lib` via `-L`) was verified to link but
 is rejected: it would mask genuine libc++ references if any future TU ever
 actually needed them, silently, instead of failing loudly.
 
+### 16. `tools/build/windows.zig` — drop `-DU_DISABLE_RENAMING=1` for `-Dicu=icu4c`
+
+**Error:** `lld-link: error: undefined symbol: u_strToUpper / u_strToLower /
+u_strlen / uset_open / uset_getItemCount / uset_getItem` (undefined symbol at
+link for 6 ICU4C functions, in `UnicodeText.ICU.cpp` et al.).
+**Root cause:** `windows.zig` passed `-DU_DISABLE_RENAMING=1` (inherited from
+`Build/Chakra.Build.props`, whose comment says "maintain compatibility with
+Windows Kit ICU's icuuc/icuin.lib"). That property matched a *custom* Windows
+ICU build with un-suffixed exports. The build now links **vcpkg's shared ICU**
+(`icuuc79.dll`), which exports **version-suffixed** names only
+(`u_strToUpper_79`, `uset_open_79`, ...), so plain names have no target.
+**Why missed:** the legacy MSBuild default was the custom ICU; the modernize
+zig build switched to vcpkg but kept the legacy define. macOS/Linux builds
+never used vcpkg ICU (they use a from-source ICU with renaming disabled).
+**Fix:** in the `.icu4c` branch of the ICU defines, drop
+`-DU_DISABLE_RENAMING=1` so ICU headers activate their versioning macros and
+references resolve to the suffixed exports the vcpkg DLL actually provides.
+The `.windows` branch keeps the flag (SDK ICU exports plain names). Type
+compatibility is unchanged (`UChar` is `char16_t` on both; verify at Step 3
+via `verify-bytecode` + smoke).
+
 
 ## Retained / verified non-changes
 

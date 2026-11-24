@@ -258,7 +258,13 @@ pub fn buildCompileDefines(
     if (!jit) out.append(arena, "-DDISABLE_JIT=1") catch @panic("OOM");
     switch (icu) {
         .icu4c => {
-            for ([_][]const u8{ "-DHAS_ICU=1", "-DINTL_ICU=1", "-DU_DISABLE_RENAMING=1" }) |d|
+            // NOTE: no U_DISABLE_RENAMING here. It was carried over from the
+            // legacy MSBuild (which linked a custom ICU with un-suffixed
+            // exports via Chakra.ICU.props). vcpkg's shared ICU exports
+            // version-suffixed names (u_strToUpper_79); the renaming macros
+            // must be active so our calls resolve to those exports. See
+            // doc/b6-windows-fixes.md #16.
+            for ([_][]const u8{ "-DHAS_ICU=1", "-DINTL_ICU=1" }) |d|
                 out.append(arena, d) catch @panic("OOM");
         },
         .windows => {
