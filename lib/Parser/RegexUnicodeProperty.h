@@ -620,6 +620,49 @@ namespace UnifiedRegex
             return s_cache;
         }
 
+        template <typename T>
+        struct AutoNoCheckHeapArray
+        {
+            T* ptr;
+            int32 cap;
+            AutoNoCheckHeapArray(T* p, int32 c) : ptr(p), cap(c) {}
+            AutoNoCheckHeapArray(const AutoNoCheckHeapArray&) = delete;
+            void operator=(const AutoNoCheckHeapArray&) = delete;
+            ~AutoNoCheckHeapArray()
+            {
+                if (ptr != nullptr)
+                {
+                    NoCheckHeapDeleteArray(cap, ptr);
+                }
+            }
+            T* Detach()
+            {
+                T* p = ptr;
+                ptr = nullptr;
+                return p;
+            }
+        };
+
+        struct AutoUSet
+        {
+            USet* set;
+            explicit AutoUSet(USet* s) : set(s) {}
+            AutoUSet(const AutoUSet&) = delete;
+            void operator=(const AutoUSet&) = delete;
+            ~AutoUSet()
+            {
+                Close();
+            }
+            void Close()
+            {
+                if (set != nullptr)
+                {
+                    uset_close(set);
+                    set = nullptr;
+                }
+            }
+        };
+
         // Fills `result` with the USet's sorted ranges and returns a flat POD
         // pair array (owned by caller until handed to PropertyRangeCache).
         static bool ExtractUSetRanges(USet* set, ArenaAllocator* allocator, CharSet<codepoint_t>& result, codepoint_t** outPairs, int32* outCap, int32* outNumPairs)
@@ -635,7 +678,8 @@ namespace UnifiedRegex
             }
 
             const int32 pairCap = itemCount * 2;
-            codepoint_t* pairs = NoCheckHeapNewArray(codepoint_t, pairCap);
+            AutoNoCheckHeapArray<codepoint_t> pairsGuard(NoCheckHeapNewArray(codepoint_t, pairCap), pairCap);
+            codepoint_t* pairs = pairsGuard.ptr;
             int32 numPairs = 0;
             for (int32 i = 0; i < itemCount; i++)
             {
@@ -644,7 +688,6 @@ namespace UnifiedRegex
                 int32 strLen = uset_getItem(set, i, &start, &end, str, 8, &ec);
                 if (U_FAILURE(ec))
                 {
-                    NoCheckHeapDeleteArray(pairCap, pairs);
                     return false;
                 }
                 if (strLen != 0 || start > end)
@@ -669,7 +712,7 @@ namespace UnifiedRegex
             {
                 result.SetRanges(allocator, numPairs, pairs);
             }
-            *outPairs = pairs;
+            *outPairs = pairsGuard.Detach();
             *outCap = pairCap;
             *outNumPairs = numPairs;
             return true;
@@ -698,7 +741,8 @@ namespace UnifiedRegex
             }
 
             UErrorCode ec = U_ZERO_ERROR;
-            USet* set = uset_open(1, 0); // empty
+            AutoUSet setGuard(uset_open(1, 0)); // empty
+            USet* set = setGuard.set;
             switch (resolved.kind)
             {
                 case BinaryProperty:
@@ -752,7 +796,7 @@ namespace UnifiedRegex
             int32 pairCap = 0;
             int32 numPairs = 0;
             bool ok = U_SUCCESS(ec) && ExtractUSetRanges(set, allocator, result, &pairs, &pairCap, &numPairs);
-            uset_close(set);
+            setGuard.Close();
             if (ok)
             {
                 cache.Insert(resolved, pairs, pairCap, numPairs);
@@ -989,7 +1033,8 @@ namespace UnifiedRegex
                 return false;
 
             UErrorCode ec = U_ZERO_ERROR;
-            USet* set = uset_open(1, 0); // empty
+            AutoUSet setGuard(uset_open(1, 0)); // empty
+            USet* set = setGuard.set;
             // ICU resolves these with an empty value ("[:Basic_Emoji:]" in
             // UnicodeSet pattern terms).
             uset_applyPropertyAlias(set, stringPropertyNames[resolved.value], -1, NULL, 0, &ec);
@@ -1030,7 +1075,7 @@ namespace UnifiedRegex
                     }
                 }
             }
-            uset_close(set);
+            setGuard.Close();
             return ok;
         }
     }

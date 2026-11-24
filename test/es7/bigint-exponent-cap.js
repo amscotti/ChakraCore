@@ -54,10 +54,49 @@ var tests = [
             assert.throws(function () { return 3n ** (1n << 60n); }, RangeError);
             assert.throws(function () { return (1n << 536870912n) ** 2n; }, RangeError);
             assert.throws(function () { return 1n << 1073741824n; }, RangeError);
-            assert.throws(function () {
-                var maxPow = 2n ** 1073741823n; // 2**30 bits on 64-bit; throws above on 32-bit
-                return maxPow * 2n;
-            }, RangeError);
+
+            // Exact upper boundary of BigIntMaxResultBitCount(): 2**30 bits on 64-bit
+            // (2**29 bits on 32-bit). Compute exact-cap values outside assert.throws
+            // so ShiftLeftMagnitude is proved not to throw 1 limb early.
+            var has64BitCap = false;
+            try {
+                var probe = 1n << 536870912n;
+                assert.strictEqual(1n, probe >> 536870912n);
+                probe = null;
+                has64BitCap = true;
+            } catch (e) {
+                assert.strictEqual(true, e instanceof RangeError);
+            }
+
+            var maxExp = has64BitCap ? 1073741823n : 536870911n;
+            var maxShiftLow = 1n << (maxExp - 62n);
+            assert.strictEqual(1n, maxShiftLow >> (maxExp - 62n));
+            maxShiftLow = null;
+
+            var carryShift = 7n << (maxExp - 64n);
+            assert.strictEqual(7n, carryShift >> (maxExp - 64n));
+            carryShift = null;
+
+            var threeShift = 3n << (maxExp - 1n);
+            assert.strictEqual(3n, threeShift >> (maxExp - 1n));
+            assert.throws(function () { return 3n << maxExp; }, RangeError);
+            threeShift = null;
+
+            var maxShift = 1n << maxExp;
+            assert.strictEqual(1n, maxShift >> maxExp);
+            assert.throws(function () { return maxShift * 2n; }, RangeError);
+            assert.throws(function () { return maxShift << 1n; }, RangeError);
+            maxShift = null;
+
+            var maxPow = 2n ** maxExp;
+            assert.strictEqual(1n, maxPow >> maxExp);
+            assert.throws(function () { return maxPow * 2n; }, RangeError);
+            assert.throws(function () { return maxPow << 1n; }, RangeError);
+            maxPow = null;
+
+            var maxNegPow = (-2n) ** maxExp;
+            assert.strictEqual(-1n, maxNegPow >> maxExp);
+            maxNegPow = null;
         }
     }
 ];

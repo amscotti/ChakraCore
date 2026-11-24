@@ -2563,28 +2563,49 @@ namespace Js
             return JavascriptBigInt::CreateZero(scriptContext);
         }
         uint64 bitLength = pbi->GetMagnitudeBitLength();
+        if (bitLength == 0)
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
         if (bits > BigIntMaxResultBitCount() || bitLength > BigIntMaxResultBitCount() - bits)
         {
             JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Shift BigInt"));
         }
 
         const uint32 limbBits = BigIntLimbBits();
-        digit_t limbShift = static_cast<digit_t>(bits / limbBits);
-        uint32 bitShift = static_cast<uint32>(bits % limbBits);
-        digit_t resultLength = pbi->m_length + limbShift + (bitShift == 0 ? 0 : 1);
-        if (resultLength > BigIntMaxResultLimbs)
+        uint64 totalBits = bitLength + bits;
+        uint64 neededLimbs64 = (totalBits + limbBits - 1) / limbBits;
+        if (neededLimbs64 > BigIntMaxResultLimbs)
         {
             JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Shift BigInt"));
         }
 
+        digit_t limbShift = static_cast<digit_t>(bits / limbBits);
+        uint32 bitShift = static_cast<uint32>(bits % limbBits);
+        digit_t resultLength = static_cast<digit_t>(neededLimbs64);
+        digit_t sourceLength = static_cast<digit_t>((bitLength + limbBits - 1) / limbBits);
+        if (sourceLength > pbi->m_length)
+        {
+            sourceLength = pbi->m_length;
+        }
+
         JavascriptBigInt * result = JavascriptBigInt::CreateZeroWithLength(resultLength, scriptContext);
-        for (digit_t i = 0; i < pbi->m_length; i++)
+        for (digit_t i = 0; i < sourceLength; i++)
         {
             digit_t digit = pbi->m_digits[i];
+            Assert(i + limbShift < resultLength);
             result->m_digits[i + limbShift] |= static_cast<digit_t>(digit << bitShift);
             if (bitShift != 0)
             {
-                result->m_digits[i + limbShift + 1] |= static_cast<digit_t>(digit >> (limbBits - bitShift));
+                digit_t highBits = static_cast<digit_t>(digit >> (limbBits - bitShift));
+                if (i + limbShift + 1 < resultLength)
+                {
+                    result->m_digits[i + limbShift + 1] |= highBits;
+                }
+                else
+                {
+                    Assert(highBits == 0);
+                }
             }
         }
         while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
