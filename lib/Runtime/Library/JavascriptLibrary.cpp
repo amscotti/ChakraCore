@@ -5818,6 +5818,12 @@ namespace Js
         this->nativeHostTimerContinuationFunctionState = state;
     }
 
+    void JavascriptLibrary::SetNativeHostTimerContinuationCancelFunction(TimerContinuationCancelCallback function, void *state)
+    {
+        this->nativeHostTimerContinuationCancelFunction = function;
+        this->nativeHostTimerContinuationCancelFunctionState = state;
+    }
+
     void JavascriptLibrary::CallNativeHostPromiseRejectionTracker(Var promise, Var reason, bool handled)
     {
         if (this->nativeHostPromiseRejectionTracker != nullptr)
@@ -5961,6 +5967,36 @@ namespace Js
         try
         {
             this->nativeHostTimerContinuationFunction(taskVar, delayMilliseconds, this->nativeHostTimerContinuationFunctionState);
+        }
+        catch (...)
+        {
+            // Hosts are required not to pass exceptions back across the callback boundary. If
+            // this happens, it is a bug in the host, not something that we are expected to
+            // handle gracefully.
+            Js::Throw::FatalInternalError();
+        }
+        END_LEAVE_SCRIPT(scriptContext);
+    }
+
+    void JavascriptLibrary::CancelDelayedTask(Var taskVar)
+    {
+        if (this->nativeHostTimerContinuationCancelFunction == nullptr || taskVar == nullptr)
+        {
+            return;
+        }
+        Assert(VarIs<JavascriptFunction>(taskVar));
+
+#if ENABLE_TTD
+        if (this->scriptContext->ShouldPerformRecordOrReplayAction())
+        {
+            return;
+        }
+#endif
+
+        BEGIN_LEAVE_SCRIPT(scriptContext);
+        try
+        {
+            this->nativeHostTimerContinuationCancelFunction(taskVar, this->nativeHostTimerContinuationCancelFunctionState);
         }
         catch (...)
         {

@@ -3627,6 +3627,15 @@ CHAKRA_API JsSetTimerContinuationCallback(_In_opt_ JsTimerContinuationCallback t
     /*allowInObjectBeforeCollectCallback*/true);
 }
 
+CHAKRA_API JsSetTimerContinuationCancelCallback(_In_opt_ JsTimerContinuationCancelCallback timerContinuationCancelCallback, _In_opt_ void *callbackState)
+{
+    return ContextAPINoScriptWrapper_NoRecord([&](Js::ScriptContext * scriptContext) -> JsErrorCode {
+        scriptContext->GetLibrary()->SetNativeHostTimerContinuationCancelFunction((Js::JavascriptLibrary::TimerContinuationCancelCallback)timerContinuationCancelCallback, callbackState);
+        return JsNoError;
+    },
+    /*allowInObjectBeforeCollectCallback*/true);
+}
+
 JsErrorCode RunScriptCore(JsValueRef scriptSource, const byte *script, size_t cb,
     LoadScriptFlag loadScriptFlag, JsSourceContext sourceContext,
     const WCHAR *sourceUrl, bool parseOnly, JsParseScriptAttributes parseAttributes,

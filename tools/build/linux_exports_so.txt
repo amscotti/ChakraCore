@@ -195,6 +195,7 @@ JsSetRuntimeDomWrapperTracingCallbacks
 JsSetRuntimeMemoryAllocationCallback
 JsSetRuntimeMemoryLimit
 JsSetTimerContinuationCallback
+JsSetTimerContinuationCancelCallback
 JsStrictEquals
 JsStringToPointer
 JsTTDCheckAndAssertIfTTDRunning

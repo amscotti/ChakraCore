@@ -104,6 +104,7 @@
     JsIdle
     JsSetPromiseContinuationCallback
     JsSetTimerContinuationCallback
+    JsSetTimerContinuationCancelCallback
 #ifndef NTBUILD
     JsAllocRawData
     JsCloneObject

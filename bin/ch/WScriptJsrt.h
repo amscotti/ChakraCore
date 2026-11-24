@@ -28,16 +28,18 @@ public:
     {
         JsValueRef m_function;
         bool m_hasRef;
+        bool m_isTimerContinuation;
         JsErrorCode m_addRefError;
 
         CallbackMessage(CallbackMessage const&);
 
     public:
-        CallbackMessage(unsigned int time, JsValueRef function);
+        CallbackMessage(unsigned int time, JsValueRef function, bool isTimerContinuation = false);
         ~CallbackMessage();
 
         bool HasValidRef() const { return m_hasRef; }
         JsErrorCode GetAddRefError() const { return m_addRefError; }
+        bool IsTimerContinuationTask(JsValueRef task) const override { return m_isTimerContinuation && m_function == task; }
         HRESULT Call(LPCSTR fileName);
         HRESULT CallFunction(LPCSTR fileName);
         template <class Func>
@@ -125,6 +127,7 @@ public:
     static JsErrorCode CALLBACK InitializeImportMetaCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef importMetaVar);
     static void CALLBACK PromiseContinuationCallback(JsValueRef task, void *callbackState);
     static void CALLBACK TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState);
+    static void CALLBACK TimerContinuationCancelCallback(JsValueRef task, void *callbackState);
     static void CALLBACK PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef reason, bool handled, void *callbackState);
 
     static LPCWSTR ConvertErrorCodeToMessage(JsErrorCode errorCode)

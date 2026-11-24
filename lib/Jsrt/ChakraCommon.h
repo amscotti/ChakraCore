@@ -811,6 +811,26 @@ typedef unsigned short uint16_t;
     typedef void (CHAKRA_CALLBACK *JsTimerContinuationCallback)(_In_ JsValueRef task, _In_ unsigned int delayMilliseconds, _In_opt_ void *callbackState);
 
     /// <summary>
+    ///     A callback called by the runtime when a previously scheduled delayed task is no longer needed.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Optional companion to <c>JsTimerContinuationCallback</c>. When a pending delayed task
+    ///     (such as a finite <c>Atomics.waitAsync</c> timeout or cross-agent monitor) settles early,
+    ///     the runtime invokes this callback with the same <c>task</c> reference passed to
+    ///     <c>JsTimerContinuationCallback</c>, on a thread inside that context, so the host can
+    ///     remove and release the task immediately instead of waiting for its timer to expire.
+    ///     </para>
+    ///     <para>
+    ///     If the task has already fired or is not in the host queue, the callback must safely do
+    ///     nothing. The host must not throw exceptions across the callback boundary.
+    ///     </para>
+    /// </remarks>
+    /// <param name="task">The delayed task passed to <c>JsTimerContinuationCallback</c>.</param>
+    /// <param name="callbackState">The data argument registered with <c>JsSetTimerContinuationCancelCallback</c>.</param>
+    typedef void (CHAKRA_CALLBACK *JsTimerContinuationCancelCallback)(_In_ JsValueRef task, _In_opt_ void *callbackState);
+
+    /// <summary>
     ///     Creates a new runtime.
     /// </summary>
     /// <param name="attributes">The attributes of the runtime to be created.</param>
@@ -2516,6 +2536,28 @@ typedef unsigned short uint16_t;
     CHAKRA_API
         JsSetTimerContinuationCallback(
             _In_opt_ JsTimerContinuationCallback timerContinuationCallback,
+            _In_opt_ void *callbackState);
+
+    /// <summary>
+    ///     Sets a per-context host timer cancellation callback.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Optional additive companion to <c>JsSetTimerContinuationCallback</c>. Requires an execution
+    ///     context. Replaces any previously registered cancellation callback for the current context;
+    ///     passing <c>nullptr</c> unsets it.
+    ///     </para>
+    /// </remarks>
+    /// <param name="timerContinuationCancelCallback">The callback function being set; <c>nullptr</c> unsets it.</param>
+    /// <param name="callbackState">
+    ///     User provided state that will be passed back to the callback.
+    /// </param>
+    /// <returns>
+    ///     The code <c>JsNoError</c> if the operation succeeded, a failure code otherwise.
+    /// </returns>
+    CHAKRA_API
+        JsSetTimerContinuationCancelCallback(
+            _In_opt_ JsTimerContinuationCancelCallback timerContinuationCancelCallback,
             _In_opt_ void *callbackState);
 
     /// <summary>

@@ -8,6 +8,10 @@
 
 #pragma once
 #include <atomic>
+#ifndef _WIN32
+#include <pthread.h>
+#include <time.h>
+#endif
 namespace Js
 {
 
@@ -31,7 +35,8 @@ namespace Js
     public:
         AtomicsAsyncWaiter(JavascriptSharedArrayBuffer* buffer, JavascriptPromiseCapability* capability, ScriptContext* scriptContext)
             : buffer(buffer), capability(capability), scriptContext(scriptContext),
-              nextWrapperWaiter(nullptr), settled(false), registration(nullptr)
+              nextWrapperWaiter(nullptr), settled(false), registration(nullptr),
+              timeoutTask(nullptr), monitorTask(nullptr)
         {
         }
 
@@ -109,6 +114,12 @@ namespace Js
         // Host-delayed monitor task entry point; sees the task function.
         static Var EntryMonitorTask(RecyclableObject* function, CallInfo callInfo, ...);
 
+        // Retain host delayed-task references so settled/cancelled waiters can
+        // ask the host to drop and unroot pending timer entries immediately.
+        void SetTimeoutTask(AtomicsWaitAsyncTimeoutTaskFunction* task) { timeoutTask = task; }
+        void SetMonitorTask(AtomicsWaitAsyncMonitorTaskFunction* task) { monitorTask = task; }
+        void CancelDelayedTasks();
+
         // Shared settle tail: resolve the capability with the given outcome
         // literal. Callers have settled and unlinked; runs outside the
         // waiter list lock.
@@ -127,6 +138,8 @@ namespace Js
         Field(AtomicsAsyncWaiter*) nextWrapperWaiter;
         ScriptContext* scriptContext;
         bool settled;
+        Field(AtomicsWaitAsyncTimeoutTaskFunction*) timeoutTask;
+        Field(AtomicsWaitAsyncMonitorTaskFunction*) monitorTask;
 
         // Plain (non-traced) native links to the registration token, cached at
         // registration. Only read by TryClaimForTimeout/TryClaimForWake on the
@@ -589,17 +602,72 @@ namespace Js
     }
 #endif
 
+#ifndef _WIN32
+    // Synchronous POSIX wait state, stack-allocated inside WaiterList::AddAndSuspendWaiter.
+    // Allocation domain: waiter thread stack (waiter stays blocked inside AddAndSuspendWaiter
+    // until either notified == true under csForAccess + mutex OR waiter removes AgentOfBuffer
+    // under csForAccess before returning).
+    // Lock order: WaiterList::csForAccess -> SyncWaiterState::mutex (never reversed).
+    struct SyncWaiterState
+    {
+        pthread_mutex_t mutex;
+        pthread_cond_t cond;
+        bool notified;
+
+        SyncWaiterState() : notified(false)
+        {
+            int rc = pthread_mutex_init(&mutex, nullptr);
+            AssertOrFailFast(rc == 0);
+#ifdef __APPLE__
+            rc = pthread_cond_init(&cond, nullptr);
+            AssertOrFailFast(rc == 0);
+#else
+            pthread_condattr_t attr;
+            rc = pthread_condattr_init(&attr);
+            AssertOrFailFast(rc == 0);
+            rc = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+            AssertOrFailFast(rc == 0);
+            rc = pthread_cond_init(&cond, &attr);
+            AssertOrFailFast(rc == 0);
+            rc = pthread_condattr_destroy(&attr);
+            AssertOrFailFast(rc == 0);
+#endif
+        }
+
+        ~SyncWaiterState()
+        {
+            int rc = pthread_cond_destroy(&cond);
+            AssertOrFailFast(rc == 0);
+            rc = pthread_mutex_destroy(&mutex);
+            AssertOrFailFast(rc == 0);
+        }
+
+        SyncWaiterState(const SyncWaiterState&) = delete;
+        SyncWaiterState& operator=(const SyncWaiterState&) = delete;
+    };
+#endif
+
     // An agent can be viewed as a worker
     struct AgentOfBuffer
     {
     public:
+#ifdef _WIN32
         AgentOfBuffer() :identity(NULL), event(NULL), asyncRegistration(nullptr) {}
         AgentOfBuffer(DWORD_PTR agent, HANDLE e) :identity(agent), event(e), asyncRegistration(nullptr) {}
         AgentOfBuffer(AtomicsAsyncWaiterRegistration* registration) :identity(NULL), event(NULL), asyncRegistration(registration) {}
+#else
+        AgentOfBuffer() :identity(NULL), syncState(nullptr), asyncRegistration(nullptr) {}
+        AgentOfBuffer(DWORD_PTR agent, SyncWaiterState* state) :identity(agent), syncState(state), asyncRegistration(nullptr) {}
+        AgentOfBuffer(AtomicsAsyncWaiterRegistration* registration) :identity(NULL), syncState(nullptr), asyncRegistration(registration) {}
+#endif
         static bool AgentCanSuspend(ScriptContext *scriptContext);
 
         DWORD_PTR identity;
+#ifdef _WIN32
         HANDLE event;
+#else
+        SyncWaiterState* syncState; // non-owning; lives on waiting thread's stack until removed or woken
+#endif
         AtomicsAsyncWaiterRegistration* asyncRegistration; // non-owning; owner is JavascriptSharedArrayBuffer
     };
 
@@ -611,7 +679,7 @@ namespace Js
         WaiterList();
         void Cleanup();
 
-        bool _Requires_lock_held_(csForAccess.cs) AddAndSuspendWaiter(DWORD_PTR waiter, uint32 timeout);
+        bool _Requires_lock_held_(csForAccess.cs) AddAndSuspendWaiter(DWORD_PTR waiter, double timeoutMs, bool infiniteTimeout);
         void RemoveWaiter(DWORD_PTR waiter);
         // Notify pops up to `count` entries in waiter-list (FIFO) order.
         // Same-ThreadContext async entries are linked into *asyncAwoken

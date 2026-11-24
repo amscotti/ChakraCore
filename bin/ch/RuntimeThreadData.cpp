@@ -129,6 +129,7 @@ DWORD RuntimeThreadData::ThreadProc()
     this->messageQueue = agentQueue;
     IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(WScriptJsrt::PromiseContinuationCallback, (void*)agentQueue));
     IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(WScriptJsrt::TimerContinuationCallback, (void*)agentQueue));
+    IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCancelCallback(WScriptJsrt::TimerContinuationCancelCallback, (void*)agentQueue));
 
 
     IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)this->initialSource.c_str(),

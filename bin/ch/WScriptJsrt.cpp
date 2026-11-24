@@ -445,6 +445,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
 
         IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)GetThreadMessageQueue()));
         IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)GetThreadMessageQueue()));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCancelCallback(TimerContinuationCancelCallback, (void*)GetThreadMessageQueue()));
 
         Initialize();
 
@@ -1479,8 +1480,8 @@ void WScriptJsrt::AddMessageQueue(MessageQueue *_messageQueue)
     messageQueue = _messageQueue;
 }
 
-WScriptJsrt::CallbackMessage::CallbackMessage(unsigned int time, JsValueRef function)
-    : MessageBase(time), m_function(function), m_hasRef(false), m_addRefError(JsNoError)
+WScriptJsrt::CallbackMessage::CallbackMessage(unsigned int time, JsValueRef function, bool isTimerContinuation)
+    : MessageBase(time), m_function(function), m_hasRef(false), m_isTimerContinuation(isTimerContinuation), m_addRefError(JsNoError)
 {
     if (m_function == JS_INVALID_REFERENCE)
     {
@@ -1593,7 +1594,7 @@ void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayM
     Assert(callbackState != JS_INVALID_REFERENCE);
     MessageQueue * targetQueue = (MessageQueue *)callbackState;
 
-    WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(delayMilliseconds, task);
+    WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(delayMilliseconds, task, true);
     if (msg == nullptr || !msg->HasValidRef())
     {
         {
@@ -1606,6 +1607,16 @@ void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayM
         return;
     }
     targetQueue->InsertSorted(msg);
+}
+
+void WScriptJsrt::TimerContinuationCancelCallback(JsValueRef task, void *callbackState)
+{
+    if (task == JS_INVALID_REFERENCE || callbackState == nullptr)
+    {
+        return;
+    }
+    MessageQueue * targetQueue = (MessageQueue *)callbackState;
+    targetQueue->RemoveTimerTask(task);
 }
 
 void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef reason, bool handled, void *callbackState)

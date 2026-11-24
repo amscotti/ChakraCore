@@ -36,6 +36,7 @@ public:
     unsigned int GetId() { return m_id; };
 
     virtual HRESULT Call(LPCSTR fileName) = 0;
+    virtual bool IsTimerContinuationTask(JsValueRef) const { return false; }
 };
 
 template <typename T>
@@ -317,6 +318,20 @@ public:
                 return true;
             }
 
+            return false;
+        });
+    }
+
+    void RemoveTimerTask(JsValueRef task)
+    {
+        m_queue.Remove([task](const ListEntry& entry)
+        {
+            MessageBase *msg = entry.message;
+            if (msg->IsTimerContinuationTask(task))
+            {
+                delete msg;
+                return true;
+            }
             return false;
         });
     }

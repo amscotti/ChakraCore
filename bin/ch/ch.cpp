@@ -291,6 +291,7 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, 
 
     IfJsErrorFailLogLabel(ChakraRTInterface::JsSetPromiseContinuationCallback(WScriptJsrt::PromiseContinuationCallback, (void*)messageQueue), ErrorRunFinalize);
     IfJsErrorFailLogLabel(ChakraRTInterface::JsSetTimerContinuationCallback(WScriptJsrt::TimerContinuationCallback, (void*)messageQueue), ErrorRunFinalize);
+    IfJsErrorFailLogLabel(ChakraRTInterface::JsSetTimerContinuationCancelCallback(WScriptJsrt::TimerContinuationCancelCallback, (void*)messageQueue), ErrorRunFinalize);
 
     if(strlen(fileName) >= 14 && strcmp(fileName + strlen(fileName) - 14, "ttdSentinal.js") == 0)
     {

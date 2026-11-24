@@ -4,6 +4,10 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#ifndef _WIN32
+#include <cmath>
+#include <errno.h>
+#endif
 
 namespace Js
 {
@@ -80,6 +84,7 @@ namespace Js
                 AtomicsWaitAsyncMonitorTaskFunction* task =
                     library->CreateAtomicsWaitAsyncMonitorTaskFunction(record);
                 library->EnqueueDelayedTask(task, AtomicsAsyncWaiter::MonitorPollIntervalMs);
+                record->SetMonitorTask(task);
 
                 WaiterList* waiterList = registration->waiterList;
                 if (waiterList != nullptr)
@@ -1061,43 +1066,208 @@ namespace Js
         return false;
     }
 
-    bool _Requires_lock_held_(csForAccess.cs) WaiterList::AddAndSuspendWaiter(DWORD_PTR waiter, uint32 timeout)
+#ifndef _WIN32
+    namespace
     {
-#ifdef _WIN32
+        constexpr uint64_t kNsPerSec = 1000000000ULL;
+        constexpr double kOneDayMs = 86400000.0;
+        constexpr double kNsPerMs = 1000000.0;
+
+        bool HasDeadlinePassed(const struct timespec& now, const struct timespec& deadline)
+        {
+            return (now.tv_sec > deadline.tv_sec) ||
+                (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec);
+        }
+
+        void AddNsToTimespec(const struct timespec& base, uint64_t deltaNs, struct timespec* out)
+        {
+            uint64_t totalNs = static_cast<uint64_t>(base.tv_nsec) + (deltaNs % kNsPerSec);
+            out->tv_sec = base.tv_sec + static_cast<time_t>(deltaNs / kNsPerSec) + static_cast<time_t>(totalNs / kNsPerSec);
+            out->tv_nsec = static_cast<long>(totalNs % kNsPerSec);
+        }
+
+        uint64_t SliceMsToNs(double sliceMs)
+        {
+            Assert(sliceMs > 0.0 && sliceMs <= kOneDayMs);
+            double nsDouble = std::ceil(sliceMs * kNsPerMs);
+            return nsDouble < 1.0 ? 1ULL : static_cast<uint64_t>(nsDouble);
+        }
+
+        double ElapsedMsBetween(const struct timespec& start, const struct timespec& end)
+        {
+            if (HasDeadlinePassed(start, end))
+            {
+                return 0.0;
+            }
+            int64_t secDiff = static_cast<int64_t>(end.tv_sec) - static_cast<int64_t>(start.tv_sec);
+            int64_t nsecDiff = static_cast<int64_t>(end.tv_nsec) - static_cast<int64_t>(start.tv_nsec);
+            return (static_cast<double>(secDiff) * 1000.0) + (static_cast<double>(nsecDiff) / kNsPerMs);
+        }
+    }
+#endif
+
+    bool _Requires_lock_held_(csForAccess.cs) WaiterList::AddAndSuspendWaiter(DWORD_PTR waiter, double timeoutMs, bool infiniteTimeout)
+    {
         Assert(m_waiters != nullptr);
         Assert(waiter != NULL);
         Assert(!Contains(waiter));
+
+        if (!infiniteTimeout && timeoutMs <= 0.0)
+        {
+            return false;
+        }
+
+#ifdef _WIN32
+        DWORD winTimeout = INFINITE;
+        if (!infiniteTimeout)
+        {
+            double ceilMs = JavascriptMath::Ceil(timeoutMs);
+            winTimeout = ceilMs >= (double)INFINITE ? (INFINITE - 1) : (DWORD)ceilMs;
+        }
 
         AgentOfBuffer agent(waiter, CreateEvent(NULL, TRUE, FALSE, NULL));
         m_waiters->Add(agent);
 
         csForAccess.Leave();
-        DWORD result = WaitForSingleObject(agent.event, timeout);
+        DWORD result = WaitForSingleObject(agent.event, winTimeout);
         csForAccess.Enter();
         return result == WAIT_OBJECT_0;
 #else
-        // TODO for xplat
-        return false;
+        SyncWaiterState state;
+        int rc = pthread_mutex_lock(&state.mutex);
+        AssertOrFailFast(rc == 0);
+
+        AgentOfBuffer agent(waiter, &state);
+        m_waiters->Add(agent);
+
+        // Lock ordering: csForAccess -> state.mutex. Leaving csForAccess while
+        // state.mutex is held prevents any concurrent notify from signaling
+        // before pthread_cond_*wait releases state.mutex atomically.
+        csForAccess.Leave();
+
+        if (infiniteTimeout)
+        {
+            while (!state.notified)
+            {
+                rc = pthread_cond_wait(&state.cond, &state.mutex);
+                AssertOrFailFast(rc == 0);
+            }
+        }
+        else
+        {
+            double remainingMs = timeoutMs;
+            while (!state.notified && remainingMs > 0.0)
+            {
+                // Chunk large finite JS timeouts to 1-day slices so timespec
+                // seconds never overflow regardless of huge double values.
+                double sliceMs = remainingMs > kOneDayMs ? kOneDayMs : remainingMs;
+                uint64_t sliceNs = SliceMsToNs(sliceMs);
+
+                struct timespec sliceStart;
+                rc = clock_gettime(CLOCK_MONOTONIC, &sliceStart);
+                AssertOrFailFast(rc == 0);
+
+                struct timespec sliceDeadline;
+                AddNsToTimespec(sliceStart, sliceNs, &sliceDeadline);
+
+                while (!state.notified)
+                {
+                    struct timespec now;
+                    rc = clock_gettime(CLOCK_MONOTONIC, &now);
+                    AssertOrFailFast(rc == 0);
+                    if (HasDeadlinePassed(now, sliceDeadline))
+                    {
+                        break;
+                    }
+#ifdef __APPLE__
+                    // macOS does not support pthread_condattr_setclock(..., CLOCK_MONOTONIC).
+                    struct timespec rel;
+                    if (now.tv_nsec > sliceDeadline.tv_nsec)
+                    {
+                        rel.tv_sec = sliceDeadline.tv_sec - now.tv_sec - 1;
+                        rel.tv_nsec = (sliceDeadline.tv_nsec + static_cast<long>(kNsPerSec)) - now.tv_nsec;
+                    }
+                    else
+                    {
+                        rel.tv_sec = sliceDeadline.tv_sec - now.tv_sec;
+                        rel.tv_nsec = sliceDeadline.tv_nsec - now.tv_nsec;
+                    }
+                    rc = pthread_cond_timedwait_relative_np(&state.cond, &state.mutex, &rel);
+#else
+                    rc = pthread_cond_timedwait(&state.cond, &state.mutex, &sliceDeadline);
+#endif
+                    AssertOrFailFast(rc == 0 || rc == ETIMEDOUT || rc == EINTR);
+                }
+
+                if (state.notified)
+                {
+                    break;
+                }
+
+                if (remainingMs <= kOneDayMs)
+                {
+                    remainingMs = 0.0;
+                }
+                else
+                {
+                    struct timespec sliceEnd;
+                    rc = clock_gettime(CLOCK_MONOTONIC, &sliceEnd);
+                    AssertOrFailFast(rc == 0);
+                    double elapsedMs = ElapsedMsBetween(sliceStart, sliceEnd);
+                    remainingMs = elapsedMs >= remainingMs ? 0.0 : (remainingMs - elapsedMs);
+                }
+            }
+        }
+
+        // Unlock state.mutex BEFORE acquiring csForAccess to keep lock order
+        // strictly csForAccess -> state.mutex.
+        rc = pthread_mutex_unlock(&state.mutex);
+        AssertOrFailFast(rc == 0);
+
+        csForAccess.Enter();
+
+        // Re-check under csForAccess: if a concurrent notify woke and popped
+        // this entry in the window between unlock and csForAccess.Enter(),
+        // return true so wait/notify stay linearizable without double removal.
+        rc = pthread_mutex_lock(&state.mutex);
+        AssertOrFailFast(rc == 0);
+        bool awoken = state.notified;
+        rc = pthread_mutex_unlock(&state.mutex);
+        AssertOrFailFast(rc == 0);
+
+        if (!awoken)
+        {
+            for (int i = m_waiters->Count() - 1; i >= 0; i--)
+            {
+                if (m_waiters->Item(i).syncState == &state)
+                {
+                    m_waiters->RemoveAt(i);
+                    break;
+                }
+            }
+        }
+        return awoken;
 #endif
     }
 
     void WaiterList::RemoveWaiter(DWORD_PTR waiter)
     {
-#ifdef _WIN32
         Assert(m_waiters != nullptr);
         for (int i = m_waiters->Count() - 1; i >= 0; i--)
         {
-            if (m_waiters->Item(i).identity == waiter)
+            if (m_waiters->Item(i).identity == waiter && m_waiters->Item(i).asyncRegistration == nullptr)
             {
+#ifdef _WIN32
                 CloseHandle(m_waiters->Item(i).event);
+#endif
                 m_waiters->RemoveAt(i);
                 return;
             }
         }
 
+#ifdef _WIN32
         Assert(false);
 #endif
-        // TODO for xplat
     }
 
     uint32 WaiterList::RemoveAndWakeWaiters(int32 count, void* threadContext, AtomicsAsyncWaiterRegistration** asyncAwoken)
@@ -1206,6 +1376,19 @@ namespace Js
                 SetEvent(agent.event);
                 // This agent will be closed when their respective call to wait has returned
             }
+#else
+            else
+            {
+                SyncWaiterState* syncState = agent.syncState;
+                Assert(syncState != nullptr);
+                int rc = pthread_mutex_lock(&syncState->mutex);
+                AssertOrFailFast(rc == 0);
+                syncState->notified = true;
+                rc = pthread_cond_signal(&syncState->cond);
+                AssertOrFailFast(rc == 0);
+                rc = pthread_mutex_unlock(&syncState->mutex);
+                AssertOrFailFast(rc == 0);
+            }
 #endif
         }
         return removed;
@@ -1240,6 +1423,27 @@ namespace Js
         }
     }
 
+    void AtomicsAsyncWaiter::CancelDelayedTasks()
+    {
+        // Runs only on the registrant's script thread, outside any waiter-list CS.
+        // Clearing these references drops any remaining link from the record and
+        // releases the host queue's JsAddRef root immediately when the embedder
+        // registered JsSetTimerContinuationCancelCallback.
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        if (timeoutTask != nullptr)
+        {
+            AtomicsWaitAsyncTimeoutTaskFunction* task = timeoutTask;
+            timeoutTask = nullptr;
+            library->CancelDelayedTask(task);
+        }
+        if (monitorTask != nullptr)
+        {
+            AtomicsWaitAsyncMonitorTaskFunction* task = monitorTask;
+            monitorTask = nullptr;
+            library->CancelDelayedTask(task);
+        }
+    }
+
     void AtomicsAsyncWaiter::ResolveOk()
     {
         if (settled)
@@ -1253,6 +1457,7 @@ namespace Js
             buffer->RemoveAsyncWaiter(this);
         }
 
+        CancelDelayedTasks();
         ResolveWith(_u("ok"));
     }
 
@@ -1328,6 +1533,8 @@ namespace Js
         // Claim (settle + unlink) already happened under the waiter-list lock
         // in TryClaimForTimeout; resolution runs strictly outside it.
         Assert(settled);
+        timeoutTask = nullptr;
+        CancelDelayedTasks();
         ResolveWith(_u("timed-out"));
     }
 
@@ -1509,6 +1716,7 @@ namespace Js
         // Claim (settle + unlink) already happened under the waiter-list lock
         // in TryClaimForWake; resolution runs strictly outside it.
         Assert(settled);
+        CancelDelayedTasks();
         ResolveWith(_u("ok"));
     }
 

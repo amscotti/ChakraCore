@@ -281,15 +281,19 @@ namespace Js
         {
             value = JavascriptConversion::ToInt32(args[3], scriptContext);
         }
-        uint32 timeout = INFINITE;
+        double timeoutMs = 0.0;
+        bool infiniteTimeout = true;
 
         if (args.Info.Count > 4 && !JavascriptOperators::IsUndefinedObject(args[4]))
         {
-            double t =JavascriptConversion::ToNumber(args[4], scriptContext);
+            double t = JavascriptConversion::ToNumber(args[4], scriptContext);
             if (!(NumberUtilities::IsNan(t) || JavascriptNumber::IsPosInf(t)))
             {
-                int32 t1 = JavascriptConversion::ToInt32(t);
-                timeout = (uint32)max(0, t1);
+                infiniteTimeout = false;
+                if (!JavascriptNumber::IsNegInf(t) && t > 0.0)
+                {
+                    timeoutMs = t;
+                }
             }
         }
 
@@ -305,7 +309,7 @@ namespace Js
         SharedArrayBuffer *sharedArrayBuffer = typedArrayBase->GetArrayBuffer()->GetAsSharedArrayBuffer();
         WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);
 
-
+        bool notEqual = false;
         bool awoken = false;
 
         {
@@ -314,28 +318,32 @@ namespace Js
             if (isBigInt64)
             {
                 int64 w = AtomicsOperations::Load<int64>((int64*)typedArrayBase->GetByteBuffer() + accessIndex);
-                if (bigValue != w)
-                {
-                    return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
-                }
+                notEqual = (bigValue != w);
             }
             else
             {
                 int32 w = AtomicsOperations::Load<int32>((int32*)typedArrayBase->GetByteBuffer() + accessIndex);
-                if (value != w)
-                {
-                    return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
-                }
+                notEqual = (value != w);
             }
 
-            DWORD_PTR agent = (DWORD_PTR)scriptContext;
-            Assert(sharedArrayBuffer->GetSharedContents()->IsValidAgent(agent));
-#pragma prefast(suppress:__WARNING_CALLER_FAILING_TO_HOLD, "This is a prefast false-positive caused by it being unable to identify that the critical section used here is the same as the one held by the AutoCriticalSection")
-            awoken = waiterList->AddAndSuspendWaiter(agent, timeout);
-            if (!awoken)
+            if (!notEqual)
             {
-                waiterList->RemoveWaiter(agent);
+                DWORD_PTR agent = (DWORD_PTR)scriptContext;
+                Assert(sharedArrayBuffer->GetSharedContents()->IsValidAgent(agent));
+#pragma prefast(suppress:__WARNING_CALLER_FAILING_TO_HOLD, "This is a prefast false-positive caused by it being unable to identify that the critical section used here is the same as the one held by the AutoCriticalSection")
+                awoken = waiterList->AddAndSuspendWaiter(agent, timeoutMs, infiniteTimeout);
+#ifdef _WIN32
+                if (!awoken)
+                {
+                    waiterList->RemoveWaiter(agent);
+                }
+#endif
             }
+        }
+
+        if (notEqual)
+        {
+            return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
         }
 
         return awoken ? scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("ok"))
@@ -455,6 +463,8 @@ namespace Js
 #endif
             ;
 
+        bool notEqual = false;
+        bool immediateTimeout = false;
         AtomicsAsyncWaiterRegistration* registration = nullptr;
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
@@ -462,45 +472,53 @@ namespace Js
             if (isBigInt64)
             {
                 int64 witness = AtomicsOperations::Load<int64>((int64*)typedArrayBase->GetByteBuffer() + accessIndex);
-                if (bigValue != witness)
-                {
-                    return CreateWaitAsyncResult(scriptContext, false,
-                        scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
-                }
+                notEqual = (bigValue != witness);
             }
             else
             {
                 int32 witness = AtomicsOperations::Load<int32>((int32*)typedArrayBase->GetByteBuffer() + accessIndex);
-                if (value != witness)
+                notEqual = (value != witness);
+            }
+
+            if (!notEqual)
+            {
+                if (!infiniteTimeout && realTimeout == 0)
                 {
-                    return CreateWaitAsyncResult(scriptContext, false,
-                        scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+                    immediateTimeout = true;
+                }
+                else
+                {
+                    // Register while holding the waiter-list lock so a concurrent notify
+                    // cannot miss the waiter. The record is rooted by rootBuffer; the
+                    // native token identifies it to notify and to the finalizer.
+                    // `monitored` starts false and is published (again under this
+                    // lock) only after the monitor task was successfully created and
+                    // enqueued below: until then a foreign notify skips the waiter
+                    // entirely -- the S6b fallback -- so an OOM'ed monitor can never
+                    // leave a counted-but-unresolvable wake behind.
+                    registration = rootBuffer->AddAsyncWaiter(
+                        waiter, scriptContext, scriptContext->GetThreadContext(), false /*monitored*/);
+                    waiterList->AddAsyncWaiter(registration);
+                    if (scheduleTimeout || scheduleMonitor)
+                    {
+                        // Cache the native links while still under the lock so the
+                        // timeout/monitor task can claim this registration later.
+                        waiter->SetRegistration(registration);
+                    }
                 }
             }
+        }
 
-            if (!infiniteTimeout && realTimeout == 0)
-            {
-                return CreateWaitAsyncResult(scriptContext, false,
-                    scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("timed-out")));
-            }
+        if (notEqual)
+        {
+            return CreateWaitAsyncResult(scriptContext, false,
+                scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+        }
 
-            // Register while holding the waiter-list lock so a concurrent notify
-            // cannot miss the waiter. The record is rooted by rootBuffer; the
-            // native token identifies it to notify and to the finalizer.
-            // `monitored` starts false and is published (again under this
-            // lock) only after the monitor task was successfully created and
-            // enqueued below: until then a foreign notify skips the waiter
-            // entirely -- the S6b fallback -- so an OOM'ed monitor can never
-            // leave a counted-but-unresolvable wake behind.
-            registration = rootBuffer->AddAsyncWaiter(
-                waiter, scriptContext, scriptContext->GetThreadContext(), false /*monitored*/);
-            waiterList->AddAsyncWaiter(registration);
-            if (scheduleTimeout || scheduleMonitor)
-            {
-                // Cache the native links while still under the lock so the
-                // timeout/monitor task can claim this registration later.
-                waiter->SetRegistration(registration);
-            }
+        if (immediateTimeout)
+        {
+            return CreateWaitAsyncResult(scriptContext, false,
+                scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("timed-out")));
         }
 
         if (scheduleTimeout)
@@ -514,7 +532,10 @@ namespace Js
             double ceilMs = JavascriptMath::Ceil(realTimeout);
             unsigned int delayMilliseconds =
                 ceilMs >= (double)UINT32_MAX ? UINT32_MAX : (unsigned int)ceilMs;
-            library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncTimeoutTaskFunction(waiter), delayMilliseconds);
+            AtomicsWaitAsyncTimeoutTaskFunction* timeoutTask =
+                library->CreateAtomicsWaitAsyncTimeoutTaskFunction(waiter);
+            library->EnqueueDelayedTask(timeoutTask, delayMilliseconds);
+            waiter->SetTimeoutTask(timeoutTask);
         }
 
         if (scheduleMonitor)
@@ -529,8 +550,11 @@ namespace Js
             // completes. A foreign notify that raced inside the (tiny)
             // registration-to-publication window simply skipped the waiter,
             // exactly as if it had arrived before registration.
-            library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncMonitorTaskFunction(waiter),
+            AtomicsWaitAsyncMonitorTaskFunction* monitorTask =
+                library->CreateAtomicsWaitAsyncMonitorTaskFunction(waiter);
+            library->EnqueueDelayedTask(monitorTask,
                 AtomicsAsyncWaiter::MonitorPollIntervalMs);
+            waiter->SetMonitorTask(monitorTask);
             {
                 AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
                 registration->monitored = true;

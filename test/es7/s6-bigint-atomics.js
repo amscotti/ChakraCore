@@ -215,8 +215,8 @@ throws(Error, function () {
 }, "wait timeout coercion error");
 check(waitOrder.join(",") === "timeout", "wait timeout coerced after value");
 
-// An infinite sync wait cannot suspend on this host and reports timed-out.
-check(Atomics.wait(b64, 0, 0n, Infinity) === "timed-out", "infinite sync wait is a non-suspending timeout");
+// A finite sync wait without a notify suspends for its timeout and reports timed-out.
+check(Atomics.wait(b64, 0, 0n, 5) === "timed-out", "finite sync wait reports timed-out after timeout");
 
 // waitAsync on BigInt64Array: fast paths and the promise path.
 var notEqual = Atomics.waitAsync(b64, 1, 1n, 0);

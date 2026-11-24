@@ -230,6 +230,7 @@ namespace Js
         static DWORD GetTypeDisplayStringsOffset() { return offsetof(JavascriptLibrary, typeDisplayStrings); }
         typedef void (CALLBACK *PromiseContinuationCallback)(Var task, void *callbackState);
         typedef void (CALLBACK *TimerContinuationCallback)(Var task, unsigned int delayMilliseconds, void *callbackState);
+        typedef void (CALLBACK *TimerContinuationCancelCallback)(Var task, void *callbackState);
 
         Var GetUndeclBlockVar() const { return undeclBlockVarSentinel; }
         bool IsUndeclBlockVar(Var var) const { return var == undeclBlockVarSentinel; }
@@ -497,6 +498,8 @@ namespace Js
         // Unset by default: finite waitAsync timeouts stay pending without it.
         FieldNoBarrier(TimerContinuationCallback) nativeHostTimerContinuationFunction = nullptr;
         Field(void *) nativeHostTimerContinuationFunctionState = nullptr;
+        FieldNoBarrier(TimerContinuationCancelCallback) nativeHostTimerContinuationCancelFunction = nullptr;
+        Field(void *) nativeHostTimerContinuationCancelFunctionState = nullptr;
 
         typedef SList<Js::FunctionProxy*, Recycler> FunctionReferenceList;
 #ifdef _CHAKRACOREBUILD
@@ -919,6 +922,7 @@ namespace Js
 
         void SetNativeHostPromiseContinuationFunction(PromiseContinuationCallback function, void *state);
         void SetNativeHostTimerContinuationFunction(TimerContinuationCallback function, void *state);
+        void SetNativeHostTimerContinuationCancelFunction(TimerContinuationCancelCallback function, void *state);
 
         void CallNativeHostPromiseRejectionTracker(Var promise, Var reason, bool handled);
 
@@ -927,11 +931,13 @@ namespace Js
         void EnqueueTask(Var taskVar);
         bool HasNativeHostPromiseContinuationCallback() const { return nativeHostPromiseContinuationFunction != nullptr; }
         bool HasNativeHostTimerContinuationCallback() const { return nativeHostTimerContinuationFunction != nullptr; }
+        bool HasNativeHostTimerContinuationCancelCallback() const { return nativeHostTimerContinuationCancelFunction != nullptr; }
         // Hands a delayed task (a JavascriptFunction) plus its minimum delay in
         // milliseconds to the host timer callback. Requires that callback
         // (HasNativeHostTimerContinuationCallback) and must not be reached
         // while TTD is recording or replaying.
         void EnqueueDelayedTask(Var taskVar, unsigned int delayMilliseconds);
+        void CancelDelayedTask(Var taskVar);
         JavascriptFinalizationRegistryCleanupTaskFunction* CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry);
         JavascriptAsyncDisposableStackStepFunction* CreateAsyncDisposableStackStepFunction(DisposeCapability* capability, JavascriptPromiseCapability* promiseCapability, bool isReject);
         AtomicsWaitAsyncTimeoutTaskFunction* CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter);
