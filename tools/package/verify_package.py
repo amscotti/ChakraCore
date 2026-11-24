@@ -18,10 +18,125 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
+
+REQUIRED_CHAKRA_HEADERS = (
+    "include/ChakraCore.h",
+    "include/ChakraCommon.h",
+    "include/ChakraDebug.h",
+    "include/ChakraCoreVersion.h",
+)
+REQUIRED_NODEAPI_HEADERS = (
+    "include/nodeapi/js_native_api.h",
+    "include/nodeapi/js_native_api_types.h",
+    "include/nodeapi/node_api.h",
+    "include/nodeapi/node_api_types.h",
+)
+REQUIRED_NOTICES = (
+    "LICENSE.txt",
+    "THIRD-PARTY-NOTICES.txt",
+    "README.md",
+)
+_MACHO_MAGICS = {
+    b"\xfe\xed\xfa\xce",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf",
+    b"\xbf\xba\xfe\xca",
+}
+_ICU_PREFIXES = (
+    "libicudata",
+    "libicuuc",
+    "libicui18n",
+    "libicuio",
+    "libicutu",
+    "libicutest",
+)
+
+
+def is_macho_file(path):
+    if not os.path.isfile(path) or os.path.islink(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return False
+    if magic not in _MACHO_MAGICS:
+        return False
+    if magic in (b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
+        res = subprocess.run(["otool", "-h", path], capture_output=True, text=True)
+        return res.returncode == 0 and "Mach header" in (res.stdout or "")
+    return True
+
+
+def is_elf_file(path):
+    if not os.path.isfile(path) or os.path.islink(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def is_icu_lib_basename(name):
+    base = os.path.basename(name)
+    return base.startswith(_ICU_PREFIXES) and (".dylib" in base or ".so" in base)
+
+
+def parse_macho_load_commands(path):
+    res = subprocess.run(["otool", "-l", path], capture_output=True, text=True)
+    if res.returncode != 0 or "is not an object file" in (res.stdout or ""):
+        raise RuntimeError("otool -l failed on {}: {}".format(path, res.stderr.strip()))
+    dylib_id = None
+    deps = []
+    rpaths = []
+    cmd = None
+    for raw in res.stdout.splitlines():
+        line = raw.strip()
+        if line.startswith("cmd "):
+            cmd = line[4:].strip()
+        elif cmd == "LC_ID_DYLIB" and line.startswith("name "):
+            dylib_id = line[5:].rsplit(" (offset ", 1)[0].strip()
+        elif cmd in ("LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB",
+                     "LC_REEXPORT_DYLIB", "LC_LAZY_LOAD_DYLIB") and line.startswith("name "):
+            deps.append(line[5:].rsplit(" (offset ", 1)[0].strip())
+        elif cmd == "LC_RPATH" and line.startswith("path "):
+            rpaths.append(line[5:].rsplit(" (offset ", 1)[0].strip())
+    return {"id": dylib_id, "deps": deps, "rpaths": rpaths}
+
+
+def parse_elf_dynamic(path):
+    res = subprocess.run(["readelf", "-d", path], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError("readelf -d failed on {}: {}".format(path, res.stderr.strip()))
+    needed = []
+    rpaths = []
+    for raw in res.stdout.splitlines():
+        if "(NEEDED)" in raw and "[" in raw:
+            needed.append(raw.split("[", 1)[1].rstrip("] \t"))
+        elif ("(RPATH)" in raw or "(RUNPATH)" in raw) and "[" in raw:
+            val = raw.split("[", 1)[1].rstrip("] \t")
+            rpaths.extend(p for p in val.split(":") if p)
+    return {"needed": needed, "rpaths": rpaths}
+
+
+def icu_major_from_name(name):
+    base = os.path.basename(name)
+    parts = base.split(".")
+    for part in parts:
+        if part.isdigit():
+            return part
+    return None
 
 
 def compute_sha256(file_path):
@@ -35,7 +150,7 @@ def compute_sha256(file_path):
     return h.hexdigest()
 
 
-def verify_extracted_dir(target_dir):
+def verify_extracted_dir(target_dir, expected_profile=None):
     errors = []
 
     # Check for nested root if tarball had single top-level directory
@@ -151,38 +266,164 @@ def verify_extracted_dir(target_dir):
     for miss in sorted(missing):
         errors.append("Expected file not found in package: {}".format(miss))
 
+    # Required layout: headers, notices, binaries, and shared/import libraries
+    pkg_target = manifest.get("target") or manifest.get("platform") or ""
+    is_windows = pkg_target.startswith("windows-") or os.path.isfile(os.path.join(target_dir, "bin", "ch.exe"))
+    is_darwin = (not is_windows) and (
+        pkg_target.startswith("darwin-")
+        or (not pkg_target.startswith("linux-") and sys.platform == "darwin")
+    )
+    for req_rel in REQUIRED_CHAKRA_HEADERS + REQUIRED_NODEAPI_HEADERS + REQUIRED_NOTICES:
+        if req_rel not in actual_files:
+            errors.append("Missing required package file: {}".format(req_rel))
+    if is_windows:
+        for req_rel in ("bin/ch.exe", "bin/ch-nodeapi.exe", "bin/ChakraCore.dll",
+                        "bin/libChakraNodeApi.dll", "lib/ChakraCore.lib", "lib/libChakraNodeApi.lib"):
+            if req_rel not in actual_files:
+                errors.append("Missing required Windows package file: {}".format(req_rel))
+    else:
+        ext = "dylib" if is_darwin else "so"
+        for req_rel in ("bin/ch", "bin/ch-nodeapi",
+                        "lib/libChakraCore.{}".format(ext),
+                        "lib/libChakraNodeApi.{}".format(ext),
+                        "bin/libChakraCore.{}".format(ext)):
+            if req_rel not in actual_files:
+                errors.append("Missing required package file: {}".format(req_rel))
+
+    if "profile" in manifest and (not isinstance(manifest["profile"], str) or not manifest["profile"].strip()):
+        errors.append("MANIFEST.json 'profile' must be a non-empty string when present")
+    if expected_profile is not None and manifest.get("profile") != expected_profile:
+        errors.append("MANIFEST.json profile mismatch: expected {!r}, got {!r}".format(
+            expected_profile, manifest.get("profile")))
+
+    icu_mode = manifest.get("icu_mode")
+    if icu_mode is not None and icu_mode not in ("bundled", "external", "none"):
+        errors.append("MANIFEST.json 'icu_mode' invalid: {!r}".format(icu_mode))
+
+    if icu_mode == "bundled":
+        icu_libs = manifest.get("icu_libraries")
+        if not isinstance(icu_libs, list) or not icu_libs:
+            errors.append("MANIFEST.json 'icu_mode' is 'bundled' but 'icu_libraries' is missing or empty")
+        else:
+            for lib_name in icu_libs:
+                if not isinstance(lib_name, str) or "/" in lib_name or "\\" in lib_name:
+                    errors.append("Invalid bundled ICU library entry: {!r}".format(lib_name))
+                    continue
+                exp_rel = "bin/{}".format(lib_name) if is_windows else "lib/{}".format(lib_name)
+                if exp_rel not in actual_files:
+                    errors.append("Manifest declares bundled ICU '{}' missing at '{}'".format(lib_name, exp_rel))
+
+    # Mach-O / ELF ICU linkage verification (runs on native binaries only, skipped on dummy fixtures)
+    if sys.platform == "darwin" and not is_windows:
+        ext_icu_majors = set()
+        for rel_p in sorted(actual_files):
+            if not (rel_p.startswith("bin/") or rel_p.startswith("lib/")):
+                continue
+            full_p = os.path.join(target_dir, *rel_p.split("/"))
+            if not is_macho_file(full_p):
+                continue
+            cs_res = subprocess.run(["codesign", "--verify", "--strict", full_p], capture_output=True, text=True)
+            if cs_res.returncode != 0:
+                errors.append("Code signature verification failed for '{}': {}".format(
+                    rel_p, cs_res.stderr.strip() or cs_res.stdout.strip()))
+            try:
+                info = parse_macho_load_commands(full_p)
+            except RuntimeError as e:
+                errors.append(str(e))
+                continue
+            uses_rpath_icu = False
+            for dep in info["deps"]:
+                is_external = not dep.startswith(("@rpath/", "@loader_path/", "@executable_path/",
+                                                  "/usr/lib/", "/System/Library/"))
+                if is_external:
+                    if icu_mode != "external":
+                        errors.append("Mach-O '{}' has non-portable external dependency '{}'".format(rel_p, dep))
+                    elif not is_icu_lib_basename(dep):
+                        errors.append("Mach-O '{}' has unexpected non-system dependency '{}'".format(rel_p, dep))
+                    else:
+                        maj = icu_major_from_name(dep)
+                        if maj:
+                            ext_icu_majors.add(maj)
+                elif dep.startswith(("@rpath/", "@loader_path/", "@executable_path/")):
+                    dep_base = os.path.basename(dep)
+                    if is_icu_lib_basename(dep_base):
+                        uses_rpath_icu = uses_rpath_icu or dep.startswith("@rpath/")
+                        if "lib/{}".format(dep_base) not in actual_files:
+                            errors.append("Mach-O '{}' references '{}' missing from package lib/".format(rel_p, dep))
+            if uses_rpath_icu:
+                if rel_p.startswith("bin/") and "@executable_path/../lib" not in info["rpaths"]:
+                    errors.append("Executable '{}' references @rpath ICU without @executable_path/../lib LC_RPATH".format(
+                        rel_p))
+                elif rel_p.startswith("lib/") and "@loader_path" not in info["rpaths"]:
+                    errors.append("Library '{}' references @rpath ICU without @loader_path LC_RPATH".format(rel_p))
+        if len(ext_icu_majors) > 1:
+            errors.append("Inconsistent external ICU major versions across package binaries: {}".format(
+                sorted(ext_icu_majors)))
+    elif sys.platform.startswith("linux") and not is_windows and shutil.which("readelf"):
+        ext_icu_majors = set()
+        for rel_p in sorted(actual_files):
+            if not (rel_p.startswith("bin/") or rel_p.startswith("lib/")):
+                continue
+            full_p = os.path.join(target_dir, *rel_p.split("/"))
+            if not is_elf_file(full_p):
+                continue
+            try:
+                elf_info = parse_elf_dynamic(full_p)
+            except RuntimeError as e:
+                errors.append(str(e))
+                continue
+            for rp in elf_info["rpaths"]:
+                if rp.startswith(("/opt/", "/usr/local/")):
+                    errors.append("ELF '{}' has non-portable RPATH/RUNPATH '{}'".format(rel_p, rp))
+            for dep in elf_info["needed"]:
+                if "libstdc++" in dep or "libc++" in dep:
+                    errors.append("ELF '{}' has unexpected C++ runtime NEEDED '{}'".format(rel_p, dep))
+                if is_icu_lib_basename(dep):
+                    maj = icu_major_from_name(dep)
+                    if maj:
+                        ext_icu_majors.add(maj)
+                    if icu_mode == "bundled" and "lib/{}".format(dep) not in actual_files:
+                        errors.append("ELF '{}' NEEDED '{}' missing from bundled package lib/".format(rel_p, dep))
+            if icu_mode == "bundled":
+                want_rp = "$ORIGIN/../lib" if rel_p.startswith("bin/") else "$ORIGIN"
+                if any(is_icu_lib_basename(d) for d in elf_info["needed"]) and want_rp not in elf_info["rpaths"]:
+                    errors.append("ELF '{}' missing '{}' RPATH/RUNPATH for bundled ICU".format(rel_p, want_rp))
+        if len(ext_icu_majors) > 1:
+            errors.append("Inconsistent ICU major versions across ELF binaries: {}".format(sorted(ext_icu_majors)))
+
     return (len(errors) == 0), errors
 
 
-def find_tarball_in_dir(d):
+def find_tarball_in_dir(d, expected_profile=None):
     try:
-        # Prefer newest matching chakracore-*.tar.gz
+        # Prefer newest matching chakracore-*.tar.gz (and profile match if requested)
         candidates = []
         for f in os.listdir(d):
             if f.endswith(".tar.gz") and (f.startswith("chakracore-") or "chakracore" in f):
                 full = os.path.join(d, f)
                 if os.path.isfile(full):
-                    candidates.append((os.path.getmtime(full), full))
+                    prof_match = 1 if (expected_profile and "-{}-".format(expected_profile) in f) else 0
+                    candidates.append((prof_match, os.path.getmtime(full), full))
         if candidates:
             candidates.sort(reverse=True)
-            return candidates[0][1]
+            return candidates[0][2]
     except Exception:
         pass
     return None
 
 
-def verify_package(source_path):
+def verify_package(source_path, expected_profile=None):
     source_path = os.path.abspath(source_path)
     if not os.path.exists(source_path):
         return False, ["Source path does not exist: {}".format(source_path)]
 
     if os.path.isdir(source_path):
         # If the directory contains a tarball, verify the tarball
-        tb = find_tarball_in_dir(source_path)
+        tb = find_tarball_in_dir(source_path, expected_profile=expected_profile)
         if tb and not os.path.isfile(os.path.join(source_path, "MANIFEST.json")):
-            return verify_package(tb)
+            return verify_package(tb, expected_profile=expected_profile)
         print("Verifying package directory: {}".format(source_path))
-        return verify_extracted_dir(source_path)
+        return verify_extracted_dir(source_path, expected_profile=expected_profile)
 
     if os.path.isfile(source_path):
         print("Verifying package tarball: {}".format(source_path))
@@ -210,7 +451,7 @@ def verify_package(source_path):
                         tar.extractall(path=tmpdir)
             except Exception as e:
                 return False, ["Failed to extract tarball '{}': {}".format(source_path, e)]
-            ok, errs = verify_extracted_dir(tmpdir)
+            ok, errs = verify_extracted_dir(tmpdir, expected_profile=expected_profile)
             if tar_mode_errors:
                 errs = tar_mode_errors + errs
                 ok = False
@@ -225,6 +466,8 @@ def main(argv=None):
                         help="Path to release tarball (.tar.gz)")
     parser.add_argument("--dir", default=None,
                         help="Path to extracted package directory")
+    parser.add_argument("--profile", default=None,
+                        help="Expected profile name in MANIFEST.json")
     parser.add_argument("target", nargs="?", default=None,
                         help="Path to tarball or directory to verify")
 
@@ -235,7 +478,7 @@ def main(argv=None):
         parser.print_help()
         sys.exit(1)
 
-    ok, errors = verify_package(target_path)
+    ok, errors = verify_package(target_path, expected_profile=args.profile)
     if ok:
         print("VERIFY PASS: Package '{}' verified successfully against MANIFEST.json (0 errors).".format(target_path))
         return 0

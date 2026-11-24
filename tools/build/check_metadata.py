@@ -40,9 +40,12 @@ prefixes, doc/b3-profiles.md section 10):
 
 Every sub-check fails loudly with diagnostics on mismatch.
 
-Usage: check_metadata.py <prefix> [--profile test|debug-static|
-       release-shared] [--self-test]
+Usage: check_metadata.py <prefix> [--profile <name>] [--self-test]
 Defaults: --profile test (the B2 assertions, unchanged).
+Supported profiles: test, debug-static, release-shared, jit, jit-debug,
+release-jit, and sanitizer side profiles <base>-sanitize-<mode> where
+<mode> is address, undefined, or thread (validating artifacts against
+<base> while requiring `.profile` to equal exact <base>-sanitize-<mode>).
 Exit code: 0 iff every sub-check passes.
 """
 
@@ -59,10 +62,32 @@ WANT_MINOS = "26.0"
 WANT_STACK = 8388608
 MIN_EXPORTS = 100
 # Per-profile LC_MAIN stacksize contract (see module docstring §2).
-# Release-shared repeats test's 8 MiB as its OWN pinned expectation
-# (direct otool observation per run — never inferred from test).
-WANT_STACK_BY_PROFILE = {"test": 8388608, "debug-static": 0,
-                         "release-shared": 8388608}
+# Shared profiles (including JIT variants) require 8 MiB; debug-static requires 0.
+WANT_STACK_BY_PROFILE = {
+    "test": 8388608,
+    "debug-static": 0,
+    "release-shared": 8388608,
+    "jit": 8388608,
+    "jit-debug": 8388608,
+    "release-jit": 8388608,
+}
+SANITIZE_MODES = ("address", "undefined", "thread")
+
+
+def resolve_profile(profile):
+    """Return (base_profile, sanitize_mode_or_None) or raise ValueError."""
+    if profile in WANT_STACK_BY_PROFILE:
+        return profile, None
+    for mode in SANITIZE_MODES:
+        suffix = "-sanitize-%s" % mode
+        if profile.endswith(suffix):
+            base = profile[:-len(suffix)]
+            if base in WANT_STACK_BY_PROFILE:
+                return base, mode
+    raise ValueError(
+        "bad --profile %r: expected one of %s or <base>-sanitize-<%s>"
+        % (profile, ", ".join(sorted(WANT_STACK_BY_PROFILE)),
+           "|".join(SANITIZE_MODES)))
 # Static archive member count, legacy-exact on both sides
 # (ar t: 524 members in build-legacy-debug and out/debug-static at the
 # B3 baseline; C2-S13 added 2 TUs; I1 added 6 TUs; I2 added 2 TUs; C3.1 added 1 TU;
@@ -342,8 +367,61 @@ def self_test():
         bad += report("release-shared wants stacksize 8388608",
                       WANT_STACK_BY_PROFILE.get("release-shared")
                       == 8388608)
+        bad += report("jit wants stacksize 8388608",
+                      WANT_STACK_BY_PROFILE.get("jit") == 8388608)
+        bad += report("jit-debug wants stacksize 8388608",
+                      WANT_STACK_BY_PROFILE.get("jit-debug") == 8388608)
+        bad += report("release-jit wants stacksize 8388608",
+                      WANT_STACK_BY_PROFILE.get("release-jit") == 8388608)
         bad += report("static archive wants 538 members",
                       WANT_STATIC_MEMBERS == 538)
+
+        # Sanitizer side-profile resolution + exact marker controls (B-5/B-7/B-9).
+        bad += report("resolve jit -> (jit, None)",
+                      resolve_profile("jit") == ("jit", None))
+        bad += report("resolve test-sanitize-address -> (test, address)",
+                      resolve_profile("test-sanitize-address")
+                      == ("test", "address"))
+        bad += report("resolve debug-static-sanitize-address",
+                      resolve_profile("debug-static-sanitize-address")
+                      == ("debug-static", "address"))
+        bad += report("resolve jit-sanitize-undefined",
+                      resolve_profile("jit-sanitize-undefined")
+                      == ("jit", "undefined"))
+        bad += report("resolve jit-debug-sanitize-undefined",
+                      resolve_profile("jit-debug-sanitize-undefined")
+                      == ("jit-debug", "undefined"))
+        for bad_prof in ("sanitize-address", "bogus-sanitize-address",
+                         "test-sanitize-bogus", "unknown"):
+            rejected = False
+            try:
+                resolve_profile(bad_prof)
+            except ValueError:
+                rejected = True
+            bad += report("rejects bad profile %r" % bad_prof, rejected)
+
+        with open(os.path.join(tmp, ".profile"), "w") as f:
+            f.write("test-sanitize-address\n")
+        bad += report("sanitize marker passes own profile",
+                      check_profile_marker(tmp, "test-sanitize-address") is None)
+        bad += report("sanitize marker fails plain base profile",
+                      check_profile_marker(tmp, "test") is not None)
+        bad += report("sanitize marker fails other base sanitize profile",
+                      check_profile_marker(tmp, "jit-sanitize-address") is not None)
+
+        with open(os.path.join(tmp, ".profile"), "w") as f:
+            f.write("debug-static-sanitize-address\n")
+        bad += report("debug-static-sanitize marker passes own profile",
+                      check_profile_marker(
+                          tmp, "debug-static-sanitize-address") is None)
+        bad += report("debug-static-sanitize marker fails debug-static",
+                      check_profile_marker(tmp, "debug-static") is not None)
+
+        bad += report("CLI rejects unknown --profile with rc=2",
+                      main(["check_metadata.py", tmp, "--profile", "bogus"]) == 2)
+        bad += report("CLI rejects bare sanitize-address with rc=2",
+                      main(["check_metadata.py", tmp,
+                            "--profile", "sanitize-address"]) == 2)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -372,22 +450,22 @@ def main(argv):
         else:
             rest.append(args[i])
             i += 1
-    if profile not in WANT_STACK_BY_PROFILE:
-        print("check_metadata: bad --profile %r: expected one of: %s"
-              % (profile, ", ".join(sorted(WANT_STACK_BY_PROFILE))),
-              file=sys.stderr)
+    try:
+        base_profile, _sanitize_mode = resolve_profile(profile)
+    except ValueError as e:
+        print("check_metadata: %s" % e, file=sys.stderr)
         return 2
     if len(rest) != 1:
         print("usage: check_metadata.py <prefix> "
-              "[--profile test|debug-static|release-shared]",
+              "[--profile <name>]",
               file=sys.stderr)
         return 2
     prefix = os.path.abspath(rest[0])
     root = os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))))
     failures = []
-    want_stack = WANT_STACK_BY_PROFILE[profile]
-    is_static = profile == "debug-static"
+    want_stack = WANT_STACK_BY_PROFILE[base_profile]
+    is_static = base_profile == "debug-static"
 
     err = check_profile_marker(prefix, profile)
     if err is not None:

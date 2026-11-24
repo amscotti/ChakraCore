@@ -22,9 +22,12 @@ zig-out) per the B1/B2 contract; this script never writes there
 
 Behavior:
 
-  * compare-and-copy every --map dest (size, then MD5): unchanged
-    bytes are never rewritten; mismatched permissions are repaired
-    without recopying the binary. Changed bytes are staged in a
+  * compare-and-copy every --map dest: fast stat check (size + nanosecond
+    mtime) skips multi-GB reads/MD5 on unchanged large artifacts (>= 1 MiB)
+    when both src and dest already exist with matching st_size and
+    st_mtime_ns; small files and any size/mtime mismatch fall back to MD5
+    comparison. Unchanged bytes are never rewritten; mismatched permissions
+    are repaired without recopying the binary. Changed bytes are staged in a
     same-directory temp file and installed with os.replace, so dest
     always gets a fresh inode: macOS caches a code signature per vnode,
     and overwriting a signed executable/shared library in place can
@@ -247,23 +250,40 @@ def write_atomically(path, data, mode=None):
                 pass
 
 
+FAST_STAT_MIN_BYTES = 1 << 20
+
+
 def copy_if_changed(src, dest):
     """Repair dest bytes or permissions.
 
-    Return "copied" when bytes were written, "repaired" when only
-    permissions were fixed, None when dest was already identical.
+    Skip full MD5 reads on large artifacts (>= FAST_STAT_MIN_BYTES) when
+    both size and nanosecond mtime already match. Return "copied" when
+    bytes were written, "repaired" when only permissions were fixed, None
+    when dest was already identical.
     """
+    src_stat = os.stat(src)
     try:
         dest_stat = os.lstat(dest)
     except FileNotFoundError:
         dest_stat = None
     if (dest_stat is not None and stat.S_ISREG(dest_stat.st_mode)
-          and os.path.getsize(src) == dest_stat.st_size
-          and md5_of(src) == md5_of(dest)):
-        if stat.S_IMODE(os.stat(src).st_mode) != stat.S_IMODE(dest_stat.st_mode):
-            shutil.copymode(src, dest)
-            return "repaired"
-        return None
+            and src_stat.st_size == dest_stat.st_size):
+        fast_match = (
+            src_stat.st_size >= FAST_STAT_MIN_BYTES
+            and src_stat.st_mtime_ns != 0
+            and src_stat.st_mtime_ns == dest_stat.st_mtime_ns
+        )
+        if fast_match or md5_of(src) == md5_of(dest):
+            if (not fast_match and src_stat.st_size >= FAST_STAT_MIN_BYTES
+                    and src_stat.st_mtime_ns != dest_stat.st_mtime_ns):
+                try:
+                    os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+                except OSError:
+                    pass
+            if stat.S_IMODE(src_stat.st_mode) != stat.S_IMODE(dest_stat.st_mode):
+                shutil.copymode(src, dest)
+                return "repaired"
+            return None
     replace_atomically(src, dest)
     return "copied"
 
@@ -304,18 +324,167 @@ def symlink_if_changed(target, link):
     return True
 
 
-VALID_PROFILES = (
+BASE_SIDE_PROFILES = (
     "debug-static",
     "release-shared",
     "jit",
-    "sanitize-address",
-    "sanitize-undefined",
-    "sanitize-thread",
+    "jit-debug",
+    "release-jit",
+)
+SANITIZE_BASE_PROFILES = (
+    "test",
+    "debug-static",
+    "release-shared",
+    "jit",
+    "jit-debug",
+    "release-jit",
+)
+SANITIZE_MODES = ("address", "undefined", "thread")
+# Keep legacy "sanitize-<mode>" alongside "<base>-sanitize-<mode>" so Linux
+# and existing unit tests stay compatible while per-base lanes stay isolated.
+VALID_PROFILES = (
+    BASE_SIDE_PROFILES
+    + tuple("sanitize-%s" % mode for mode in SANITIZE_MODES)
+    + tuple("%s-sanitize-%s" % (base, mode)
+            for base in SANITIZE_BASE_PROFILES
+            for mode in SANITIZE_MODES)
 )
 
 
-def main(argv):
+def self_test():
+    """Verify fast-stat skip, overwrite on mtime/size change, and isolation."""
+    bad = 0
+
+    def report(name, cond):
+        print("self-test %-52s -> %s"
+              % (name, "PASS" if cond else "FAIL"))
+        return 0 if cond else 1
+
+    tmp = tempfile.mkdtemp(prefix="install-profile-selftest-")
+    try:
+        src_dir = os.path.join(tmp, "src")
+        os.makedirs(src_dir)
+        small_src = os.path.join(src_dir, "ch")
+        with open(small_src, "wb") as f:
+            f.write(b"ch-payload\n")
+        os.chmod(small_src, 0o755)
+
+        large_src = os.path.join(src_dir, "libChakraCoreStatic.a")
+        large_size = FAST_STAT_MIN_BYTES + 4096
+        with open(large_src, "wb") as f:
+            f.seek(large_size - 1)
+            f.write(b"Z")
+        os.chmod(large_src, 0o644)
+
+        # 1. Fresh install + fast-stat no-op skips md5_of on >=1MiB files.
+        rc = main([
+            "install_profile.py",
+            "--profile", "jit-debug",
+            "--dest", "out/jit-debug",
+            "--map=bin/ch=" + small_src,
+            "--map=lib/libChakraCoreStatic.a=" + large_src,
+            "--symlink=lib/libch.dylib=ch",
+        ], root=tmp)
+        dest_large = os.path.join(tmp, "out", "jit-debug", "lib",
+                                  "libChakraCoreStatic.a")
+        first_stat = os.lstat(dest_large)
+        bad += report("jit-debug fresh install exits 0",
+                      rc == 0 and os.path.isfile(dest_large))
+
+        md5_calls = []
+        orig_md5 = md5_of
+
+        def tracked_md5(path):
+            md5_calls.append(os.path.basename(path))
+            return orig_md5(path)
+
+        globals()["md5_of"] = tracked_md5
+        try:
+            rc2 = main([
+                "install_profile.py",
+                "--profile", "jit-debug",
+                "--dest", "out/jit-debug",
+                "--map=bin/ch=" + small_src,
+                "--map=lib/libChakraCoreStatic.a=" + large_src,
+                "--symlink=lib/libch.dylib=ch",
+            ], root=tmp)
+        finally:
+            globals()["md5_of"] = orig_md5
+        second_stat = os.lstat(dest_large)
+        bad += report("large no-op skips md5_of and keeps inode/mtime",
+                      rc2 == 0
+                      and "libChakraCoreStatic.a" not in md5_calls
+                      and first_stat.st_ino == second_stat.st_ino
+                      and first_stat.st_mtime_ns == second_stat.st_mtime_ns)
+
+        # 2. Mtime bump on large file triggers check & updates dest on change.
+        with open(large_src, "r+b") as f:
+            f.seek(0)
+            f.write(b"CHANGED")
+        bumped_ns = first_stat.st_mtime_ns + 5_000_000
+        os.utime(large_src, ns=(bumped_ns, bumped_ns))
+        res_mod = copy_if_changed(large_src, dest_large)
+        third_stat = os.lstat(dest_large)
+        with open(dest_large, "rb") as f:
+            head = f.read(7)
+        bad += report("large mtime+content change copies fresh inode",
+                      res_mod == "copied"
+                      and head == b"CHANGED"
+                      and third_stat.st_ino != second_stat.st_ino)
+
+        # 3. Size change triggers overwrite even if mtime is forcibly matched.
+        with open(large_src, "ab") as f:
+            f.write(b"!")
+        same_ns = third_stat.st_mtime_ns
+        os.utime(large_src, ns=(same_ns, same_ns))
+        res_sz = copy_if_changed(large_src, dest_large)
+        bad += report("large size change with identical mtime still copies",
+                      res_sz == "copied"
+                      and os.path.getsize(dest_large) == large_size + 1)
+
+        # 4. Permission repair without recopying large file.
+        os.chmod(dest_large, 0o755)
+        res_perm = copy_if_changed(large_src, dest_large)
+        bad += report("large mode mismatch repairs without recopy",
+                      res_perm == "repaired"
+                      and stat.S_IMODE(os.lstat(dest_large).st_mode) == 0o644)
+
+        # 5. <base>-sanitize-<mode> and release-jit profiles write exact .profile.
+        for prof in ("test-sanitize-address", "debug-static-sanitize-address",
+                     "jit-sanitize-undefined", "release-jit"):
+            rc_p = main([
+                "install_profile.py",
+                "--profile", prof,
+                "--dest", "out/" + prof,
+                "--map=bin/ch=" + small_src,
+            ], root=tmp)
+            marker_p = os.path.join(tmp, "out", prof, ".profile")
+            got = open(marker_p).read() if os.path.isfile(marker_p) else None
+            bad += report("profile %s stamps exact marker" % prof,
+                          rc_p == 0 and got == prof + "\n")
+
+        # 6. Negative controls: plain 'test' and mismatched --dest rejected.
+        bad += report("plain test profile rejected (rc=2)",
+                      main(["install_profile.py", "--profile", "test",
+                            "--dest", "out/test", "--map=bin/ch=" + small_src],
+                           root=tmp) == 2)
+        bad += report("mismatched --dest rejected (rc=2)",
+                      main(["install_profile.py", "--profile", "jit",
+                            "--dest", "out/other", "--map=bin/ch=" + small_src],
+                           root=tmp) == 2)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print("install_profile self-test: %s"
+          % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
+             else "%d CONTROL(S) MISBEHAVE" % bad))
+    return 1 if bad else 0
+
+
+def main(argv, root=None):
     args = list(argv[1:])
+    if "--self-test" in args:
+        return self_test()
     profile = None
     dest = None
     maps = []
@@ -357,8 +526,9 @@ def main(argv):
     if not maps:
         return fail("at least one --map is required "
                     "(refusing to run with an empty managed set)")
-    root = os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))
+    if root is None:
+        root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
     dest_abs = os.path.join(root, *dest_norm.split("/"))
 
     managed = []

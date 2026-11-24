@@ -29,13 +29,17 @@ def get_repo_root():
     return os.path.abspath(os.path.join(this_dir, "..", ".."))
 
 
-def find_addon_binary(repo_root, name="hello_world"):
-    cand_dirs = [
+def find_addon_binary(repo_root, name="hello_world", profile=None):
+    cand_dirs = []
+    if profile:
+        pdir = "zig-out" if profile == "test" else os.path.join("out", profile)
+        cand_dirs.append(os.path.join(repo_root, pdir, "lib", "nodeapi-addons"))
+    cand_dirs.extend([
         os.path.join(repo_root, "zig-out", "lib", "nodeapi-addons"),
         os.path.join(repo_root, "out", "release-shared", "lib", "nodeapi-addons"),
         os.path.join(repo_root, "out", "test", "lib", "nodeapi-addons"),
         os.path.join(repo_root, "out", "jit", "lib", "nodeapi-addons"),
-    ]
+    ])
     for d in cand_dirs:
         cand = os.path.join(d, "{}.node".format(name))
         if os.path.isfile(cand):
@@ -43,7 +47,43 @@ def find_addon_binary(repo_root, name="hello_world"):
     return None
 
 
-def run_package_smoke_tests(package_dir, repo_root, case_file=None):
+def is_native_binary(path):
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return False
+    return not head.startswith(b"#!")
+
+
+def check_macos_no_external_homebrew(package_dir, bin_paths, lib_paths):
+    if sys.platform != "darwin":
+        return
+    for p in bin_paths + lib_paths:
+        if not os.path.isfile(p) or os.path.islink(p):
+            continue
+        with open(p, "rb") as f:
+            magic = f.read(4)
+        if magic not in (b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+                         b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+                         b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+                         b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"):
+            continue
+        res = subprocess.run(["otool", "-L", p], capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError("otool -L failed on {}: {}".format(p, res.stderr))
+        for line in res.stdout.splitlines()[1:]:
+            dep = line.strip().split(" (", 1)[0]
+            if dep.startswith(("/opt/homebrew/", "/usr/local/")):
+                raise RuntimeError(
+                    "Packaged binary '{}' still has external non-portable dependency '{}'".format(
+                        os.path.relpath(p, package_dir), dep)
+                )
+
+
+def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_profile=None):
     # Check for single nested root directory
     manifest_p = os.path.join(package_dir, "MANIFEST.json")
     if not os.path.isfile(manifest_p):
@@ -57,12 +97,22 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
     lib_dir = os.path.join(package_dir, "lib")
 
     pkg_target = ""
-    if os.path.isfile(os.path.join(package_dir, "MANIFEST.json")):
+    pkg_profile = None
+    pkg_icu_mode = None
+    manifest_file = os.path.join(package_dir, "MANIFEST.json")
+    if os.path.isfile(manifest_file):
         try:
-            with open(os.path.join(package_dir, "MANIFEST.json"), "r", encoding="utf-8") as mf:
-                pkg_target = json.load(mf).get("target", "") or ""
+            with open(manifest_file, "r", encoding="utf-8") as mf:
+                mdata = json.load(mf)
+                pkg_target = mdata.get("target", "") or ""
+                pkg_profile = mdata.get("profile")
+                pkg_icu_mode = mdata.get("icu_mode")
         except Exception:
             pkg_target = ""
+
+    if expected_profile and pkg_profile != expected_profile:
+        raise RuntimeError("Profile mismatch in MANIFEST.json: expected {!r}, got {!r}".format(
+            expected_profile, pkg_profile))
 
     is_windows = (
         pkg_target.startswith("windows-")
@@ -112,6 +162,10 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
         ):
             if not os.path.isfile(path):
                 raise RuntimeError("Required package artifact '{}' not found at {}".format(desc, path))
+
+        if is_darwin and pkg_icu_mode == "bundled":
+            check_macos_no_external_homebrew(
+                package_dir, [ch_bin, ch_nodeapi_bin], [core_lib, nodeapi_lib])
 
     # Clean environment: ensure DYLD_LIBRARY_PATH and LD_LIBRARY_PATH are unset
     # so we strictly test rpath resolution relative to the binary!
@@ -183,13 +237,17 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
 
     # 3b. Locate case script
     if not case_file:
-        cands = [
+        cands = []
+        if pkg_profile:
+            pdir = "zig-out" if pkg_profile == "test" else os.path.join("out", pkg_profile)
+            cands.append(os.path.join(repo_root, pdir, "lib", "nodeapi-addons", "hello_world.js"))
+        cands.extend([
             os.path.join(repo_root, "zig-out", "lib", "nodeapi-addons", "hello_world.js"),
             os.path.join(repo_root, "out", "release-shared", "lib", "nodeapi-addons", "hello_world.js"),
             os.path.join(repo_root, "out", "test", "lib", "nodeapi-addons", "hello_world.js"),
             os.path.join(repo_root, "tools", "nodeapi", "cases", "hello_world.js"),
             os.path.join(repo_root, "tools", "nodeapi", "addons", "hello_world.js"),
-        ]
+        ])
         for c in cands:
             if os.path.isfile(c):
                 case_file = c
@@ -204,7 +262,7 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
         case_file = temp_driver
 
     try:
-        addon_node = find_addon_binary(repo_root, "hello_world")
+        addon_node = find_addon_binary(repo_root, "hello_world", profile=pkg_profile)
         if addon_node:
             print("Found compiled addon: {}".format(addon_node))
             cmd3 = [ch_nodeapi_bin, addon_node, case_file]
@@ -245,21 +303,49 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
         if temp_driver and os.path.exists(temp_driver):
             os.remove(temp_driver)
 
+    # 4. Test ICU / Intl runtime execution for native binaries
+    if is_native_binary(ch_bin):
+        print("--- Test 4: {} Intl / ICU runtime check ---".format(ch_bin))
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as tf:
+            tf.write(
+                "if (typeof Intl === 'undefined') {\n"
+                "    console.log('intl:disabled');\n"
+                "} else {\n"
+                "    var s = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(1234.5);\n"
+                "    console.log('intl:' + s);\n"
+                "}\n"
+            )
+            intl_js = tf.name
+        try:
+            res4 = subprocess.run([ch_bin, intl_js], capture_output=True, text=True, env=clean_env)
+        finally:
+            if os.path.exists(intl_js):
+                os.remove(intl_js)
+        if res4.returncode != 0:
+            raise RuntimeError("ch Intl check failed (rc={}):\nstderr: {}".format(
+                res4.returncode, res4.stderr))
+        out4 = (res4.stdout or "").strip()
+        print("ch Intl output: {}".format(out4))
+        ok_intl = ("intl:1.234,50" in out4) or (pkg_icu_mode != "bundled" and "intl:disabled" in out4)
+        if not ok_intl:
+            raise RuntimeError("ch Intl check returned unexpected output: {!r}".format(out4))
+
     print("\nALL PACKAGE TESTS PASSED SUCCESSFULLY!")
     return True
 
 
-def find_tarball_in_dir(d):
+def find_tarball_in_dir(d, expected_profile=None):
     try:
         candidates = []
         for f in os.listdir(d):
             if f.endswith(".tar.gz") and (f.startswith("chakracore-") or "chakracore" in f):
                 full = os.path.join(d, f)
                 if os.path.isfile(full):
-                    candidates.append((os.path.getmtime(full), full))
+                    prof_match = 1 if (expected_profile and "-{}-".format(expected_profile) in f) else 0
+                    candidates.append((prof_match, os.path.getmtime(full), full))
         if candidates:
             candidates.sort(reverse=True)
-            return candidates[0][1]
+            return candidates[0][2]
     except Exception:
         pass
     return None
@@ -271,6 +357,8 @@ def main(argv=None):
                         help="Path to release tarball (.tar.gz)")
     parser.add_argument("--dir", default=None,
                         help="Path to extracted package directory")
+    parser.add_argument("--profile", default=None,
+                        help="Expected profile name in MANIFEST.json")
     parser.add_argument("target", nargs="?", default=None,
                         help="Path to package tarball or extracted directory")
     parser.add_argument("--case", default=None,
@@ -296,9 +384,9 @@ def main(argv=None):
                     tar.extractall(path=tmpdir, filter="data")
                 else:
                     tar.extractall(path=tmpdir)
-            run_package_smoke_tests(tmpdir, repo_root, args.case)
+            run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile)
     elif os.path.isdir(target_path):
-        tb = find_tarball_in_dir(target_path)
+        tb = find_tarball_in_dir(target_path, expected_profile=args.profile)
         has_ch = (
             os.path.isfile(os.path.join(target_path, "bin", "ch"))
             or os.path.isfile(os.path.join(target_path, "bin", "ch.exe"))
@@ -311,9 +399,9 @@ def main(argv=None):
                         tar.extractall(path=tmpdir, filter="data")
                     else:
                         tar.extractall(path=tmpdir)
-                run_package_smoke_tests(tmpdir, repo_root, args.case)
+                run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile)
         else:
-            run_package_smoke_tests(target_path, repo_root, args.case)
+            run_package_smoke_tests(target_path, repo_root, args.case, expected_profile=args.profile)
     else:
         print("Error: Target path '{}' does not exist".format(target_path), file=sys.stderr)
         sys.exit(1)

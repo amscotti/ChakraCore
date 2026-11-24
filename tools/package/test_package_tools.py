@@ -19,7 +19,9 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -63,15 +65,25 @@ class PackagingToolsTest(unittest.TestCase):
         make_dummy_file(os.path.join(self.repo_root, "THIRD-PARTY-NOTICES.txt"), b"Third Party Notices\n")
         make_dummy_file(os.path.join(self.repo_root, "README.md"), b"# ChakraCore\n")
 
-        # Fake ChakraCore headers
-        make_dummy_file(os.path.join(self.repo_root, "lib", "Jsrt", "ChakraCore.h"), b"// ChakraCore.h\n")
-        make_dummy_file(os.path.join(self.repo_root, "lib", "Jsrt", "ChakraCommon.h"), b"// ChakraCommon.h\n")
+        # Fake repo-root headers (decoy: build_package must NEVER fall back here)
+        make_dummy_file(os.path.join(self.repo_root, "lib", "Jsrt", "ChakraCore.h"), b"// repo ChakraCore.h\n")
+        make_dummy_file(os.path.join(self.repo_root, "lib", "Jsrt", "ChakraCommon.h"), b"// repo ChakraCommon.h\n")
+        make_dummy_file(os.path.join(self.repo_root, "lib", "Jsrt", "ChakraDebug.h"), b"// repo ChakraDebug.h\n")
         make_dummy_file(os.path.join(self.repo_root, "lib", "Common", "ChakraCoreVersion.h"),
                         b"#define CHAKRA_CORE_MAJOR_VERSION 1\n#define CHAKRA_CORE_MINOR_VERSION 13\n#define CHAKRA_CORE_PATCH_VERSION 0\n")
 
-        # Fake Node-API headers
-        make_dummy_file(os.path.join(self.repo_root, "include", "nodeapi", "js_native_api.h"), b"// js_native_api.h\n")
-        make_dummy_file(os.path.join(self.repo_root, "include", "nodeapi", "node_api.h"), b"// node_api.h\n")
+        # Fake repo-root Node-API headers (decoy: must come from prefix only)
+        for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+            make_dummy_file(os.path.join(self.repo_root, "include", "nodeapi", nh),
+                            "// repo {}\n".format(nh).encode("ascii"))
+
+        # Populate prefix headers (all 4 Chakra headers + all 4 Node-API headers)
+        for hname in ("ChakraCore.h", "ChakraCommon.h", "ChakraDebug.h", "ChakraCoreVersion.h"):
+            make_dummy_file(os.path.join(self.prefix, "include", hname),
+                            "// prefix {}\n".format(hname).encode("ascii"))
+        for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+            make_dummy_file(os.path.join(self.prefix, "include", "nodeapi", nh),
+                            "// prefix {}\n".format(nh).encode("ascii"))
 
         # Populate fake prefix binaries and libraries
         fake_ch_script = (
@@ -252,6 +264,12 @@ class PackagingToolsTest(unittest.TestCase):
         make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.dll"), b"MZnodeapi", 0o755)
         make_dummy_file(os.path.join(win_prefix, "lib", "ChakraCore.lib"), b"!<arch>\ncore", 0o755)
         make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.lib"), b"!<arch>\nnodeapi", 0o755)
+        for hname in ("ChakraCore.h", "ChakraCommon.h", "ChakraDebug.h", "ChakraCoreVersion.h"):
+            make_dummy_file(os.path.join(win_prefix, "include", hname),
+                            "// win {}\n".format(hname).encode("ascii"))
+        for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+            make_dummy_file(os.path.join(win_prefix, "include", "nodeapi", nh),
+                            "// win {}\n".format(nh).encode("ascii"))
 
         out_pkg = os.path.join(self.out_dir, "win_pkg")
         rc = build_package.main([
@@ -277,8 +295,12 @@ class PackagingToolsTest(unittest.TestCase):
             "lib/libChakraNodeApi.lib",
             "include/ChakraCore.h",
             "include/ChakraCommon.h",
+            "include/ChakraDebug.h",
+            "include/ChakraCoreVersion.h",
             "include/nodeapi/js_native_api.h",
+            "include/nodeapi/js_native_api_types.h",
             "include/nodeapi/node_api.h",
+            "include/nodeapi/node_api_types.h",
             "LICENSE.txt",
             "THIRD-PARTY-NOTICES.txt",
             "README.md",
@@ -315,6 +337,12 @@ class PackagingToolsTest(unittest.TestCase):
         make_dummy_file(os.path.join(win_prefix, "bin", "libChakraNodeApi.dll"), b"MZnodeapi", 0o755)
         make_dummy_file(os.path.join(win_prefix, "lib", "ChakraCore.lib"), b"!<arch>\ncore", 0o755)
         make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.lib"), b"!<arch>\nnodeapi", 0o755)
+        for hname in ("ChakraCore.h", "ChakraCommon.h", "ChakraDebug.h", "ChakraCoreVersion.h"):
+            make_dummy_file(os.path.join(win_prefix, "include", hname),
+                            "// win {}\n".format(hname).encode("ascii"))
+        for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+            make_dummy_file(os.path.join(win_prefix, "include", "nodeapi", nh),
+                            "// win {}\n".format(nh).encode("ascii"))
 
         staging_dir = os.path.join(self.out_dir, "chakracore-1.13.0-windows-x64-smoke")
         build_package.stage_package(win_prefix, staging_dir, self.repo_root, "1.13.0", "windows-x64")
@@ -327,6 +355,8 @@ class PackagingToolsTest(unittest.TestCase):
                     return mock.Mock(returncode=0, stdout="ch.exe version 1.13.0.0-beta\n", stderr="")
                 if cmd[1] == "-e":
                     return mock.Mock(returncode=0, stdout="package smoke\n", stderr="")
+                if len(cmd) == 2 and cmd[1].endswith(".js"):
+                    return mock.Mock(returncode=0, stdout="intl:1.234,50\n", stderr="")
             elif exe == "ch-nodeapi.exe":
                 if cmd[1:] == ["--help"]:
                     return mock.Mock(returncode=0, stdout="usage: ch-nodeapi\n", stderr="")
@@ -335,6 +365,270 @@ class PackagingToolsTest(unittest.TestCase):
 
         with mock.patch.object(test_package.subprocess, "run", side_effect=fake_subprocess_run):
             self.assertTrue(test_package.run_package_smoke_tests(staging_dir, self.repo_root))
+
+    def test_profile_flag_naming_manifest_and_mismatch(self):
+        out_pkg = os.path.join(self.out_dir, "prof_test")
+        make_dummy_file(os.path.join(self.prefix, ".profile"), b"jit\n")
+        rc = build_package.main([
+            "--prefix", self.prefix,
+            "--profile", "jit",
+            "--out-dir", out_pkg,
+            "--version", "1.13.0",
+            "--target", "custom-target",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc, 0)
+
+        staging_dir = os.path.join(out_pkg, "chakracore-1.13.0-jit-custom-target")
+        tarball = os.path.join(out_pkg, "chakracore-1.13.0-jit-custom-target.tar.gz")
+        self.assertTrue(os.path.isdir(staging_dir))
+        self.assertTrue(os.path.isfile(tarball))
+        with open(os.path.join(staging_dir, "MANIFEST.json"), encoding="utf-8") as mf:
+            manifest = json.load(mf)
+        self.assertEqual(manifest.get("profile"), "jit")
+        self.assertEqual(manifest.get("icu_mode"), "external")
+
+        self.assertEqual(verify_package.main(["--profile", "jit", "--tarball", tarball]), 0)
+        self.assertEqual(verify_package.main(["--profile", "test", "--tarball", tarball]), 1)
+        self.assertEqual(test_package.main(["--profile", "jit", "--tarball", tarball, "--repo-root", self.repo_root]), 0)
+        with self.assertRaises(RuntimeError):
+            test_package.run_package_smoke_tests(staging_dir, self.repo_root, expected_profile="test")
+
+        # Prefix .profile mismatch must fail loudly in build_package.
+        rc_mismatch = build_package.main([
+            "--prefix", self.prefix,
+            "--profile", "release-shared",
+            "--out-dir", out_pkg,
+            "--version", "1.13.0",
+            "--target", "custom-target",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc_mismatch, 1)
+
+    def test_no_cross_prefix_fallback_and_missing_files_fail_loudly(self):
+        # Populate decoy other prefixes in repo_root that must NEVER be used.
+        make_dummy_file(os.path.join(self.repo_root, "zig-out", "bin", "ch"), b"decoy", 0o755)
+        make_dummy_file(os.path.join(self.repo_root, "zig-out", "lib", self.nodeapi_lib), b"decoy", 0o755)
+        make_dummy_file(os.path.join(self.repo_root, "out", "release-shared", "lib", self.nodeapi_lib), b"decoy", 0o755)
+
+        # Missing both --prefix and --profile fails loudly.
+        self.assertEqual(build_package.main(["--repo-root", self.repo_root]), 2)
+
+        # Remove Node-API lib + ChakraDebug.h + node_api_types.h from self.prefix;
+        # decoys in repo_root/out/release-shared, lib/Jsrt, include/nodeapi must NOT rescue it.
+        os.remove(os.path.join(self.prefix, "lib", self.nodeapi_lib))
+        os.remove(os.path.join(self.prefix, "include", "ChakraDebug.h"))
+        os.remove(os.path.join(self.prefix, "include", "nodeapi", "node_api_types.h"))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            build_package.stage_package(
+                self.prefix, os.path.join(self.out_dir, "fail-staging"),
+                self.repo_root, "1.13.0", "test-plat",
+            )
+        msg = str(ctx.exception)
+        self.assertIn(self.nodeapi_lib, msg)
+        self.assertIn("include/ChakraDebug.h", msg)
+        self.assertIn("include/nodeapi/node_api_types.h", msg)
+
+        self.assertEqual(build_package.main([
+            "--prefix", self.prefix,
+            "--out-dir", os.path.join(self.out_dir, "fail_pkg"),
+            "--repo-root", self.repo_root,
+        ]), 1)
+
+    @unittest.skipUnless(
+        sys.platform == "darwin"
+        and os.path.isfile("/opt/homebrew/opt/icu4c/lib/libicui18n.dylib")
+        and shutil.which("clang"),
+        "requires macOS with Homebrew ICU and clang",
+    )
+    def test_macos_real_macho_icu_bundling_and_verification(self):
+        macho_prefix = os.path.join(self.tmpdir, "macho_prefix")
+        src_dir = os.path.join(self.tmpdir, "macho_src")
+        os.makedirs(os.path.join(macho_prefix, "bin"))
+        os.makedirs(os.path.join(macho_prefix, "lib"))
+        os.makedirs(os.path.join(macho_prefix, "include", "nodeapi"))
+        os.makedirs(src_dir)
+
+        for hname in ("ChakraCore.h", "ChakraCommon.h", "ChakraDebug.h", "ChakraCoreVersion.h"):
+            make_dummy_file(os.path.join(macho_prefix, "include", hname),
+                            "// macho {}\n".format(hname).encode("ascii"))
+        for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+            make_dummy_file(os.path.join(macho_prefix, "include", "nodeapi", nh),
+                            "// macho {}\n".format(nh).encode("ascii"))
+        make_dummy_file(os.path.join(macho_prefix, ".profile"), b"jit\n")
+
+        core_c = os.path.join(src_dir, "core.c")
+        with open(core_c, "w", encoding="utf-8") as f:
+            f.write(
+                "#include <unicode/unum.h>\n"
+                "#include <stdio.h>\n"
+                "int chakra_icu_probe(void) {\n"
+                "    UErrorCode ec = U_ZERO_ERROR;\n"
+                "    UNumberFormat* nf = unum_open(UNUM_CURRENCY, NULL, 0, \"de_DE\", NULL, &ec);\n"
+                "    if (nf) unum_close(nf);\n"
+                "    return U_SUCCESS(ec) ? 0 : 1;\n"
+                "}\n"
+            )
+        napi_c = os.path.join(src_dir, "nodeapi.c")
+        with open(napi_c, "w", encoding="utf-8") as f:
+            f.write("extern int chakra_icu_probe(void);\nint napi_probe(void) { return chakra_icu_probe(); }\n")
+        ch_c = os.path.join(src_dir, "ch.c")
+        with open(ch_c, "w", encoding="utf-8") as f:
+            f.write(
+                "#include <dlfcn.h>\n"
+                "#include <libgen.h>\n"
+                "#include <mach-o/dyld.h>\n"
+                "#include <stdio.h>\n"
+                "#include <string.h>\n"
+                "#include <unicode/uversion.h>\n"
+                "int main(int argc, char** argv) {\n"
+                "    UVersionInfo v;\n"
+                "    u_getVersion(v);\n"
+                "    if (argc > 1 && strcmp(argv[1], \"--version\") == 0) {\n"
+                "        printf(\"ch icu %d.%d\\n\", v[0], v[1]);\n"
+                "        return 0;\n"
+                "    }\n"
+                "    char buf[4096]; uint32_t sz = sizeof(buf);\n"
+                "    _NSGetExecutablePath(buf, &sz);\n"
+                "    char libp[4096];\n"
+                "    snprintf(libp, sizeof(libp), \"%s/libChakraCore.dylib\", dirname(buf));\n"
+                "    void* h = dlopen(libp, RTLD_NOW);\n"
+                "    if (!h) { fprintf(stderr, \"dlopen: %s\\n\", dlerror()); return 2; }\n"
+                "    int (*fn)(void) = (int(*)(void))dlsym(h, \"chakra_icu_probe\");\n"
+                "    return fn ? fn() : 3;\n"
+                "}\n"
+            )
+        chn_c = os.path.join(src_dir, "chn.c")
+        with open(chn_c, "w", encoding="utf-8") as f:
+            f.write("extern int napi_probe(void);\nint main(void) { return napi_probe(); }\n")
+
+        icu_inc = "/opt/homebrew/opt/icu4c/include"
+        icu_lib = "/opt/homebrew/opt/icu4c/lib"
+        core_dy = os.path.join(macho_prefix, "lib", "libChakraCore.dylib")
+        napi_dy = os.path.join(macho_prefix, "lib", "libChakraNodeApi.dylib")
+        ch_bin = os.path.join(macho_prefix, "bin", "ch")
+        chn_bin = os.path.join(macho_prefix, "bin", "ch-nodeapi")
+
+        subprocess.run([
+            "clang", "-shared", "-fPIC", "-I" + icu_inc, "-L" + icu_lib,
+            "-licuuc", "-licui18n", "-licudata",
+            "-Wl,-install_name,@rpath/libChakraCore.dylib", "-Wl,-headerpad_max_install_names",
+            core_c, "-o", core_dy,
+        ], check=True)
+        subprocess.run([
+            "clang", "-shared", "-fPIC", core_dy,
+            "-Wl,-install_name,@rpath/libChakraNodeApi.dylib", "-Wl,-headerpad_max_install_names",
+            napi_c, "-o", napi_dy,
+        ], check=True)
+        subprocess.run([
+            "clang", "-I" + icu_inc, "-L" + icu_lib,
+            "-licuuc", "-licui18n", "-licudata",
+            "-Wl,-headerpad_max_install_names",
+            ch_c, "-o", ch_bin,
+        ], check=True)
+        subprocess.run([
+            "clang", napi_dy, core_dy,
+            "-Wl,-rpath,@executable_path/../lib", "-Wl,-headerpad_max_install_names",
+            chn_c, "-o", chn_bin,
+        ], check=True)
+
+        pkg_out = os.path.join(self.out_dir, "macho_bundled")
+        rc = build_package.main([
+            "--prefix", macho_prefix,
+            "--profile", "jit",
+            "--out-dir", pkg_out,
+            "--version", "1.13.0",
+            "--target", "darwin-arm64",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc, 0)
+
+        staging = os.path.join(pkg_out, "chakracore-1.13.0-jit-darwin-arm64")
+        tarball = os.path.join(pkg_out, "chakracore-1.13.0-jit-darwin-arm64.tar.gz")
+        with open(os.path.join(staging, "MANIFEST.json"), encoding="utf-8") as mf:
+            manifest = json.load(mf)
+        self.assertEqual(manifest.get("icu_mode"), "bundled")
+        self.assertEqual(manifest.get("profile"), "jit")
+        icu_libs = manifest.get("icu_libraries", [])
+        self.assertTrue(any(x.startswith("libicudata.") for x in icu_libs), icu_libs)
+        self.assertTrue(any(x.startswith("libicuuc.") for x in icu_libs), icu_libs)
+        self.assertTrue(any(x.startswith("libicui18n.") for x in icu_libs), icu_libs)
+
+        ok, errs = verify_package.verify_package(tarball, expected_profile="jit")
+        self.assertTrue(ok, "Bundled Mach-O package verify failed: {}".format(errs))
+
+        # Bit-for-bit reproducibility across independent Mach-O ICU bundling + codesign runs.
+        pkg_out2 = os.path.join(self.out_dir, "macho_bundled_2")
+        rc2 = build_package.main([
+            "--prefix", macho_prefix,
+            "--profile", "jit",
+            "--out-dir", pkg_out2,
+            "--version", "1.13.0",
+            "--target", "darwin-arm64",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc2, 0)
+        tarball2 = os.path.join(pkg_out2, "chakracore-1.13.0-jit-darwin-arm64.tar.gz")
+        self.assertEqual(
+            build_package.compute_sha256(tarball),
+            build_package.compute_sha256(tarball2),
+            "Bundled Mach-O tarball must be bit-for-bit deterministic across runs",
+        )
+
+        # Extract tarball cleanly and execute packaged binaries with DYLD_* unset.
+        with tempfile.TemporaryDirectory(prefix="macho-extract-") as ex_dir:
+            with tarfile.open(tarball, "r:*") as tf:
+                if hasattr(tarfile, "data_filter"):
+                    tf.extractall(path=ex_dir, filter="data")
+                else:
+                    tf.extractall(path=ex_dir)
+            clean_env = os.environ.copy()
+            for k in ("DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "LD_LIBRARY_PATH"):
+                clean_env.pop(k, None)
+            r_ver = subprocess.run([os.path.join(ex_dir, "bin", "ch"), "--version"],
+                                   env=clean_env, capture_output=True, text=True)
+            self.assertEqual(r_ver.returncode, 0, r_ver.stderr)
+            self.assertIn("ch icu ", r_ver.stdout)
+            r_dl = subprocess.run([os.path.join(ex_dir, "bin", "ch")],
+                                  env=clean_env, capture_output=True, text=True)
+            self.assertEqual(r_dl.returncode, 0, r_dl.stderr)
+            r_na = subprocess.run([os.path.join(ex_dir, "bin", "ch-nodeapi")],
+                                  env=clean_env, capture_output=True, text=True)
+            self.assertEqual(r_na.returncode, 0, r_na.stderr)
+            test_package.check_macos_no_external_homebrew(
+                ex_dir,
+                [os.path.join(ex_dir, "bin", "ch"), os.path.join(ex_dir, "bin", "ch-nodeapi")],
+                [os.path.join(ex_dir, "lib", "libChakraCore.dylib"),
+                 os.path.join(ex_dir, "lib", "libChakraNodeApi.dylib")],
+            )
+
+        # Negative control: external ICU package tampered to claim icu_mode='bundled' fails verify_package.
+        ext_out = os.path.join(self.out_dir, "macho_external")
+        rc_ext = build_package.main([
+            "--prefix", macho_prefix,
+            "--profile", "jit",
+            "--icu-mode", "external",
+            "--out-dir", ext_out,
+            "--version", "1.13.0",
+            "--target", "darwin-arm64",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc_ext, 0)
+        ext_staging = os.path.join(ext_out, "chakracore-1.13.0-jit-darwin-arm64")
+        ok_ext, errs_ext = verify_package.verify_extracted_dir(ext_staging, expected_profile="jit")
+        self.assertTrue(ok_ext, "External ICU verify failed: {}".format(errs_ext))
+
+        mpath = os.path.join(ext_staging, "MANIFEST.json")
+        with open(mpath, encoding="utf-8") as mf:
+            mdata = json.load(mf)
+        mdata["icu_mode"] = "bundled"
+        mdata["icu_libraries"] = ["libicudata.79.dylib"]
+        with open(mpath, "w", encoding="utf-8") as mf:
+            json.dump(mdata, mf, indent=2, sort_keys=True)
+        ok_tamper, errs_tamper = verify_package.verify_extracted_dir(ext_staging)
+        self.assertFalse(ok_tamper)
+        self.assertTrue(any("non-portable external dependency" in e for e in errs_tamper), errs_tamper)
 
 
 if __name__ == "__main__":
