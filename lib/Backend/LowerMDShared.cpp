@@ -809,9 +809,7 @@ LowererMD::ChangeToHelperCall(IR::Instr *callInstr, IR::JnHelperMethod helperMet
                 bailOutInfoCopy->bailOutFunc
             );
 
-#if ENABLE_DEBUG_CONFIG_OPTIONS
             bailOutRecord->bailOutOpcode = bailOutInfoCopy->bailOutOpcode;
-#endif
 
             bailOutInfoCopy->bailOutRecord = bailOutRecord;
         }

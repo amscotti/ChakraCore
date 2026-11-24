@@ -14653,9 +14653,7 @@ Lowerer::GenerateBailOut(IR::Instr * instr, IR::BranchInstr * branchInstr, IR::L
     // Save the bailout record. The register allocator will generate arguments.
     bailOutInfo->bailOutRecord = bailOutRecord;
 
-#if ENABLE_DEBUG_CONFIG_OPTIONS
     bailOutRecord->bailOutOpcode = bailOutInfo->bailOutOpcode;
-#endif
 
     if (instr->m_opcode == Js::OpCode::BailOnNotStackArgs && instr->GetSrc1())
     {

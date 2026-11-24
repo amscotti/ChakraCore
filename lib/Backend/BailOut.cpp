@@ -79,9 +79,7 @@ void BailOutInfo::PartialDeepCopyTo(BailOutInfo * const other) const
     other->bailOutInstr = this->bailOutInstr;
     other->bailInInstr = this->bailInInstr;
 
-#if ENABLE_DEBUG_CONFIG_OPTIONS
     other->bailOutOpcode = this->bailOutOpcode;
-#endif
 
     other->bailOutFunc = this->bailOutFunc;
     other->branchConditionOpnd = this->branchConditionOpnd;
@@ -434,7 +432,8 @@ BailOutRecord::BailOutRecord(uint32 bailOutOffset, uint bailOutCacheIndex, IR::B
     argOutOffsetInfo(nullptr), bailOutOffset(bailOutOffset),
     bailOutCount(0), polymorphicCacheIndex(bailOutCacheIndex), bailOutKind(kind),
     branchValueRegSlot(Js::Constants::NoRegister),
-    ehBailoutData(nullptr), m_bailOutRecordId(0), type(Normal)
+    ehBailoutData(nullptr), m_bailOutRecordId(0), type(Normal),
+    bailOutOpcode(Js::OpCode::InvalidOpCode)
 #if DBG
     , inlineDepth(0)
 #endif

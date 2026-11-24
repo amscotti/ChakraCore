@@ -3350,9 +3350,7 @@ BasicBlock::CreateLoopTopBailOutInfo(GlobOpt * globOpt)
     BailOutInfo* bailOutInfo = JitAnew(globOpt->func->m_alloc, BailOutInfo, firstInstr->GetByteCodeOffset(), firstInstr->m_func);
     bailOutInfo->isLoopTopBailOutInfo = true;
     globOpt->FillBailOutInfo(this, bailOutInfo);
-#if ENABLE_DEBUG_CONFIG_OPTIONS
     bailOutInfo->bailOutOpcode = Js::OpCode::LoopBodyStart;
-#endif
     return bailOutInfo;
 }
 

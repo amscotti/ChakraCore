@@ -1436,10 +1436,8 @@ LinearScan::FillBailOutRecord(IR::Instr * instr)
         BailOutRecord * bailOutRecord = NativeCodeDataNewZ(allocator, BailOutRecord, bailOutOffset, (uint)-1, IR::BailOutInvalid, currentFunc);
         bailOutRecord->m_bailOutRecordId = m_bailOutRecordCount++;
         bailOutRecord->globalBailOutRecordTable = EnsureGlobalBailOutRecordTable(currentFunc);
-#if ENABLE_DEBUG_CONFIG_OPTIONS
         // To indicate this is a subsequent bailout from an inlinee
         bailOutRecord->bailOutOpcode = Js::OpCode::InlineeEnd;
-#endif
         if (this->func->HasTry())
         {
             RegionType currentRegionType = this->currentRegion->GetType();
