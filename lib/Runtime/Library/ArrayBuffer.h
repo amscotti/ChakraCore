@@ -96,6 +96,7 @@ namespace Js
         virtual bool IsArrayBuffer() = 0;
         virtual bool IsSharedArrayBuffer() = 0;
         virtual bool IsWebAssemblyArrayBuffer() { return false; }
+        bool IsGrowableSharedArrayBuffer();
         virtual ArrayBuffer * GetAsArrayBuffer() = 0;
         virtual SharedArrayBuffer * GetAsSharedArrayBuffer() { return nullptr; }
         virtual void AddParent(ArrayBufferParent* parent);
@@ -136,10 +137,12 @@ namespace Js
         // IsImmutableBuffer().
         Field(bool) isImmutable;
 
-        // View-parent tracking shared by resizable ArrayBuffers and growable
-        // SharedArrayBuffers. Views (TypedArrayBase, DataView) register via
-        // ArrayBufferParent's constructor, which calls AddParent on their
-        // buffer regardless of buffer kind.
+        // View-parent tracking shared by ArrayBuffers (for detach and resize)
+        // and growable/Wasm SharedArrayBuffers (for grow length refresh).
+        // Fixed-size non-Wasm SharedArrayBuffers skip AddParent and leave
+        // primaryParent and otherParents null, because they can neither detach
+        // nor grow. Views (TypedArrayBase, DataView) call AddParent from
+        // ArrayBufferParent's constructor.
         //
         // Ownership record (doc/memory-management.md section 3):
         // Domain: Recycler/JS value, same runtime as this wrapper. Owner: this

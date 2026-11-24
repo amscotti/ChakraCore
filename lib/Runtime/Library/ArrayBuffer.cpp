@@ -315,8 +315,19 @@ namespace Js
         return arrayBufferState.Detach();
     }
 
+    bool ArrayBufferBase::IsGrowableSharedArrayBuffer()
+    {
+        SharedArrayBuffer* sharedBuffer = this->GetAsSharedArrayBuffer();
+        return sharedBuffer != nullptr && (sharedBuffer->IsGrowable() || this->IsWebAssemblyArrayBuffer());
+    }
+
     void ArrayBufferBase::AddParent(ArrayBufferParent* parent)
     {
+        if (this->IsSharedArrayBuffer() && !this->IsGrowableSharedArrayBuffer())
+        {
+            return;
+        }
+
         if (this->primaryParent == nullptr || this->primaryParent->Get() == nullptr)
         {
             this->primaryParent = this->GetRecycler()->CreateWeakReferenceHandle(parent);

@@ -140,6 +140,7 @@ namespace Js
     private:
         template <typename EncodedChar>
         void InitFromCharDigits(const EncodedChar *prgch, uint32 cch, bool isNegative); // init from char of digits
+        static JavascriptBigInt * CreateFromPowerOfTwoDigits(const char16 * pch, const char16 * pchEnd, uint32 radix, bool isNegative, ScriptContext * scriptContext);
 
         void MulThenAdd(digit_t luMul, digit_t luAdd);
         static uint32 DivModInPlace(digit_t * digits, digit_t& length, uint32 divisor);

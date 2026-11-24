@@ -509,7 +509,8 @@ ThreadContext::~ThreadContext()
 #endif
         if (keptObjects)
         {
-            keptObjects->ClearAndZero();
+            keptObjects->Clear();
+            keptObjects->Reset();
             keptObjects.Unroot(recycler);
         }
         if (finalizationRegistries)
@@ -1441,27 +1442,21 @@ ThreadContext::KeepDuringJob(Js::RecyclableObject* object)
 
     if (!keptObjects)
     {
-        keptObjects.Root(RecyclerNew(recycler, KeptObjectList, recycler), recycler);
+        keptObjects.Root(RecyclerNew(recycler, KeptObjectSet, recycler), recycler);
     }
 
-    // Linear dedupe keeps the common case simple; the list is bounded by the
-    // number of distinct targets kept alive in one job. Using a recycler set
-    // would remove the O(n^2) worst case for jobs that keep many objects.
     // Capacity contract (memory-management.md section 3): the bound is
     // spec-determined -- AddToKeptObjects must retain every distinct
     // dereferenced/constructed target until the job boundary clears the
-    // list (ClearKeptObjects), so a hard entry cap would silently break
+    // set (ClearKeptObjects), so a hard entry cap would silently break
     // WeakRef semantics and is deliberately not imposed. Exhaustion is a
-    // controlled failure, never a silent drop: List growth allocates
+    // controlled failure, never a silent drop: BaseHashSet growth allocates
     // through the Recycler, whose OOM policy throws OutOfMemoryException
     // (or the configured fatal handler) out of the deref/constructor,
     // leaving the already-kept prefix intact for the boundary clear.
-    if (!keptObjects->Contains(object))
-    {
-        // JsUtil::List stores entries as Field(T, Recycler): Add goes through
-        // WriteBarrierPtr on GLOBAL_ENABLE_WRITE_BARRIER builds.
-        keptObjects->Add(object);
-    }
+    // AddNew deduplicates in O(1) expected time and stores entries as
+    // Field(T, Recycler), publishing through WriteBarrierPtr on barrier builds.
+    keptObjects->AddNew(object);
 }
 
 void
@@ -1469,8 +1464,20 @@ ThreadContext::ClearKeptObjects()
 {
     if (keptObjects)
     {
-        // Zero removed slots so stale pointers are not conservative scan roots.
-        keptObjects->ClearAndZero();
+        // Release oversized backing tables after a large job so one spike
+        // does not retain megabytes or force O(capacity) zero-fills on
+        // subsequent small jobs.
+        const int KeptObjectsRetainThreshold = 4096;
+        if (keptObjects->Count() > KeptObjectsRetainThreshold)
+        {
+            keptObjects->Clear();
+            keptObjects->Reset();
+        }
+        else
+        {
+            // Zero removed slots so stale pointers are not conservative scan roots.
+            keptObjects->Clear();
+        }
     }
 }
 

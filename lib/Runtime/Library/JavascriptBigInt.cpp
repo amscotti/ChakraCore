@@ -29,18 +29,33 @@ namespace Js
             return static_cast<uint32>(sizeof(digit_t) * 8);
         }
 
-        // Exponent results are built by repeated schoolbook squaring, so the
-        // limb-count bound used by asUintN (2**24 limbs) is far beyond any
-        // answer this implementation can produce in reasonable time. Keep a
-        // smaller, explicit resource bound: 2**20 bits is 128 KiB and makes a
-        // hostile `2n ** (2n**64n - 1n)` a controlled RangeError instead of an
-        // unbounded allocation. V8 uses a larger maximum (about 2**30 bits);
-        // the observable contract for oversized results is the same.
-        const uint64 BigIntMaxExponentResultBits = 1ull << 20;
-
         inline uint64 BigIntMaxResultBitCount()
         {
             return BigIntMaxResultLimbs * BigIntLimbBits();
+        }
+
+        // Match the exponentiation result cap to BigIntMaxResultBitCount()
+        // (2**30 bits on 64-bit limbs, 2**29 bits on 32-bit limbs) so requests
+        // like 3n ** 1000000n succeed while oversized results still fail with a
+        // controlled RangeError before allocating.
+        inline uint64 BigIntMaxExponentResultBits()
+        {
+            return BigIntMaxResultBitCount();
+        }
+
+        inline bool IsPowerOfTwoRadix(uint32 radix, uint32 * bitsPerDigit)
+        {
+            if (radix >= 2 && radix <= 32 && (radix & (radix - 1)) == 0)
+            {
+                uint32 bits = 0;
+                for (uint32 r = radix; r > 1; r >>= 1)
+                {
+                    bits++;
+                }
+                *bitsPerDigit = bits;
+                return true;
+            }
+            return false;
         }
 
         // Number of uint32 halves in one digit_t limb.
@@ -221,6 +236,93 @@ namespace Js
         }
     }
 
+    JavascriptBigInt * JavascriptBigInt::CreateFromPowerOfTwoDigits(
+        const char16 * pch, const char16 * pchEnd, uint32 radix, bool isNegative, ScriptContext * scriptContext)
+    {
+        uint32 bitsPerDigit = 0;
+        bool isPow2 = IsPowerOfTwoRadix(radix, &bitsPerDigit);
+        Assert(isPow2);
+        Unused(isPow2);
+
+        while (pch < pchEnd && *pch == _u('0'))
+        {
+            pch++;
+        }
+        if (pch == pchEnd)
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
+
+        uint32 topDigit = BigIntDigitValue(*pch, radix);
+        if (topDigit == static_cast<uint32>(-1))
+        {
+            return nullptr;
+        }
+
+        uint32 topBits = 0;
+        for (uint32 v = topDigit; v != 0; v >>= 1)
+        {
+            topBits++;
+        }
+
+        const uint32 limbBits = BigIntLimbBits();
+        uint64 bitLength = static_cast<uint64>(pchEnd - pch - 1) * bitsPerDigit + topBits;
+        uint64 limbCount64 = (bitLength + limbBits - 1) / limbBits;
+        if (limbCount64 > BigIntMaxResultLimbs ||
+            limbCount64 > static_cast<uint64>(BigIntLimbMask()) ||
+            limbCount64 > SIZE_MAX / sizeof(digit_t))
+        {
+            // Validate remaining characters before throwing RangeError so
+            // malformed inputs still fail as SyntaxError (nullptr).
+            for (const char16 * p = pch + 1; p < pchEnd; p++)
+            {
+                if (BigIntDigitValue(*p, radix) == static_cast<uint32>(-1))
+                {
+                    return nullptr;
+                }
+            }
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt"));
+        }
+
+        JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZeroWithLength(static_cast<digit_t>(limbCount64), scriptContext);
+        digit_t limbIdx = 0;
+        digit_t currentLimb = 0;
+        uint32 bitPos = 0;
+
+        for (const char16 * p = pchEnd; p > pch;)
+        {
+            uint32 digitValue = BigIntDigitValue(*--p, radix);
+            if (digitValue == static_cast<uint32>(-1))
+            {
+                return nullptr;
+            }
+
+            currentLimb |= static_cast<digit_t>(digitValue) << bitPos;
+            if (bitPos + bitsPerDigit < limbBits)
+            {
+                bitPos += bitsPerDigit;
+            }
+            else
+            {
+                Assert(limbIdx < bigintNew->m_length);
+                bigintNew->m_digits[limbIdx++] = currentLimb;
+                uint32 written = limbBits - bitPos;
+                uint32 remaining = bitsPerDigit - written;
+                currentLimb = remaining > 0 ? static_cast<digit_t>(digitValue >> written) : 0;
+                bitPos = remaining;
+            }
+        }
+        if (currentLimb != 0)
+        {
+            Assert(limbIdx < bigintNew->m_length);
+            bigintNew->m_digits[limbIdx++] = currentLimb;
+        }
+        Assert(limbIdx == bigintNew->m_length);
+        Assert(bigintNew->m_digits[bigintNew->m_length - 1] != 0);
+        bigintNew->m_isNegative = isNegative;
+        return bigintNew;
+    }
+
     JavascriptBigInt * JavascriptBigInt::CreateFromString(const char16 * content, charcount_t cchContent, ScriptContext * scriptContext)
     {
         Assert(content != nullptr);
@@ -253,6 +355,12 @@ namespace Js
             return nullptr; // a lone sign or a bare "0x"/"0o"/"0b" prefix
         }
 
+        uint32 bitsPerDigit = 0;
+        if (IsPowerOfTwoRadix(radix, &bitsPerDigit))
+        {
+            return CreateFromPowerOfTwoDigits(pch, pchEnd, radix, isNegative, scriptContext);
+        }
+
         JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZero(scriptContext);
         for (const char16 * pchDigit = pch; pchDigit < pchEnd; pchDigit++)
         {
@@ -280,6 +388,11 @@ namespace Js
 
     JavascriptBigInt * JavascriptBigInt::CreateZeroWithLength(digit_t length, ScriptContext * scriptContext)
     {
+        if (length > BigIntMaxResultLimbs + 1 ||
+            static_cast<uint64>(length) > SIZE_MAX / sizeof(digit_t))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Allocate BigInt"));
+        }
         JavascriptBigInt * bigintNew = RecyclerNew(scriptContext->GetRecycler(), JavascriptBigInt, scriptContext->GetLibrary()->GetBigIntTypeStatic());
         bigintNew->m_length = length;
         bigintNew->m_isNegative = false;
@@ -373,11 +486,77 @@ namespace Js
 
         static const char16 digitChars[] = _u("0123456789abcdefghijklmnopqrstuvwxyz");
 
+        uint32 bitsPerDigit = 0;
+        if (IsPowerOfTwoRadix(radix, &bitsPerDigit))
+        {
+            const uint32 limbBits = BigIntLimbBits();
+            const uint32 digitMask = radix - 1;
+            uint64 bitLength = GetMagnitudeBitLength();
+            Assert(bitLength > 0);
+
+            uint64 digitCount64 = (bitLength + bitsPerDigit - 1) / bitsPerDigit;
+            uint64 resultLength64 = digitCount64 + (m_isNegative ? 1 : 0);
+            if (resultLength64 > SIZE_MAX || !IsValidCharCount(static_cast<size_t>(resultLength64)))
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
+            }
+
+            charcount_t digitCount = static_cast<charcount_t>(digitCount64);
+            charcount_t resultLength = static_cast<charcount_t>(resultLength64);
+            BufferStringBuilder builder(resultLength, scriptContext);
+            char16 * result = builder.DangerousGetWritableBuffer();
+
+            charcount_t pos = resultLength;
+            digit_t limbIndex = 0;
+            digit_t currentLimb = m_digits[0];
+            uint32 bitsLeftInLimb = limbBits;
+            for (charcount_t emitted = 0; emitted < digitCount; emitted++)
+            {
+                uint32 digit;
+                if (bitsLeftInLimb >= bitsPerDigit)
+                {
+                    digit = static_cast<uint32>(currentLimb) & digitMask;
+                    currentLimb >>= bitsPerDigit;
+                    bitsLeftInLimb -= bitsPerDigit;
+                }
+                else
+                {
+                    digit = static_cast<uint32>(currentLimb);
+                    limbIndex++;
+                    if (limbIndex < m_length)
+                    {
+                        currentLimb = m_digits[limbIndex];
+                        uint32 need = bitsPerDigit - bitsLeftInLimb;
+                        digit |= (static_cast<uint32>(currentLimb) << bitsLeftInLimb) & digitMask;
+                        currentLimb >>= need;
+                        bitsLeftInLimb = limbBits - need;
+                    }
+                    else
+                    {
+                        currentLimb = 0;
+                        bitsLeftInLimb = 0;
+                    }
+                }
+                result[--pos] = digitChars[digit];
+            }
+
+            if (m_isNegative)
+            {
+                Assert(pos == 1);
+                result[0] = _u('-');
+            }
+            else
+            {
+                Assert(pos == 0);
+            }
+            return builder.ToString();
+        }
+
         // Base 2 is the longest representation: one character per bit. Check
         // the representation size before allocating (a string past the engine
         // limit cannot be produced anyway).
-        size_t maxDigitsSize = static_cast<size_t>(m_length) * (sizeof(digit_t) * 8) + 2;
-        if (!IsValidCharCount(maxDigitsSize))
+        uint64 maxDigitsSize = static_cast<uint64>(m_length) * (sizeof(digit_t) * 8) + 2;
+        if (maxDigitsSize > SIZE_MAX || !IsValidCharCount(static_cast<size_t>(maxDigitsSize)))
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
         }
@@ -1155,10 +1334,18 @@ namespace Js
             return;
         }
 
-        length += length;// double size
-        if (SIZE_MAX / sizeof(digit_t) < length) // overflow 
+        if (length > BigIntMaxResultLimbs || length > SIZE_MAX / sizeof(digit_t))
         {
             JavascriptError::ThrowRangeError(this->GetScriptContext(), VBSERR_TypeMismatch, _u("Resize BigInt"));
+        }
+
+        if (length <= BigIntMaxResultLimbs / 2 && length <= (SIZE_MAX / sizeof(digit_t)) / 2)
+        {
+            length += length; // double size
+        }
+        else
+        {
+            length = static_cast<digit_t>(BigIntMaxResultLimbs);
         }
 
         digits = RecyclerNewArrayLeaf(this->GetScriptContext()->GetRecycler(), digit_t, length);
@@ -1243,53 +1430,98 @@ namespace Js
         else
         {
             Assert(radix == 2 || radix == 8 || radix == 16);
+            uint32 bitsPerDigit = (radix == 16) ? 4 : (radix == 8 ? 3 : 1);
 
-            // Accumulate the largest radix power that fits a limb, then fold
-            // that chunk with one MulThenAdd. A per-digit MulThenAdd is
-            // quadratic for long source literals and lets untrusted source
-            // burn minutes in the scanner/constant path.
-            uint32 chunkDigits = 0;
-            digit_t chunkBase = 1;
-            const digit_t maxDigit = static_cast<digit_t>(~static_cast<digit_t>(0));
-            while (chunkBase <= maxDigit / radix)
+            while (pChar < pCharLimit && (*pChar == _u('0') || *pChar == _u('_')))
             {
-                chunkBase *= radix;
-                chunkDigits++;
+                pChar++;
             }
-            Assert(chunkDigits != 0);
-
-            digit_t chunkValue = 0;
-            digit_t chunkMul = 1;
-            uint32 chunkCount = 0;
-            for (; pChar < pCharLimit; pChar++)
+            if (pChar == pCharLimit)
             {
-                if (*pChar == _u('_'))
+                m_isNegative = false;
+                m_length = 1;
+                m_digits[0] = 0;
+                return;
+            }
+
+            uint32 topDigit = BigIntDigitValue(static_cast<char16>(*pChar), radix);
+            Assert(topDigit != static_cast<uint32>(-1));
+            uint32 topBits = 0;
+            for (uint32 v = topDigit; v != 0; v >>= 1)
+            {
+                topBits++;
+            }
+
+            uint64 digitCount = 0;
+            for (const EncodedChar * p = pChar; p < pCharLimit; p++)
+            {
+                if (*p != _u('_'))
                 {
-                    // The scanner's base parser already validated separator
-                    // placement (between two digits); just exclude it here.
+                    digitCount++;
+                }
+            }
+            Assert(digitCount >= 1);
+
+            const uint32 limbBits = BigIntLimbBits();
+            uint64 bitLength = (digitCount - 1) * bitsPerDigit + topBits;
+            uint64 limbCount64 = (bitLength + limbBits - 1) / limbBits;
+            if (limbCount64 > BigIntMaxResultLimbs ||
+                limbCount64 > static_cast<uint64>(BigIntLimbMask()) ||
+                limbCount64 > SIZE_MAX / sizeof(digit_t))
+            {
+                JavascriptError::ThrowRangeError(this->GetScriptContext(), JSERR_FunctionArgument_Invalid, _u("BigInt"));
+            }
+
+            digit_t limbCount = static_cast<digit_t>(limbCount64);
+            if (limbCount > m_maxLength)
+            {
+                m_digits = RecyclerNewArrayLeafZ(this->GetScriptContext()->GetRecycler(), digit_t, limbCount);
+                m_maxLength = limbCount;
+            }
+            else
+            {
+                memset(m_digits, 0, limbCount * sizeof(digit_t));
+            }
+            m_length = limbCount;
+
+            digit_t limbIdx = 0;
+            digit_t currentLimb = 0;
+            uint32 bitPos = 0;
+            for (const EncodedChar * p = pCharLimit; p > pChar;)
+            {
+                EncodedChar ch = *--p;
+                if (ch == _u('_'))
+                {
                     continue;
                 }
-                uint32 digitValue = BigIntDigitValue(static_cast<char16>(*pChar), radix);
+                uint32 digitValue = BigIntDigitValue(static_cast<char16>(ch), radix);
                 Assert(digitValue != static_cast<uint32>(-1));
                 if (digitValue == static_cast<uint32>(-1))
                 {
                     continue; // unreachable for scanner-produced literals
                 }
-                chunkValue = chunkValue * radix + digitValue;
-                chunkMul *= radix;
-                chunkCount++;
-                if (chunkCount == chunkDigits)
+                currentLimb |= static_cast<digit_t>(digitValue) << bitPos;
+                if (bitPos + bitsPerDigit < limbBits)
                 {
-                    MulThenAdd(chunkMul, chunkValue);
-                    chunkValue = 0;
-                    chunkMul = 1;
-                    chunkCount = 0;
+                    bitPos += bitsPerDigit;
+                }
+                else
+                {
+                    Assert(limbIdx < m_length);
+                    m_digits[limbIdx++] = currentLimb;
+                    uint32 written = limbBits - bitPos;
+                    uint32 remaining = bitsPerDigit - written;
+                    currentLimb = remaining > 0 ? static_cast<digit_t>(digitValue >> written) : 0;
+                    bitPos = remaining;
                 }
             }
-            if (chunkCount != 0)
+            if (currentLimb != 0)
             {
-                MulThenAdd(chunkMul, chunkValue);
+                Assert(limbIdx < m_length);
+                m_digits[limbIdx++] = currentLimb;
             }
+            Assert(limbIdx == m_length);
+            Assert(m_digits[m_length - 1] != 0);
         }
 
         // make sure this is no negative zero
@@ -1804,12 +2036,28 @@ namespace Js
     // return |pbi1| * |pbi2|
     JavascriptBigInt * JavascriptBigInt::MulAbsolute(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2)
     {
+        uint64 bits1 = pbi1->GetMagnitudeBitLength();
+        uint64 bits2 = pbi2->GetMagnitudeBitLength();
+        if (bits1 > 0 && bits2 > 0)
+        {
+            uint64 minResultBits = (bits1 - 1) + (bits2 - 1) + 1;
+            if (minResultBits > BigIntMaxResultBitCount())
+            {
+                JavascriptError::ThrowRangeError(pbi1->GetScriptContext(), VBSERR_TypeMismatch, _u("Multiply BigInt"));
+            }
+        }
+
         // Start with maximum length possible in pbi3
-        digit_t length = pbi1->m_length + pbi2->m_length;
-        if (SIZE_MAX / sizeof(digit_t) < length) // overflow 
+        uint64 length64 = static_cast<uint64>(pbi1->m_length) + static_cast<uint64>(pbi2->m_length);
+        if (pbi1->m_length > BigIntMaxResultLimbs ||
+            pbi2->m_length > BigIntMaxResultLimbs ||
+            length64 > BigIntMaxResultLimbs + 1 ||
+            length64 > static_cast<uint64>(BigIntLimbMask()) ||
+            length64 > SIZE_MAX / sizeof(digit_t)) // overflow
         {
             JavascriptError::ThrowRangeError(pbi1->GetScriptContext(), VBSERR_TypeMismatch, _u("Multiply BigInt"));
         }
+        digit_t length = static_cast<digit_t>(length64);
         JavascriptBigInt * pbi3 = JavascriptBigInt::CreateZeroWithLength(length, pbi1->GetScriptContext());
 
         // Compute pbi3 = pbi1 * pbi2 as follow:
@@ -1845,9 +2093,13 @@ namespace Js
         }
         
         // adjust length
-        while ((pbi3->m_length > 0) && (pbi3->m_digits[pbi3->m_length - 1] == 0))
+        while ((pbi3->m_length > 1) && (pbi3->m_digits[pbi3->m_length - 1] == 0))
         {
             pbi3->m_length--;
+        }
+        if (pbi3->m_length > BigIntMaxResultLimbs)
+        {
+            JavascriptError::ThrowRangeError(pbi1->GetScriptContext(), VBSERR_TypeMismatch, _u("Multiply BigInt"));
         }
         Assert(pbi3->m_length > 0);
         return pbi3;
@@ -2229,20 +2481,38 @@ namespace Js
 
         // The result of |base| ** exponent (|base| >= 2 here) has at least
         // (baseBits - 1) * exponent + 1 bits. Reject impossible requests in
-        // O(1) with an overflow-safe division. The exact width is checked
-        // after each multiplication below, so the accepted set is precisely
-        // "mathematical result fits BigIntMaxExponentResultBits", including
-        // the power-of-two boundary: 2n ** 1048575n is accepted and
-        // 2n ** 1048576n is rejected.
+        // O(1) with an overflow-safe division. When |base| also has its second
+        // highest bit set (|base| >= 1.5 * 2**(baseBits - 1), e.g. 3), each
+        // power gains more than baseBits - 0.5 bits, rejecting huge 3n**N
+        // requests in O(1) as well. Exact width is still checked after each
+        // multiplication below.
+        uint64 maxResultBits = BigIntMaxExponentResultBits();
         uint64 baseBits = pbiBase->GetMagnitudeBitLength();
         Assert(baseBits > 1);
         uint64 growthPerExponent = baseBits - 1;
-        if (exponent > (BigIntMaxExponentResultBits - 1) / growthPerExponent)
+        if (exponent > (maxResultBits - 1) / growthPerExponent)
         {
             JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
         }
+        if (pbiBase->GetMagnitudeBit(baseBits - 2))
+        {
+            uint64 halfGrowth = 2 * growthPerExponent + 1;
+            if (exponent > (2 * maxResultBits - 1) / halfGrowth)
+            {
+                JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+            }
+        }
 
         bool negate = pbiBase->m_isNegative && (exponent & 1) != 0;
+        if (pbiBase->HasSingleMagnitudeBit(growthPerExponent))
+        {
+            JavascriptBigInt * result = JavascriptBigInt::ShiftLeftMagnitude(
+                JavascriptBigInt::CreateOne(scriptContext),
+                growthPerExponent * exponent);
+            result->m_isNegative = negate;
+            return result;
+        }
+
         JavascriptBigInt * result = JavascriptBigInt::CreateOne(scriptContext);
         JavascriptBigInt * factor = JavascriptBigInt::New(pbiBase, scriptContext);
         factor->m_isNegative = false;
@@ -2251,7 +2521,7 @@ namespace Js
             if ((exponent & 1) != 0)
             {
                 result = JavascriptBigInt::MulAbsolute(result, factor);
-                if (result->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                if (result->GetMagnitudeBitLength() > maxResultBits)
                 {
                     JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
                 }
@@ -2260,7 +2530,7 @@ namespace Js
             if (exponent != 0)
             {
                 factor = JavascriptBigInt::MulAbsolute(factor, factor);
-                if (factor->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                if (factor->GetMagnitudeBitLength() > maxResultBits)
                 {
                     JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
                 }
@@ -2507,6 +2777,10 @@ namespace Js
         while (value->m_length > 1 && value->m_digits[value->m_length - 1] == 0)
         {
             value->m_length--;
+        }
+        if (value->m_length > BigIntMaxResultLimbs)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Bitwise BigInt"));
         }
         value->m_isNegative = isNegative && !value->IsZeroValue();
         return value;

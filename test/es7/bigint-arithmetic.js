@@ -269,8 +269,10 @@ var tests = [
             var hugeBase = (1n << 2000000n) + 12345n;
             assert.strictEqual(hugeBase ** 1n, hugeBase);
             assert.strictEqual((-hugeBase) ** 1n, -hugeBase);
-            assert.throws(function () { return hugeBase ** 2n; }, RangeError);
-            assert.throws(function () { return 2n ** 1048576n; }, RangeError);
+            assert.strictEqual(2n ** 1048576n, 1n << 1048576n);
+            assert.strictEqual((-2n) ** 1048576n, 1n << 1048576n);
+            assert.throws(function () { return (1n << 536870912n) ** 2n; }, RangeError);
+            assert.throws(function () { return 2n ** 1073741824n; }, RangeError);
 
             assert.throws(function () { return 1n ** -1n; }, RangeError);
             assert.throws(function () { return 0n ** -1n; }, RangeError);

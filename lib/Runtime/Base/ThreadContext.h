@@ -747,11 +747,11 @@ private:
     RecyclerRootPtr<RecyclableData> recyclableData;
 
     // WeakRef KeepDuringJob is agent/thread-wide: a same-thread cross-realm
-    // target belongs to this list even when the active root call is another
-    // ScriptContext. List entries use Field(T, Recycler), i.e. WriteBarrierPtr
-    // on barrier builds, so Add publishes through the recycler barrier.
-    typedef JsUtil::List<Js::RecyclableObject*, Recycler> KeptObjectList;
-    RecyclerRootPtr<KeptObjectList> keptObjects;
+    // target belongs to this set even when the active root call is another
+    // ScriptContext. Entries use Field(T, Recycler), i.e. WriteBarrierPtr
+    // on barrier builds, so AddNew publishes through the recycler barrier.
+    typedef JsUtil::BaseHashSet<Js::RecyclableObject*, Recycler, PowerOf2SizePolicy, Js::RecyclableObject*, RecyclerPointerComparer> KeptObjectSet;
+    RecyclerRootPtr<KeptObjectSet> keptObjects;
 
     // FinalizationRegistry cleanup jobs are agent/thread-wide. The root keeps
     // only leaf weak handles; a registry remains collectible while registered.
