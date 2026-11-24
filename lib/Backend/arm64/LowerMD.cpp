@@ -1066,7 +1066,7 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
             {
                 stackParamInsert->InsertBefore(movGen);
             }
-            argInstr->SetSrc1(tempInt);
+            argInstr->ReplaceSrc1(tempInt);
         }
         argInstr->ReplaceDst(opndParam);
         argInstr->Unlink();
@@ -4471,7 +4471,7 @@ LowererMD::ChangeToAssign(IR::Instr * instr, IRType destType)
     else if(destType == TyFloat32 && instr->GetDst()->IsRegOpnd())
     {
         Assert(instr->GetSrc1()->IsFloat32());
-        instr->m_opcode = Js::OpCode::FLDR;
+        instr->m_opcode = instr->GetSrc1()->IsRegOpnd() ? Js::OpCode::FMOV : Js::OpCode::FLDR;
 
         // Note that we allocate double register for single precision floats as well, as the register allocator currently
         // does not support 32-bit float registers
@@ -4504,7 +4504,7 @@ LowererMD::ChangeToAssign(IR::Instr * instr, IRType destType)
     }
     else
     {
-        instr->m_opcode = IRType_IsFloat(destType) ? Js::OpCode::FMOV : Js::OpCode::MOV;
+        instr->m_opcode = GetAssignOp(destType);
     }
 
     AutoRestoreLegalize restore(instr->m_func, false);
@@ -4901,8 +4901,8 @@ LowererMD::LowerRet(IR::Instr * retInstr)
         }
         IR::RegOpnd *retReg = IR::RegOpnd::New(regType, m_func);
         retReg->SetReg(regNum);
-        Lowerer::InsertMove(retReg, retInstr->UnlinkSrc1(), retInstr);
-        retInstr->SetSrc1(retReg);
+        IR::Instr *moveInstr = Lowerer::InsertMove(retReg, retInstr->UnlinkSrc1(), retInstr);
+        retInstr->SetSrc1(moveInstr->GetDst());
         return retInstr;
     }
 #endif
@@ -8159,8 +8159,39 @@ LowererMD::EmitInt4Instr(IR::Instr *instr)
         break;
 
     case Js::OpCode::Sub_I4:
+    {
+        IR::Opnd *subDst = instr->GetDst();
+        IR::Opnd *subSrc1 = instr->GetSrc1();
+        IR::Opnd *subSrc2 = instr->GetSrc2();
+        if (subDst && subDst->IsRegOpnd() && subDst->GetSize() == 8 && subSrc1->GetSize() == 4)
+        {
+            // E.g. SwitchIRBuilder produces a TyVar jump-table index from Sub_I4 of 32-bit inputs;
+            // execute 32-bit SUB in a 32-bit temp and zero-extend into the 64-bit destination.
+            IR::RegOpnd *tmpDst = IR::RegOpnd::New(TyUint32, instr->m_func);
+            instr->UnlinkDst();
+            instr->SetDst(tmpDst);
+            instr->m_opcode = Js::OpCode::SUB;
+            IR::Instr *extInstr = IR::Instr::New(Js::OpCode::UBFX, subDst,
+                tmpDst->UseWithNewType(subDst->GetType(), instr->m_func),
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, instr->m_func, true),
+                instr->m_func);
+            instr->InsertAfter(extInstr);
+            break;
+        }
+        if (subDst && subDst->GetSize() == 4)
+        {
+            if (subSrc1->IsRegOpnd() && subSrc1->GetSize() == 8)
+            {
+                instr->ReplaceSrc1(subSrc1->UseWithNewType(subDst->GetType(), instr->m_func));
+            }
+            if (subSrc2 && subSrc2->IsRegOpnd() && subSrc2->GetSize() == 8)
+            {
+                instr->ReplaceSrc2(subSrc2->UseWithNewType(subDst->GetType(), instr->m_func));
+            }
+        }
         instr->m_opcode = Js::OpCode::SUB;
         break;
+    }
 
     case Js::OpCode::Mul_I4:
         instr->m_opcode = Js::OpCode::MUL;
@@ -9058,11 +9089,26 @@ LowererMD::GenerateFastInlineBuiltInMathAbs(IR::Instr *inlineInstr)
         nextInstr->InsertBefore(tmpInstr);
         Legalize(tmpInstr);
     }
-    else if (srcType == IRType::TyFloat64)
+    else if (srcType == IRType::TyFloat64 || srcType == IRType::TyFloat32)
     {
-        // FABS dst, src
-        tmpInstr = IR::Instr::New(Js::OpCode::FABS, dst, src, this->m_func);
-        nextInstr->InsertBefore(tmpInstr);
+        // FABS dst, src (EncoderMD::EmitOp2FpRegister supports both 1D and 1S)
+        if (dst->GetType() == srcType)
+        {
+            tmpInstr = IR::Instr::New(Js::OpCode::FABS, dst, src, this->m_func);
+            nextInstr->InsertBefore(tmpInstr);
+            Legalize(tmpInstr);
+        }
+        else
+        {
+            IR::RegOpnd *tmpAbs = IR::RegOpnd::New(srcType, this->m_func);
+            tmpInstr = IR::Instr::New(Js::OpCode::FABS, tmpAbs, src, this->m_func);
+            nextInstr->InsertBefore(tmpInstr);
+            Legalize(tmpInstr);
+
+            tmpInstr = IR::Instr::New(Js::OpCode::FCVT, dst, tmpAbs, this->m_func);
+            nextInstr->InsertBefore(tmpInstr);
+            Legalize(tmpInstr);
+        }
     }
     else
     {
@@ -9540,7 +9586,7 @@ LowererMD::EmitUIntToFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
 
 void LowererMD::ConvertFloatToInt32(IR::Opnd* intOpnd, IR::Opnd* floatOpnd, IR::LabelInstr * labelHelper, IR::LabelInstr * labelDone, IR::Instr * instrInsert)
 {
-    Assert(floatOpnd->IsFloat64());
+    Assert(floatOpnd->IsFloat());
     Assert(intOpnd->IsInt32());
 
     // VCVTS32F64 dst.i32, src.f64
@@ -9756,7 +9802,13 @@ LowererMD::EmitFloatToInt(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert, 
     }
 
     // dst = ToInt32Core(src);
-    LoadDoubleHelperArgument(instr, src);
+    IR::Opnd *doubleSrc = src;
+    if (src->IsFloat32())
+    {
+        doubleSrc = IR::RegOpnd::New(TyFloat64, this->m_func);
+        instr->InsertBefore(IR::Instr::New(Js::OpCode::FCVT, doubleSrc, src, this->m_func));
+    }
+    LoadDoubleHelperArgument(instr, doubleSrc);
 
     this->ChangeToHelperCall(instr, IR::HelperConv_ToInt32Core);
 
@@ -10170,7 +10222,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
             LegalizeMD::LegalizeSrc(instr, instr->GetSrc1(), 1);
             return true;
         }
-        instr->m_opcode = instr->GetSrc1()->IsFloat() ? Js::OpCode::FMOV : Js::OpCode::MOV;
+        instr->m_opcode = GetAssignOp(instr->GetSrc1()->GetType());
     }
     else if (EncoderMD::IsStore(instr))
     {
@@ -10180,7 +10232,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
             LegalizeMD::LegalizeDst(instr);
             return true;
         }
-        instr->m_opcode = instr->GetDst()->IsFloat() ? Js::OpCode::FMOV : Js::OpCode::MOV;
+        instr->m_opcode = GetAssignOp(instr->GetDst()->GetType());
     }
     else if (instr->m_opcode == Js::OpCode::LDARGOUTSZ)
     {

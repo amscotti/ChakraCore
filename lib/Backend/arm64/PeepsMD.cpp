@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
@@ -27,8 +28,9 @@ PeepsMD::ProcessImplicitRegs(IR::Instr *instr)
     {
         FOREACH_REG(reg)
         {
-            // not DONTALLOCATE, not CALLEESAVED
-            if (RegAttribs[reg] == 0)
+            // not DONTALLOCATE, not CALLEESAVED (except 128-bit SIMD in D8-D15, where scalar callees clobber bits [127:64])
+            if (RegAttribs[reg] == 0 ||
+                (this->peeps->regMap[reg] != nullptr && IRType_IsSimd128(this->peeps->regMap[reg]->GetType())))
             {
                 this->peeps->ClearReg(reg);
             }

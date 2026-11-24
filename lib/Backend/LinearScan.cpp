@@ -2592,29 +2592,48 @@ LinearScan::FindReg(Lifetime *newLifetime, IR::RegOpnd *regOpnd, bool force)
             }
 
 
+            const bool canUseCalleeSaved =
+#ifdef _M_ARM64
+                !IRType_IsSimd128(newLifetime->sym->GetType());
+#else
+                true;
+#endif
+
             if (newLifetime->isLiveAcrossCalls)
             {
                 // Try to find a callee saved regs
-                BitVector regsBvTemp = regsBv;
-                regsBvTemp.And(this->calleeSavedRegs);
+                if (canUseCalleeSaved)
+                {
+                    BitVector regsBvTemp = regsBv;
+                    regsBvTemp.And(this->calleeSavedRegs);
 
-                regIndex = GetPreferencedRegIndex(newLifetime, regsBvTemp);
+                    regIndex = GetPreferencedRegIndex(newLifetime, regsBvTemp);
+                }
 
                 if (regIndex == BVInvalidIndex)
                 {
+                    BitVector nonCalleeBv = regsBv;
+                    if (!canUseCalleeSaved)
+                    {
+                        // On AArch64, scalar/C++ callees preserve only low 64 bits of D8-D15;
+                        // exclude them across calls so 128-bit SIMD values use caller-saved regs
+                        // (which KillImplicitRegs spills) or spill to stack instead.
+                        nonCalleeBv.Minus(this->calleeSavedRegs);
+                    }
+
                     if (!newLifetime->isLiveAcrossUserCalls)
                     {
                         // No callee saved regs is found and the lifetime only across helper
                         // calls, we can also use a caller saved regs to make use of the
                         // save and restore around helper blocks
-                        regIndex = GetPreferencedRegIndex(newLifetime, regsBv);
+                        regIndex = GetPreferencedRegIndex(newLifetime, nonCalleeBv);
                     }
                     else
                     {
                         // If we can't find a callee-saved reg, we can try using a caller-saved reg instead.
                         // We'll hopefully get a few loads enregistered that way before we get to the call.
                         tryCallerSavedRegs = true;
-                        callerSavedAvailableBv = regsBv;
+                        callerSavedAvailableBv = nonCalleeBv;
                     }
                 }
             }
@@ -2781,6 +2800,13 @@ LinearScan::Spill(Lifetime *newLifetime, IR::RegOpnd *regOpnd, bool dontSpillCur
         }
     }
 
+    const bool canUseCalleeSaved =
+#ifdef _M_ARM64
+        !newLifetime || !IRType_IsSimd128(newLifetime->sym->GetType());
+#else
+        true;
+#endif
+
     SList<Lifetime *>::EditingIterator candidate;
     FOREACH_SLIST_ENTRY_EDITING(Lifetime *, lifetime, this->activeLiveranges, iter)
     {
@@ -2789,7 +2815,8 @@ LinearScan::Spill(Lifetime *newLifetime, IR::RegOpnd *regOpnd, bool dontSpillCur
             this->instrUseRegs.Test(lifetime->reg) == false &&
             lifetime->isFloat == isFloatReg &&
             !lifetime->cantSpill                            &&
-            (!needCalleeSaved || this->calleeSavedRegs.Test(lifetime->reg)) &&
+            (!needCalleeSaved || (canUseCalleeSaved && this->calleeSavedRegs.Test(lifetime->reg))) &&
+            (!newLifetime || !newLifetime->isLiveAcrossCalls || canUseCalleeSaved || !this->calleeSavedRegs.Test(lifetime->reg)) &&
             this->linearScanMD.FitRegIntSizeConstraints(lifetime->reg, intUsageBV))
         {
             minSpillCost = spillCost;
@@ -3375,12 +3402,50 @@ LinearScan::KillImplicitRegs(IR::Instr *instr)
     BitVector deadRegs;
     deadRegs.Copy(this->activeRegs);
     deadRegs.And(this->callerSavedRegs);
+#ifdef _M_ARM64
+    // D8-D15 only preserve low 64 bits across scalar calls, so any active 128-bit SIMD
+    // value or cached regContent/tempReg in D8-D15 must also be spilled/invalidated.
+    BitVector simdCalleeRegs;
+    simdCalleeRegs.Copy(this->activeRegs);
+    simdCalleeRegs.And(this->calleeSavedRegs);
+    FOREACH_BITSET_IN_UNITBV(reg, simdCalleeRegs, BitVector)
+    {
+        Lifetime *lifetime = this->regContent[reg];
+        if (lifetime && lifetime->sym && IRType_IsSimd128(lifetime->sym->GetType()))
+        {
+            deadRegs.Set(reg);
+        }
+    }
+    NEXT_BITSET_IN_UNITBV;
+#endif
     FOREACH_BITSET_IN_UNITBV(reg, deadRegs, BitVector)
     {
         this->SpillReg((RegNum)reg);
     }
     NEXT_BITSET_IN_UNITBV;
+#ifdef _M_ARM64
+    FOREACH_BITSET_IN_UNITBV(reg, this->calleeSavedRegs, BitVector)
+    {
+        Lifetime *lifetime = this->regContent[reg];
+        if (lifetime && lifetime->sym && IRType_IsSimd128(lifetime->sym->GetType()))
+        {
+            this->regContent[reg] = nullptr;
+        }
+    }
+    NEXT_BITSET_IN_UNITBV;
+#endif
     this->tempRegs.And(this->calleeSavedRegs);
+#ifdef _M_ARM64
+    FOREACH_BITSET_IN_UNITBV(reg, this->tempRegs, BitVector)
+    {
+        Lifetime *tempLifetime = this->tempRegLifetimes[reg];
+        if (tempLifetime && tempLifetime->sym && IRType_IsSimd128(tempLifetime->sym->GetType()))
+        {
+            this->tempRegs.Clear(reg);
+        }
+    }
+    NEXT_BITSET_IN_UNITBV;
+#endif
 
     if (callSetupRegs.Count())
     {
@@ -4107,7 +4172,7 @@ LinearScan::ReconcileRegContent(Lifetime ** branchRegContent, Lifetime **labelRe
                                 Lifetime *lifetime, RegNum reg, BitVector *thrashedRegs, IR::Instr *insertionInstr, IR::Instr *insertionStartInstr)
 {
     RegNum originalReg = RegNOREG;
-    IRType type = RegTypes[reg];
+    IRType type = (lifetime->sym && IRType_IsSimd128(lifetime->sym->GetType())) ? lifetime->sym->GetType() : RegTypes[reg];
     Assert(labelRegContent[reg] != branchRegContent[reg]);
     bool matchBranchReg = (branchRegContent[reg] == lifetime);
     Lifetime **originalRegContent = (matchBranchReg ? labelRegContent : branchRegContent);

@@ -3251,10 +3251,10 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
 
         default:
 #if defined(ENABLE_WASM_SIMD) && (_M_IX86 || _M_AMD64 || _M_ARM64)
-        // W8-NEON slice 1: ARM64 dispatch enabled; Simd128Instruction on
-        // ARM64 handles slice-1 NEON families and fails safe otherwise.
-        // FunctionUsesSimd/ShouldJitFunction gates stay intact, so SIMD
-        // functions remain interpreted by default.
+        // ARM64 WASM SIMD dispatch: Simd128Instruction lowers supported NEON
+        // families and fails safe otherwise. FunctionUsesSimd only returns
+        // true for v128 signature params/returns, and ShouldJitFunction skips
+        // those and IsMultiValue(), while body-only SIMD functions tier up.
             if (IsSimd128Opcode(instr->m_opcode))
             {
                 instrPrev = m_lowererMD.Simd128Instruction(instr);
@@ -7054,7 +7054,9 @@ Lowerer::LowerPrivateElementHelperCall(IR::Instr *instr, IR::JnHelperMethod help
     {
         IR::RegOpnd *linkOpnd = chainOpnd->AsRegOpnd();
         IR::Instr *linkInstr = linkOpnd->m_sym->m_instrDef;
-        Assert(linkInstr && linkInstr->m_opcode == Js::OpCode::ExtendArg_A && linkInstr->GetDst() == linkOpnd);
+        Assert(linkInstr && linkInstr->m_opcode == Js::OpCode::ExtendArg_A
+            && linkInstr->GetDst()->IsRegOpnd()
+            && linkInstr->GetDst()->AsRegOpnd()->m_sym == linkOpnd->m_sym);
         m_lowererMD.LoadHelperArgument(instr, linkInstr->GetSrc1());
         chainOpnd = linkInstr->GetSrc2();
     }

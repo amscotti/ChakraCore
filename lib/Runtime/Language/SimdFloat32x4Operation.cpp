@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft Corporation and contributors. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -70,10 +71,11 @@ namespace Js
     {
         SIMDValue result;
 
-        result.f32[SIMD_X] = (value.f32[SIMD_X] < 0) ? -1 * value.f32[SIMD_X] : value.f32[SIMD_X];
-        result.f32[SIMD_Y] = (value.f32[SIMD_Y] < 0) ? -1 * value.f32[SIMD_Y] : value.f32[SIMD_Y];
-        result.f32[SIMD_Z] = (value.f32[SIMD_Z] < 0) ? -1 * value.f32[SIMD_Z] : value.f32[SIMD_Z];
-        result.f32[SIMD_W] = (value.f32[SIMD_W] < 0) ? -1 * value.f32[SIMD_W] : value.f32[SIMD_W];
+        // Clear IEEE-754 sign bit directly so -0.0 -> +0.0 and NaN payloads match hardware FABS.
+        result.u32[SIMD_X] = value.u32[SIMD_X] & 0x7FFFFFFFu;
+        result.u32[SIMD_Y] = value.u32[SIMD_Y] & 0x7FFFFFFFu;
+        result.u32[SIMD_Z] = value.u32[SIMD_Z] & 0x7FFFFFFFu;
+        result.u32[SIMD_W] = value.u32[SIMD_W] & 0x7FFFFFFFu;
 
         return result;
     }

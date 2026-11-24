@@ -54,8 +54,9 @@ namespace Js
     {
         SIMDValue result;
 
-        result.f64[SIMD_X] = (value.f64[SIMD_X] < 0) ? -1 * value.f64[SIMD_X] : value.f64[SIMD_X];
-        result.f64[SIMD_Y] = (value.f64[SIMD_Y] < 0) ? -1 * value.f64[SIMD_Y] : value.f64[SIMD_Y];
+        // Clear IEEE-754 sign bit directly so -0.0 -> +0.0 and NaN payloads match hardware FABS.
+        result.i64[SIMD_X] = static_cast<int64>(static_cast<uint64>(value.i64[SIMD_X]) & 0x7FFFFFFFFFFFFFFFULL);
+        result.i64[SIMD_Y] = static_cast<int64>(static_cast<uint64>(value.i64[SIMD_Y]) & 0x7FFFFFFFFFFFFFFFULL);
 
         return result;
     }
