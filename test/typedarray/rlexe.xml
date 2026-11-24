@@ -9,6 +9,13 @@
   </test>
   <test>
     <default>
+      <files>sort_tempalloc_leak.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>typedarray</tags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>likely.js</files>
       <compile-flags>-bgjit- -lic:1</compile-flags>
       <tags>typedarray</tags>
