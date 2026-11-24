@@ -431,32 +431,251 @@ namespace UnifiedRegex
             return ResolveGcValue(name, nameLen, out);
         }
 
-        // Fills `result` with the USet's ranges. Property application never
-        // produces string elements (that is v-flag "property of strings"
-        // territory, out of scope), so any string item is skipped. Returns
-        // false when ICU reports a failure mid-iteration so the caller does
-        // not silently accept a truncated set.
-        static bool CopyUSetRanges(USet* set, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
+        // Fixed-capacity, thread-safe process cache of compiled ICU property
+        // code-point ranges so repeated \p{...}/\P{...} escapes skip ICU USet
+        // construction and per-range enumeration.
+        //
+        // Memory-management record (doc/memory-management.md):
+        // - Allocation domain: unmanaged NoCheckHeapNewArray buffers holding
+        //   only plain POD codepoint_t range pairs (zero GC or Arena pointers).
+        // - Owner / release: PropertyRangeCache destructor owns and frees all
+        //   active entries via NoCheckHeapDeleteArray; evicted slots are freed
+        //   via NoCheckHeapDeleteArray once unlocked.
+        // - Concurrency & bounds: fixed 64x4 (256-entry) direct-set-associative
+        //   table guarded by CriticalSection (shared by foreground and
+        //   BackgroundParser threads). ICU calls run outside the lock; lookups
+        //   copy POD pairs into caller-local storage under AutoCriticalSection
+        //   so callers never retain pointers into cached slots past unlock.
+        struct PropertyRangeCache
+        {
+            static const uint32 NumSets = 64;
+            static const uint32 Ways = 4;
+
+            struct Entry
+            {
+                Kind kind;
+                bool isGroupValue;
+                bool valid;
+                int32 value;
+                int32 numPairs;
+                int32 pairCapacity;
+                codepoint_t* pairs;
+            };
+
+            CriticalSection cs;
+            Entry entries[NumSets][Ways];
+            uint32 nextEvict[NumSets];
+
+            PropertyRangeCache()
+            {
+                for (uint32 s = 0; s < NumSets; s++)
+                {
+                    nextEvict[s] = 0;
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        entries[s][w].kind = Invalid;
+                        entries[s][w].isGroupValue = false;
+                        entries[s][w].valid = false;
+                        entries[s][w].value = 0;
+                        entries[s][w].numPairs = 0;
+                        entries[s][w].pairCapacity = 0;
+                        entries[s][w].pairs = nullptr;
+                    }
+                }
+            }
+
+            ~PropertyRangeCache()
+            {
+                for (uint32 s = 0; s < NumSets; s++)
+                {
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        if (entries[s][w].pairs != nullptr)
+                        {
+                            NoCheckHeapDeleteArray(entries[s][w].pairCapacity, entries[s][w].pairs);
+                            entries[s][w].pairs = nullptr;
+                        }
+                    }
+                }
+            }
+
+            static uint32 HashKey(const Resolved& r)
+            {
+                uint32 h = static_cast<uint32>(r.kind) * 0x9E3779B1u;
+                h ^= static_cast<uint32>(r.value) * 0x85EBCA6Bu;
+                if (r.isGroupValue)
+                {
+                    h ^= 0xC2B2AE35u;
+                }
+                return h;
+            }
+
+            bool TryFillFromCache(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
+            {
+                const uint32 setIdx = HashKey(resolved) & (NumSets - 1);
+                codepoint_t stackBuf[1024];
+                codepoint_t* copyTarget = stackBuf;
+                int32 numPairs = 0;
+                bool found = false;
+
+                {
+                    AutoCriticalSection lock(&cs);
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        const Entry& e = entries[setIdx][w];
+                        if (e.valid && e.kind == resolved.kind && e.value == resolved.value && e.isGroupValue == resolved.isGroupValue)
+                        {
+                            numPairs = e.numPairs;
+                            const int32 numScalars = numPairs * 2;
+                            if (numScalars > 1024)
+                            {
+                                // Thread-local arena allocation; AutoCriticalSection releases on OOM.
+                                copyTarget = AnewArray(allocator, codepoint_t, numScalars);
+                            }
+                            for (int32 i = 0; i < numScalars; i++)
+                            {
+                                copyTarget[i] = e.pairs[i];
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found)
+                {
+                    return false;
+                }
+                if (numPairs > 0)
+                {
+                    result.SetRanges(allocator, numPairs, copyTarget);
+                    if (copyTarget != stackBuf)
+                    {
+                        AdeleteArray(allocator, numPairs * 2, copyTarget);
+                    }
+                }
+                return true;
+            }
+
+            void Insert(const Resolved& resolved, codepoint_t* pairs, int32 pairCapacity, int32 numPairs)
+            {
+                const uint32 setIdx = HashKey(resolved) & (NumSets - 1);
+                codepoint_t* obsoletePairs = nullptr;
+                int32 obsoleteCapacity = 0;
+                bool inserted = false;
+
+                {
+                    AutoCriticalSection lock(&cs);
+                    uint32 targetWay = Ways;
+                    bool alreadyCached = false;
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        const Entry& e = entries[setIdx][w];
+                        if (e.valid && e.kind == resolved.kind && e.value == resolved.value && e.isGroupValue == resolved.isGroupValue)
+                        {
+                            // Another thread raced and cached the same key.
+                            alreadyCached = true;
+                            break;
+                        }
+                        if (!e.valid && targetWay == Ways)
+                        {
+                            targetWay = w;
+                        }
+                    }
+
+                    if (!alreadyCached)
+                    {
+                        if (targetWay == Ways)
+                        {
+                            targetWay = nextEvict[setIdx];
+                            nextEvict[setIdx] = (targetWay + 1) & (Ways - 1);
+                            obsoletePairs = entries[setIdx][targetWay].pairs;
+                            obsoleteCapacity = entries[setIdx][targetWay].pairCapacity;
+                        }
+                        entries[setIdx][targetWay].kind = resolved.kind;
+                        entries[setIdx][targetWay].isGroupValue = resolved.isGroupValue;
+                        entries[setIdx][targetWay].valid = true;
+                        entries[setIdx][targetWay].value = resolved.value;
+                        entries[setIdx][targetWay].numPairs = numPairs;
+                        entries[setIdx][targetWay].pairCapacity = pairCapacity;
+                        entries[setIdx][targetWay].pairs = pairs;
+                        inserted = true;
+                    }
+                }
+
+                if (!inserted && pairs != nullptr)
+                {
+                    NoCheckHeapDeleteArray(pairCapacity, pairs);
+                }
+                if (obsoletePairs != nullptr)
+                {
+                    NoCheckHeapDeleteArray(obsoleteCapacity, obsoletePairs);
+                }
+            }
+        };
+
+        inline PropertyRangeCache& GetPropertyRangeCache()
+        {
+            static PropertyRangeCache s_cache;
+            return s_cache;
+        }
+
+        // Fills `result` with the USet's sorted ranges and returns a flat POD
+        // pair array (owned by caller until handed to PropertyRangeCache).
+        static bool ExtractUSetRanges(USet* set, ArenaAllocator* allocator, CharSet<codepoint_t>& result, codepoint_t** outPairs, int32* outCap, int32* outNumPairs)
         {
             UErrorCode ec = U_ZERO_ERROR;
-            int32 itemCount = uset_getItemCount(set);
+            const int32 itemCount = uset_getItemCount(set);
+            *outPairs = nullptr;
+            *outCap = 0;
+            *outNumPairs = 0;
+            if (itemCount <= 0)
+            {
+                return true;
+            }
+
+            const int32 pairCap = itemCount * 2;
+            codepoint_t* pairs = NoCheckHeapNewArray(codepoint_t, pairCap);
+            int32 numPairs = 0;
             for (int32 i = 0; i < itemCount; i++)
             {
                 UChar32 start, end;
                 UChar str[8];
                 int32 strLen = uset_getItem(set, i, &start, &end, str, 8, &ec);
                 if (U_FAILURE(ec))
+                {
+                    NoCheckHeapDeleteArray(pairCap, pairs);
                     return false;
-                if (strLen != 0)
+                }
+                if (strLen != 0 || start > end)
+                {
                     continue;
-                if (start > end)
-                    continue;
-                result.SetRange(allocator, static_cast<codepoint_t>(start), static_cast<codepoint_t>(end));
+                }
+                const codepoint_t lo = static_cast<codepoint_t>(start);
+                const codepoint_t hi = static_cast<codepoint_t>(end);
+                if (numPairs > 0 && pairs[numPairs * 2 - 1] + 1 == lo)
+                {
+                    pairs[numPairs * 2 - 1] = hi;
+                }
+                else
+                {
+                    pairs[numPairs * 2] = lo;
+                    pairs[numPairs * 2 + 1] = hi;
+                    numPairs++;
+                }
             }
+
+            if (numPairs > 0)
+            {
+                result.SetRanges(allocator, numPairs, pairs);
+            }
+            *outPairs = pairs;
+            *outCap = pairCap;
+            *outNumPairs = numPairs;
             return true;
         }
 
-        bool BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
+        inline bool BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
         {
             switch (resolved.kind)
             {
@@ -470,6 +689,12 @@ namespace UnifiedRegex
                     return false;
                 default:
                     break;
+            }
+
+            PropertyRangeCache& cache = GetPropertyRangeCache();
+            if (cache.TryFillFromCache(resolved, allocator, result))
+            {
+                return true;
             }
 
             UErrorCode ec = U_ZERO_ERROR;
@@ -523,9 +748,238 @@ namespace UnifiedRegex
                     ec = U_ILLEGAL_ARGUMENT_ERROR;
                     break;
             }
-            bool ok = U_SUCCESS(ec) && CopyUSetRanges(set, allocator, result);
+            codepoint_t* pairs = nullptr;
+            int32 pairCap = 0;
+            int32 numPairs = 0;
+            bool ok = U_SUCCESS(ec) && ExtractUSetRanges(set, allocator, result, &pairs, &pairCap, &numPairs);
             uset_close(set);
+            if (ok)
+            {
+                cache.Insert(resolved, pairs, pairCap, numPairs);
+            }
             return ok;
+        }
+
+        // Fixed-capacity, thread-safe process cache of compiled (post-\P and /i)
+        // split BMP + astral range pairs consumed directly by ParsePropertyEscapePass1.
+        // Uses the same unmanaged NoCheckHeapNewArray POD domain, bounded 64x4 table,
+        // CriticalSection locking, and destructor cleanup as PropertyRangeCache.
+        struct PropertyCompiledCache
+        {
+            static const uint32 NumSets = 64;
+            static const uint32 Ways = 4;
+
+            struct Entry
+            {
+                Kind kind;
+                bool isGroupValue;
+                bool isNegation;
+                bool isIgnoreCase;
+                bool valid;
+                int32 value;
+                int32 numBmpPairs;
+                char16* bmpPairs;
+                int32 numAstralPairs;
+                codepoint_t* astralPairs;
+            };
+
+            CriticalSection cs;
+            Entry entries[NumSets][Ways];
+            uint32 nextEvict[NumSets];
+
+            PropertyCompiledCache()
+            {
+                for (uint32 s = 0; s < NumSets; s++)
+                {
+                    nextEvict[s] = 0;
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        entries[s][w].kind = Invalid;
+                        entries[s][w].isGroupValue = false;
+                        entries[s][w].isNegation = false;
+                        entries[s][w].isIgnoreCase = false;
+                        entries[s][w].valid = false;
+                        entries[s][w].value = 0;
+                        entries[s][w].numBmpPairs = 0;
+                        entries[s][w].bmpPairs = nullptr;
+                        entries[s][w].numAstralPairs = 0;
+                        entries[s][w].astralPairs = nullptr;
+                    }
+                }
+            }
+
+            static void FreeEntryBuffers(char16* bmpPairs, int32 numBmpPairs, codepoint_t* astralPairs, int32 numAstralPairs)
+            {
+                if (bmpPairs != nullptr)
+                {
+                    NoCheckHeapDeleteArray(numBmpPairs * 2, bmpPairs);
+                }
+                if (astralPairs != nullptr)
+                {
+                    NoCheckHeapDeleteArray(numAstralPairs * 2, astralPairs);
+                }
+            }
+
+            ~PropertyCompiledCache()
+            {
+                for (uint32 s = 0; s < NumSets; s++)
+                {
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        FreeEntryBuffers(
+                            entries[s][w].bmpPairs, entries[s][w].numBmpPairs,
+                            entries[s][w].astralPairs, entries[s][w].numAstralPairs);
+                        entries[s][w].bmpPairs = nullptr;
+                        entries[s][w].astralPairs = nullptr;
+                    }
+                }
+            }
+
+            static uint32 HashKey(const Resolved& r, bool isNegation, bool isIgnoreCase)
+            {
+                uint32 h = PropertyRangeCache::HashKey(r);
+                if (isNegation)
+                    h ^= 0x165667B1u;
+                if (isIgnoreCase)
+                    h ^= 0x9E3779B9u;
+                return h;
+            }
+
+            static bool Matches(const Entry& e, const Resolved& r, bool isNegation, bool isIgnoreCase)
+            {
+                return e.valid && e.kind == r.kind && e.value == r.value &&
+                    e.isGroupValue == r.isGroupValue && e.isNegation == isNegation &&
+                    e.isIgnoreCase == isIgnoreCase;
+            }
+
+            template <typename Callback>
+            bool TryWithCachedRanges(const Resolved& resolved, bool isNegation, bool isIgnoreCase, ArenaAllocator* allocator, Callback fn)
+            {
+                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase) & (NumSets - 1);
+                char16 stackBmp[1024];
+                codepoint_t stackAstral[256];
+                char16* bmpBuf = stackBmp;
+                codepoint_t* astralBuf = stackAstral;
+                int32 numBmpPairs = 0;
+                int32 numAstralPairs = 0;
+                bool found = false;
+
+                {
+                    AutoCriticalSection lock(&cs);
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        const Entry& e = entries[setIdx][w];
+                        if (Matches(e, resolved, isNegation, isIgnoreCase))
+                        {
+                            numBmpPairs = e.numBmpPairs;
+                            numAstralPairs = e.numAstralPairs;
+                            if (numBmpPairs > 0)
+                            {
+                                const int32 count = numBmpPairs * 2;
+                                if (count > 1024)
+                                    bmpBuf = AnewArray(allocator, char16, count);
+                                for (int32 i = 0; i < count; i++)
+                                    bmpBuf[i] = e.bmpPairs[i];
+                            }
+                            if (numAstralPairs > 0)
+                            {
+                                const int32 count = numAstralPairs * 2;
+                                if (count > 256)
+                                    astralBuf = AnewArray(allocator, codepoint_t, count);
+                                for (int32 i = 0; i < count; i++)
+                                    astralBuf[i] = e.astralPairs[i];
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found)
+                {
+                    return false;
+                }
+                fn(numBmpPairs > 0 ? bmpBuf : nullptr, numBmpPairs,
+                   numAstralPairs > 0 ? astralBuf : nullptr, numAstralPairs);
+                if (bmpBuf != stackBmp)
+                {
+                    AdeleteArray(allocator, numBmpPairs * 2, bmpBuf);
+                }
+                if (astralBuf != stackAstral)
+                {
+                    AdeleteArray(allocator, numAstralPairs * 2, astralBuf);
+                }
+                return true;
+            }
+
+            void Insert(
+                const Resolved& resolved, bool isNegation, bool isIgnoreCase,
+                char16* bmpPairs, int32 numBmpPairs,
+                codepoint_t* astralPairs, int32 numAstralPairs)
+            {
+                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase) & (NumSets - 1);
+                char16* oldBmp = nullptr;
+                int32 oldNumBmp = 0;
+                codepoint_t* oldAstral = nullptr;
+                int32 oldNumAstral = 0;
+                bool inserted = false;
+
+                {
+                    AutoCriticalSection lock(&cs);
+                    uint32 targetWay = Ways;
+                    bool alreadyCached = false;
+                    for (uint32 w = 0; w < Ways; w++)
+                    {
+                        const Entry& e = entries[setIdx][w];
+                        if (Matches(e, resolved, isNegation, isIgnoreCase))
+                        {
+                            alreadyCached = true;
+                            break;
+                        }
+                        if (!e.valid && targetWay == Ways)
+                        {
+                            targetWay = w;
+                        }
+                    }
+
+                    if (!alreadyCached)
+                    {
+                        if (targetWay == Ways)
+                        {
+                            targetWay = nextEvict[setIdx];
+                            nextEvict[setIdx] = (targetWay + 1) & (Ways - 1);
+                            oldBmp = entries[setIdx][targetWay].bmpPairs;
+                            oldNumBmp = entries[setIdx][targetWay].numBmpPairs;
+                            oldAstral = entries[setIdx][targetWay].astralPairs;
+                            oldNumAstral = entries[setIdx][targetWay].numAstralPairs;
+                        }
+                        Entry& dst = entries[setIdx][targetWay];
+                        dst.kind = resolved.kind;
+                        dst.isGroupValue = resolved.isGroupValue;
+                        dst.isNegation = isNegation;
+                        dst.isIgnoreCase = isIgnoreCase;
+                        dst.valid = true;
+                        dst.value = resolved.value;
+                        dst.numBmpPairs = numBmpPairs;
+                        dst.bmpPairs = bmpPairs;
+                        dst.numAstralPairs = numAstralPairs;
+                        dst.astralPairs = astralPairs;
+                        inserted = true;
+                    }
+                }
+
+                if (!inserted)
+                {
+                    FreeEntryBuffers(bmpPairs, numBmpPairs, astralPairs, numAstralPairs);
+                }
+                FreeEntryBuffers(oldBmp, oldNumBmp, oldAstral, oldNumAstral);
+            }
+        };
+
+        inline PropertyCompiledCache& GetPropertyCompiledCache()
+        {
+            static PropertyCompiledCache s_compiledCache;
+            return s_compiledCache;
         }
 
         bool BuildStringPropertySet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result, StringCollector* collector)

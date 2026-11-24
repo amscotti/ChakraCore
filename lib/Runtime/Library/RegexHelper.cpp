@@ -1486,9 +1486,42 @@ namespace Js
 
         if (!noResult)
         {
+            ArenaAllocator* replaceTempAlloc = state.tempAllocatorObj->GetAllocator();
             CharCount* substitutionOffsets = nullptr;
             int substitutions = GetReplaceSubstitutions(replaceStr, replaceLength,
-                 state.tempAllocatorObj->GetAllocator(), &substitutionOffsets);
+                 replaceTempAlloc, &substitutionOffsets);
+
+            UnifiedRegex::Program* replaceProgram = pattern->rep.unified.program;
+            const bool namedSubstitutionEnabled = replaceProgram->HasNamedGroups();
+            const uint32 replaceNumGroupNames = namedSubstitutionEnabled ? replaceProgram->numGroupNames : 0;
+            // For patterns with many named captures, index name -> reverse chain of
+            // entry indices once in replaceTempAlloc so each $<name> substitution
+            // resolves in O(duplicates-of-name) rather than scanning all names.
+            typedef JsUtil::BaseDictionary<JsUtil::CharacterBuffer<char16>, int, ArenaAllocator, PowerOf2SizePolicy> ReplaceNamedGroupIndex;
+            ReplaceNamedGroupIndex* namedGroupTailMap = nullptr;
+            int* prevSameNameEntry = nullptr;
+            if (substitutionOffsets != 0 && replaceNumGroupNames > 8)
+            {
+                namedGroupTailMap = Anew(replaceTempAlloc, ReplaceNamedGroupIndex, replaceTempAlloc, replaceNumGroupNames);
+                prevSameNameEntry = AnewArray(replaceTempAlloc, int, replaceNumGroupNames);
+                for (uint32 i = 0; i < replaceNumGroupNames; i++)
+                {
+                    CharCount entryNameLen = 0;
+                    const char16* entryName = replaceProgram->GetGroupName(i, &entryNameLen);
+                    const JsUtil::CharacterBuffer<char16> key(entryName, entryNameLen);
+                    int prevIdx = -1;
+                    if (namedGroupTailMap->TryGetValue(key, &prevIdx))
+                    {
+                        prevSameNameEntry[i] = prevIdx;
+                        namedGroupTailMap->Item(key, static_cast<int>(i));
+                    }
+                    else
+                    {
+                        prevSameNameEntry[i] = -1;
+                        namedGroupTailMap->AddNew(key, static_cast<int>(i));
+                    }
+                }
+            }
 
             // Use to see if we already have partial result populated in concatenated
             CompoundString::Builder<64 * sizeof(void *) / sizeof(char16)> concatenated(scriptContext);
@@ -1524,14 +1557,34 @@ namespace Js
                     // materializes a groups object here); enabled only when
                     // the pattern has named captures, matching GetSubstitution
                     // with namedCaptures undefined otherwise.
-                    UnifiedRegex::Program* program = pattern->rep.unified.program;
-                    const bool namedSubstitutionEnabled = program->HasNamedGroups();
                     Var undefined = scriptContext->GetLibrary()->GetUndefined();
                     auto getNamedGroup = [=](const char16* name, CharCount nameLen) -> Var {
                         // ES2025 duplicate named groups: the substitution
                         // uses the value of the participating group with
                         // this name (last participant; at most one is live).
-                        int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
+                        int groupId = -1;
+                        if (namedGroupTailMap != nullptr)
+                        {
+                            const JsUtil::CharacterBuffer<char16> key(name, nameLen);
+                            int entryIdx = -1;
+                            if (namedGroupTailMap->TryGetValue(key, &entryIdx))
+                            {
+                                while (entryIdx >= 0)
+                                {
+                                    const uint16 candidateGroupId = replaceProgram->GetGroupNameGroupId(static_cast<uint32>(entryIdx));
+                                    if (!pattern->GetGroup(candidateGroupId).IsUndefined())
+                                    {
+                                        groupId = static_cast<int>(candidateGroupId);
+                                        break;
+                                    }
+                                    entryIdx = prevSameNameEntry[entryIdx];
+                                }
+                            }
+                        }
+                        else
+                        {
+                            groupId = ResolveNamedGroupId(replaceProgram, pattern, name, nameLen);
+                        }
                         if (groupId < 0)
                         {
                             return undefined;
@@ -2440,38 +2493,29 @@ namespace Js
         return GetString(scriptContext, input, nonMatchValue, pattern->GetGroup(groupId));
     }
 
-    DynamicObject* RegexHelper::CreateGroupsObject(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
+    struct AutoReleaseTempAllocator
     {
-        UnifiedRegex::Program* program = pattern->rep.unified.program;
-        Assert(program->HasNamedGroups());
-        Assert(pattern->WasLastMatchSuccessful());
+        ScriptContext* scriptContext;
+        TempArenaAllocatorObject* tempAllocatorObj;
 
-        DynamicObject* groups = scriptContext->GetLibrary()->CreateObject(
-            scriptContext->GetLibrary()->GetNull()); // null [[Prototype]]
-        Var undefined = scriptContext->GetLibrary()->GetUndefined();
-        const uint32 numGroupNames = program->numGroupNames;
-        for (uint32 i = 0; i < numGroupNames; i++)
+        AutoReleaseTempAllocator(ScriptContext* scriptContext, LPCWSTR name)
+            : scriptContext(scriptContext)
+            , tempAllocatorObj(scriptContext->GetTemporaryAllocator(name))
         {
-            CharCount nameLen = 0;
-            const char16* name = program->GetGroupName(i, &nameLen);
-            PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
-            // ES2025 duplicate named groups: a later entry for the same name
-            // resolves to the same participating group, so the extra set is
-            // an idempotent overwrite and the property keeps its
-            // first-occurrence (textual) position. No group with the name
-            // participating -> undefined.
-            const int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
-            Var value = groupId < 0 ? undefined
-                : GetString(scriptContext, input, undefined, pattern->GetGroup(groupId));
-            // CreateDataProperty semantics: on a null-prototype object the
-            // ordinary [[Set]] creates an own writable/enumerable/configurable
-            // data property (and "__proto__" is not special without a prototype).
-            JavascriptOperators::SetProperty(groups, groups, propertyId, value, scriptContext);
         }
-        return groups;
-    }
 
-    int RegexHelper::ResolveNamedGroupId(UnifiedRegex::Program* program, UnifiedRegex::RegexPattern* pattern, const char16* name, CharCount nameLen)
+        ~AutoReleaseTempAllocator()
+        {
+            if (tempAllocatorObj != nullptr)
+            {
+                scriptContext->ReleaseTemporaryAllocator(tempAllocatorObj);
+            }
+        }
+
+        ArenaAllocator* GetAllocator() const { return tempAllocatorObj->GetAllocator(); }
+    };
+
+    static int FindLastParticipatingGroupId(UnifiedRegex::Program* program, UnifiedRegex::RegexPattern* pattern, const char16* name, CharCount nameLen)
     {
         int result = -1;
         const uint32 numGroupNames = program->numGroupNames;
@@ -2494,6 +2538,102 @@ namespace Js
                 result = program->GetGroupNameGroupId(i);
         }
         return result;
+    }
+
+    // Populates a null-prototype `groups` object in textual first-occurrence
+    // order. Small patterns keep a zero-allocation linear scan; larger ones
+    // build a temporary arena map (destroyed before return, no GC pointers)
+    // so duplicate-named groups resolve in O(N) instead of O(N^2).
+    template <typename GetValueFn>
+    static DynamicObject* PopulateNamedGroupsObject(
+        ScriptContext* scriptContext,
+        UnifiedRegex::RegexPattern* pattern,
+        GetValueFn getValue)
+    {
+        static const uint32 NamedGroupHashThreshold = 8;
+        typedef JsUtil::BaseDictionary<JsUtil::CharacterBuffer<char16>, int, ArenaAllocator, PowerOf2SizePolicy> NamedGroupMap;
+
+        UnifiedRegex::Program* program = pattern->rep.unified.program;
+        Assert(program->HasNamedGroups());
+        Assert(pattern->WasLastMatchSuccessful());
+
+        DynamicObject* groups = scriptContext->GetLibrary()->CreateObject(
+            scriptContext->GetLibrary()->GetNull()); // null [[Prototype]]
+        const uint32 numGroupNames = program->numGroupNames;
+
+        if (numGroupNames <= NamedGroupHashThreshold)
+        {
+            for (uint32 i = 0; i < numGroupNames; i++)
+            {
+                CharCount nameLen = 0;
+                const char16* name = program->GetGroupName(i, &nameLen);
+                PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+                const int groupId = FindLastParticipatingGroupId(program, pattern, name, nameLen);
+                // CreateDataProperty semantics: on a null-prototype object the
+                // ordinary [[Set]] creates an own writable/enumerable/configurable
+                // data property (and "__proto__" is not special without a prototype).
+                JavascriptOperators::SetProperty(groups, groups, propertyId, getValue(groupId), scriptContext);
+            }
+            return groups;
+        }
+
+        AutoReleaseTempAllocator tempAllocGuard(scriptContext, _u("RegexNamedGroups"));
+        ArenaAllocator* tempAlloc = tempAllocGuard.GetAllocator();
+        int* resolvedIds = AnewArray(tempAlloc, int, numGroupNames);
+        bool* isFirstOccurrence = AnewArray(tempAlloc, bool, numGroupNames);
+        NamedGroupMap nameToFirstIdx(tempAlloc, numGroupNames);
+
+        for (uint32 i = 0; i < numGroupNames; i++)
+        {
+            CharCount nameLen = 0;
+            const char16* name = program->GetGroupName(i, &nameLen);
+            const JsUtil::CharacterBuffer<char16> key(name, nameLen);
+            const uint16 groupId = program->GetGroupNameGroupId(i);
+            const bool participates = !pattern->GetGroup(groupId).IsUndefined();
+
+            int firstIdx = -1;
+            if (nameToFirstIdx.TryGetValue(key, &firstIdx))
+            {
+                isFirstOccurrence[i] = false;
+                if (participates)
+                {
+                    resolvedIds[firstIdx] = static_cast<int>(groupId);
+                }
+            }
+            else
+            {
+                nameToFirstIdx.AddNew(key, static_cast<int>(i));
+                isFirstOccurrence[i] = true;
+                resolvedIds[i] = participates ? static_cast<int>(groupId) : -1;
+            }
+        }
+
+        for (uint32 i = 0; i < numGroupNames; i++)
+        {
+            if (!isFirstOccurrence[i])
+            {
+                continue;
+            }
+            CharCount nameLen = 0;
+            const char16* name = program->GetGroupName(i, &nameLen);
+            PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+            JavascriptOperators::SetProperty(groups, groups, propertyId, getValue(resolvedIds[i]), scriptContext);
+        }
+        return groups;
+    }
+
+    DynamicObject* RegexHelper::CreateGroupsObject(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
+    {
+        Var undefined = scriptContext->GetLibrary()->GetUndefined();
+        return PopulateNamedGroupsObject(scriptContext, pattern, [=](int groupId) -> Var {
+            return groupId < 0 ? undefined
+                : GetString(scriptContext, input, undefined, pattern->GetGroup(groupId));
+        });
+    }
+
+    int RegexHelper::ResolveNamedGroupId(UnifiedRegex::Program* program, UnifiedRegex::RegexPattern* pattern, const char16* name, CharCount nameLen)
+    {
+        return FindLastParticipatingGroupId(program, pattern, name, nameLen);
     }
 
     Var RegexHelper::GetGroupsVar(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
@@ -2543,39 +2683,21 @@ namespace Js
         Var groupsVar = undefined;
         if (hasNamedGroups)
         {
-            DynamicObject* groups = library->CreateObject(library->GetNull()); // null [[Prototype]]
-            const uint32 numGroupNames = program->numGroupNames;
-            for (uint32 i = 0; i < numGroupNames; i++)
-            {
-                CharCount nameLen = 0;
-                const char16* name = program->GetGroupName(i, &nameLen);
-                PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
-                // Same duplicate-name rule as CreateGroupsObject: the last
-                // participating group with this name supplies the pair
-                // (idempotent for repeated entries); undefined when none.
+            groupsVar = PopulateNamedGroupsObject(scriptContext, pattern, [=](int groupId) -> Var {
                 // MakeIndicesArray creates one matchIndexPair and defines that
-                // same object on both indices[i] and indices.groups. The pair
-                // was stored in the loop above; a second array would break
-                // identity (and mutation) with the numbered slot.
-                const int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
-                Var value = undefined;
-                if (groupId >= 0)
+                // same object on both indices[i] and indices.groups.
+                if (groupId < 0)
                 {
-                    Var stored = nullptr;
-                    if (indices->DirectGetItemAt(static_cast<uint32>(groupId), &stored))
-                    {
-                        value = stored;
-                    }
-                    else
-                    {
-                        Assert(false);
-                    }
+                    return undefined;
                 }
-                // CreateDataProperty semantics on a null-prototype object
-                // (see CreateGroupsObject), including for "__proto__" names.
-                JavascriptOperators::SetProperty(groups, groups, propertyId, value, scriptContext);
-            }
-            groupsVar = groups;
+                Var stored = nullptr;
+                if (indices->DirectGetItemAt(static_cast<uint32>(groupId), &stored))
+                {
+                    return stored;
+                }
+                Assert(false);
+                return undefined;
+            });
         }
         indices->SetPropertyWithAttributes(
             library->GetRegexGroupsPropertyRecord()->GetPropertyId(),

@@ -492,6 +492,7 @@ HRESULT Parser::ValidateSyntax(LPCUTF8 pszSrc, size_t encodedCharCount, bool isG
     bool handled = false;
 
     BOOL fDeferSave = m_deferringAST;
+    ParseNodeFnc *nonLambdaFuncSave = m_currentNodeNonLambdaFunc;
     try
     {
         hr = NOERROR;
@@ -527,9 +528,11 @@ HRESULT Parser::ValidateSyntax(LPCUTF8 pszSrc, size_t encodedCharCount, bool isG
         ParseNodeFnc *pnodeFnc = CreateAllowDeferNodeForOpT<knopFncDecl>();
         pnodeFnc->SetIsGenerator(isGenerator);
         pnodeFnc->SetIsAsync(isAsync);
+        pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
 
         m_ppnodeVar = &pnodeFnc->pnodeVars;
         m_currentNodeFunc = pnodeFnc;
+        m_currentNodeNonLambdaFunc = pnodeFnc;
         m_currentNodeDeferredFunc = NULL;
         m_sourceContextInfo = nullptr;
         AssertMsg(m_pstmtCur == NULL, "Statement stack should be empty when we start parse function body");
@@ -546,10 +549,12 @@ HRESULT Parser::ValidateSyntax(LPCUTF8 pszSrc, size_t encodedCharCount, bool isG
         if (m_token.tk != tkEOF)
             Error(ERRsyntax);
 
+        m_currentNodeNonLambdaFunc = nonLambdaFuncSave;
         m_deferringAST = fDeferSave;
     }
     catch (ParseExceptionObject& e)
     {
+        m_currentNodeNonLambdaFunc = nonLambdaFuncSave;
         m_deferringAST = fDeferSave;
         hr = e.GetError();
         hr = pse->ProcessError(this->GetScanner(), hr, /* pnodeBase */ NULL, e.GetStringOne(), e.GetStringTwo());
@@ -12762,9 +12767,10 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         }
         else // a binary operator
         {
-            if (nop == knopComma && m_token.tk == tkRParen)
+            if (nop == knopComma && m_token.tk == tkRParen && m_funcParenExprDepth > 0)
             {
-                // Trailing comma
+                // Trailing comma (defer only while parsing parenthesized expressions
+                // that could become arrow function formal parameter lists).
                 this->GetScanner()->Capture(&m_deferCommaErrorLoc);
                 m_deferCommaError = true;
                 break;
@@ -14344,6 +14350,11 @@ LRestart:
             this->GetScanner()->Scan();
             ParseNodePtr pnodeObj = ParseExpr<buildAST>(isForOf ? koplCma : koplNo);
             charcount_t ichLim = this->GetScanner()->IchLimTok();
+            if (m_deferCommaError)
+            {
+                this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+                Error(ERRnoRparen);
+            }
             ChkCurTok(tkRParen, ERRnoRparen);
 
             ParseNodeForInOrForOf * pnodeForInOrForOf = nullptr;
@@ -14416,6 +14427,11 @@ LRestart:
 
             charcount_t ichLim = this->GetScanner()->IchLimTok();
 
+            if (m_deferCommaError)
+            {
+                this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+                Error(ERRnoRparen);
+            }
             ChkCurTok(tkRParen, ERRnoRparen);
 
             ParseNodeFor * pnodeFor = nullptr;
@@ -14461,6 +14477,11 @@ LRestart:
         ParseNodePtr pnodeVal = ParseExpr<buildAST>();
         charcount_t ichLim = this->GetScanner()->IchLimTok();
 
+        if (m_deferCommaError)
+        {
+            this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+            Error(ERRnoRparen);
+        }
         ChkCurTok(tkRParen, ERRnoRparen);
         ChkCurTok(tkLCurly, ERRnoLcurly);
 
@@ -14567,6 +14588,11 @@ LRestart:
         ChkNxtTok(tkLParen, ERRnoLparen);
         ParseNodePtr pnodeCond = ParseExpr<buildAST>();
         charcount_t ichLim = this->GetScanner()->IchLimTok();
+        if (m_deferCommaError)
+        {
+            this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+            Error(ERRnoRparen);
+        }
         ChkCurTok(tkRParen, ERRnoRparen);
 
         ParseNodeWhile * pnodeWhile = nullptr;
@@ -14612,6 +14638,11 @@ LRestart:
 
         ParseNodePtr pnodeCond = ParseExpr<buildAST>();
         charcount_t ichLim = this->GetScanner()->IchLimTok();
+        if (m_deferCommaError)
+        {
+            this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+            Error(ERRnoRparen);
+        }
         ChkCurTok(tkRParen, ERRnoRparen);
 
         if (buildAST)
@@ -14719,6 +14750,11 @@ LRestart:
             m_scopeCountNoAst++;
         }
         charcount_t ichLim = this->GetScanner()->IchLimTok();
+        if (m_deferCommaError)
+        {
+            this->GetScanner()->SeekTo(m_deferCommaErrorLoc);
+            Error(ERRnoRparen);
+        }
         ChkCurTok(tkRParen, ERRnoRparen);
 
         ParseNodeWith * pnodeWith = nullptr;

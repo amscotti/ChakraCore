@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeByteCodePch.h"
@@ -127,6 +128,7 @@ void Scope::RemoveParamScope(ParseNodeFnc *pnodeScope)
     paramScope->m_count = 0;
     paramScope->scopeSlotCount = 0;
     paramScope->m_symList = nullptr;
+    paramScope->m_symTable = nullptr;
     // Remove the parameter scope from the scope chain.
 
     bodyScope->SetEnclosingScope(paramScope->GetEnclosingScope());

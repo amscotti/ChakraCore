@@ -1630,35 +1630,37 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
                 byteCodeGenerator->EmitLocalPropInit(pnodeFnc->location, sym, funcInfoParent);
             }
 
-            Symbol * fncScopeSym = sym->GetFuncScopeVarSym();
-
             // Annex B B.3.2.1/B.3.3.1: the synthetic function-scoped var store
             // is only emitted for declarations the parser marked as receiving
-            // the extension. GetFuncScopeVarSym can find an unrelated
-            // same-named var/parameter/arguments binding, which must not be
-            // updated when the declaration was skipped.
-            if (fncScopeSym && pnodeFnc->IsAnnexBVarExtension())
+            // the extension. Guard GetFuncScopeVarSym() behind IsAnnexBVarExtension()
+            // so non-Annex-B functions (including class field/static helpers)
+            // skip the function-scope lookup altogether.
+            if (pnodeFnc->IsAnnexBVarExtension())
             {
-                if (pnodeFnc->funcInfo != nullptr && pnodeFnc->funcInfo->byteCodeFunction != nullptr)
+                Symbol * fncScopeSym = sym->GetFuncScopeVarSym();
+                if (fncScopeSym)
                 {
-                    Js::FunctionInfo *functionInfo = pnodeFnc->funcInfo->byteCodeFunction->GetFunctionInfo();
-                    functionInfo->SetAttributes((Js::FunctionInfo::Attributes)(
-                        functionInfo->GetAttributes() | Js::FunctionInfo::Attributes::AnnexBBlockFunction));
-                }
-                // The synthetic binding is an eval var binding in the var
-                // environment. InitFuncScoped checks each environment on the
-                // eval chain: a block/function lexical binding skips the
-                // store, while a global lexical binding is rejected by the
-                // preflight above. Existing global properties keep their
-                // Annex B var-binding attributes.
-                if ((byteCodeGenerator->GetFlags() & fscrEvalCode) && funcInfoParent->IsGlobalFunction())
-                {
-                    Js::PropertyId propertyId = fncScopeSym->EnsurePosition(byteCodeGenerator);
-                    byteCodeGenerator->EmitGlobalFncDeclInit(pnodeFnc->location, propertyId, funcInfoParent);
-                }
-                else
-                {
-                    byteCodeGenerator->EmitPropStore(pnodeFnc->location, fncScopeSym, nullptr, funcInfoParent, false, false, /* isFncDeclVar */true);
+                    if (pnodeFnc->funcInfo != nullptr && pnodeFnc->funcInfo->byteCodeFunction != nullptr)
+                    {
+                        Js::FunctionInfo *functionInfo = pnodeFnc->funcInfo->byteCodeFunction->GetFunctionInfo();
+                        functionInfo->SetAttributes((Js::FunctionInfo::Attributes)(
+                            functionInfo->GetAttributes() | Js::FunctionInfo::Attributes::AnnexBBlockFunction));
+                    }
+                    // The synthetic binding is an eval var binding in the var
+                    // environment. InitFuncScoped checks each environment on the
+                    // eval chain: a block/function lexical binding skips the
+                    // store, while a global lexical binding is rejected by the
+                    // preflight above. Existing global properties keep their
+                    // Annex B var-binding attributes.
+                    if ((byteCodeGenerator->GetFlags() & fscrEvalCode) && funcInfoParent->IsGlobalFunction())
+                    {
+                        Js::PropertyId propertyId = fncScopeSym->EnsurePosition(byteCodeGenerator);
+                        byteCodeGenerator->EmitGlobalFncDeclInit(pnodeFnc->location, propertyId, funcInfoParent);
+                    }
+                    else
+                    {
+                        byteCodeGenerator->EmitPropStore(pnodeFnc->location, fncScopeSym, nullptr, funcInfoParent, false, false, /* isFncDeclVar */true);
+                    }
                 }
             }
         }
@@ -5065,39 +5067,65 @@ Js::RegSlot ByteCodeGenerator::PrependLocalScopes(Js::RegSlot evalEnv, Js::RegSl
     }
 
     // The with/catch objects must be prepended to the environment we pass to eval() or to a func declared inside with,
-    // but the list must first be reversed so that innermost scopes appear first in the list.
-    while (currScope != funcScope)
+    // so walk the scope chain once to collect instantiated scopes innermost-first, then emit outermost-to-innermost.
+    static const uint StackScopeCap = 64;
+    Scope *stackScopes[StackScopeCap];
+    Scope **instantiatedScopes = stackScopes;
+    uint count = 0;
+    uint capacity = StackScopeCap;
+
+    for (Scope *scope = currScope; scope != funcScope; scope = scope->GetEnclosingScope())
     {
-        Scope *innerScope;
-        for (innerScope = currScope; innerScope->GetEnclosingScope() != funcScope; innerScope = innerScope->GetEnclosingScope())
-            ;
-        if (innerScope->GetMustInstantiate())
+        Assert(scope != nullptr);
+        if (scope->GetMustInstantiate())
         {
-            if (!innerScope->HasInnerScopeIndex())
+            if (count == capacity)
             {
-                if (evalEnv == funcInfo->GetEnvRegister() || evalEnv == funcInfo->frameDisplayRegister)
+                uint newCapacity = capacity * 2;
+                Scope **newScopes = AnewArray(this->alloc, Scope *, newCapacity);
+                js_memcpy_s(newScopes, newCapacity * sizeof(Scope *), instantiatedScopes, count * sizeof(Scope *));
+                if (instantiatedScopes != stackScopes)
                 {
-                    this->m_writer.Reg2(Js::OpCode::LdInnerFrameDisplayNoParent, tempLoc, innerScope->GetLocation());
+                    AdeleteArray(this->alloc, capacity, instantiatedScopes);
                 }
-                else
-                {
-                    this->m_writer.Reg3(Js::OpCode::LdInnerFrameDisplay, tempLoc, innerScope->GetLocation(), evalEnv);
-                }
+                instantiatedScopes = newScopes;
+                capacity = newCapacity;
+            }
+            instantiatedScopes[count++] = scope;
+        }
+    }
+
+    for (uint i = count; i > 0; i--)
+    {
+        Scope *innerScope = instantiatedScopes[i - 1];
+        if (!innerScope->HasInnerScopeIndex())
+        {
+            if (evalEnv == funcInfo->GetEnvRegister() || evalEnv == funcInfo->frameDisplayRegister)
+            {
+                this->m_writer.Reg2(Js::OpCode::LdInnerFrameDisplayNoParent, tempLoc, innerScope->GetLocation());
             }
             else
             {
-                if (evalEnv == funcInfo->GetEnvRegister() || evalEnv == funcInfo->frameDisplayRegister)
-                {
-                    this->m_writer.Reg1Unsigned1(Js::OpCode::LdIndexedFrameDisplayNoParent, tempLoc, innerScope->GetInnerScopeIndex());
-                }
-                else
-                {
-                    this->m_writer.Reg2Int1(Js::OpCode::LdIndexedFrameDisplay, tempLoc, evalEnv, innerScope->GetInnerScopeIndex());
-                }
+                this->m_writer.Reg3(Js::OpCode::LdInnerFrameDisplay, tempLoc, innerScope->GetLocation(), evalEnv);
             }
-            evalEnv = tempLoc;
         }
-        funcScope = innerScope;
+        else
+        {
+            if (evalEnv == funcInfo->GetEnvRegister() || evalEnv == funcInfo->frameDisplayRegister)
+            {
+                this->m_writer.Reg1Unsigned1(Js::OpCode::LdIndexedFrameDisplayNoParent, tempLoc, innerScope->GetInnerScopeIndex());
+            }
+            else
+            {
+                this->m_writer.Reg2Int1(Js::OpCode::LdIndexedFrameDisplay, tempLoc, evalEnv, innerScope->GetInnerScopeIndex());
+            }
+        }
+        evalEnv = tempLoc;
+    }
+
+    if (instantiatedScopes != stackScopes)
+    {
+        AdeleteArray(this->alloc, capacity, instantiatedScopes);
     }
 
     if (acquireTempLoc)

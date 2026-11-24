@@ -281,6 +281,7 @@ namespace UnifiedRegex
         // matching node (code-point-set translation below). Never an
         // assertion.
         Node* ParsePropertyEscapePass1();
+        Node* BuildPropertyEscapeNode(const char16* bmpPairs, int32 numBmpPairs, const codepoint_t* astralPairs, int32 numAstralPairs);
         // Cursor at 'p' or 'P', u mode, inside a character class: consumes
         // the escape and unions its code point set into targetSet (\P{...}
         // contributes its complement).
@@ -341,6 +342,8 @@ namespace UnifiedRegex
         const EncodedChar* vLiteralEnd;     // pass 0: cached literal terminator (per literal)
         const EncodedChar* vClassSpanStart; // pass 0: span the v validator consumed ('[' .. after ']')
         const EncodedChar* vClassSpanEnd;   // pass 0: ']'-atom rule in TermPass0
+        const EncodedChar* vClassAbortedStart; // pass 0: span where speculative v scan aborted
+        const EncodedChar* vClassAbortedEnd;   // pass 0: skip re-scanning nested '[' in aborted span
 
         void DeferredFailIfUnicodeSets(HRESULT error);
         void DeferredFailIfUnicodeNoSets(HRESULT error);

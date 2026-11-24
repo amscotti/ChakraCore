@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -21,11 +22,16 @@ enum ScopeType: int
 class Scope
 {
 private:
+    static const int HashTableThreshold = 16;
+
     Scope *enclosingScope;
     Js::ScopeInfo *scopeInfo;
     Js::RegSlot location;
     FuncInfo *func;
     Symbol *m_symList;
+    // Arena-allocated lookup index populated once a scope grows beyond
+    // HashTableThreshold symbols; outlives lookups within the same parse/emit arena.
+    SymbolTable *m_symTable;
     int m_count;
     ArenaAllocator *alloc;
     uint scopeSlotCount; // count of slots in the local scope
@@ -64,6 +70,7 @@ public:
         hasNestedParamFunc(false),
         location(Js::Constants::NoRegister),
         m_symList(nullptr),
+        m_symTable(nullptr),
         m_count(0),
         scopeSlotCount(0),
         innerScopeIndex((uint)-1),
@@ -76,6 +83,10 @@ public:
 
     Symbol *FindLocalSymbol(SymbolName const& key)
     {
+        if (m_symTable != nullptr)
+        {
+            return m_symTable->Lookup(key);
+        }
         Symbol *sym;
         for (sym = m_symList; sym; sym = sym->GetNext())
         {
@@ -114,14 +125,7 @@ public:
 
     static bool HasSymbolName(Scope * scope, const JsUtil::CharacterBuffer<WCHAR>& name)
     {
-        for (Symbol *sym = scope->m_symList; sym; sym = sym->GetNext())
-        {
-            if (sym->GetName() == name)
-            {
-                return true;
-            }
-        }
-        return false;
+        return scope->FindLocalSymbol(name) != nullptr;
     }
 
     void AddSymbol(Symbol *sym)
@@ -135,6 +139,7 @@ public:
         {
             return;
         }
+        InsertIntoSymTable(sym);
         sym->SetNext(m_symList);
         m_symList = sym;
         m_count++;
@@ -148,10 +153,36 @@ public:
         }
         sym->SetScope(this);
         Assert(!HasSymbolName(this, sym->GetName()));
+        InsertIntoSymTable(sym);
         sym->SetNext(m_symList);
         m_symList = sym;
         m_count++;
     }
+
+private:
+    void InsertIntoSymTable(Symbol *sym)
+    {
+        if (alloc == nullptr)
+        {
+            return;
+        }
+        if (m_symTable == nullptr)
+        {
+            if (m_count < HashTableThreshold)
+            {
+                return;
+            }
+            SymbolTable *table = Anew(alloc, SymbolTable, alloc, m_count * 2);
+            for (Symbol *existing = m_symList; existing; existing = existing->GetNext())
+            {
+                table->AddNew(existing);
+            }
+            m_symTable = table;
+        }
+        m_symTable->AddNew(sym);
+    }
+
+public:
 
     bool HasStaticPathToAncestor(Scope const * target) const
     {

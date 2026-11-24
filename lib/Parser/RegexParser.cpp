@@ -236,6 +236,8 @@ namespace UnifiedRegex
         , vLiteralEnd(nullptr)
         , vClassSpanStart(nullptr)
         , vClassSpanEnd(nullptr)
+        , vClassAbortedStart(nullptr)
+        , vClassAbortedEnd(nullptr)
         , decimalEscapes(nullptr)
         , numDecimalEscapes(0)
         , decimalEscapesCap(0)
@@ -685,6 +687,16 @@ namespace UnifiedRegex
             return VBuildNode(*set, /*negation*/ false);
         }
 
+        Node* cachedNode = nullptr;
+        if (UnicodeProperty::GetPropertyCompiledCache().TryWithCachedRanges(
+                resolved, isNegation, caseInsensitiveFlagPresent, ctAllocator,
+                [this, &cachedNode](const char16* bmpPairs, int32 numBmpPairs, const codepoint_t* astralPairs, int32 numAstralPairs) {
+                    cachedNode = BuildPropertyEscapeNode(bmpPairs, numBmpPairs, astralPairs, numAstralPairs);
+                }))
+        {
+            return cachedNode;
+        }
+
         CharSet<codepoint_t> codePointSet;
         if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
             Fail(JSERR_RegExpSyntax); // ICU failed to compute the set
@@ -710,7 +722,152 @@ namespace UnifiedRegex
             toUse = &thirdSet;
         }
 
-        return TranslateCodePointSet(*toUse, /*isNegation*/ false);
+        int32 numBmpPairs = 0;
+        int32 numAstralPairs = 0;
+        codepoint_t searchIdx = 0, lo = 0, hi = 0;
+        while (toUse->GetNextRange(searchIdx, &lo, &hi))
+        {
+            if (lo <= 0xFFFF)
+            {
+                numBmpPairs++;
+            }
+            if (hi >= 0x10000)
+            {
+                numAstralPairs++;
+            }
+            if (hi >= 0x10FFFF)
+            {
+                break;
+            }
+            searchIdx = hi + 1;
+        }
+
+        struct CompiledBuffersGuard
+        {
+            char16* bmpPairs;
+            int32 numBmpPairs;
+            codepoint_t* astralPairs;
+            int32 numAstralPairs;
+
+            CompiledBuffersGuard()
+                : bmpPairs(nullptr)
+                , numBmpPairs(0)
+                , astralPairs(nullptr)
+                , numAstralPairs(0)
+            {
+            }
+
+            ~CompiledBuffersGuard()
+            {
+                UnicodeProperty::PropertyCompiledCache::FreeEntryBuffers(
+                    bmpPairs, numBmpPairs, astralPairs, numAstralPairs);
+            }
+
+            void Disarm()
+            {
+                bmpPairs = nullptr;
+                numBmpPairs = 0;
+                astralPairs = nullptr;
+                numAstralPairs = 0;
+            }
+        } guard;
+
+        if (numBmpPairs > 0)
+        {
+            guard.bmpPairs = NoCheckHeapNewArray(char16, numBmpPairs * 2);
+            guard.numBmpPairs = numBmpPairs;
+        }
+        if (numAstralPairs > 0)
+        {
+            guard.astralPairs = NoCheckHeapNewArray(codepoint_t, numAstralPairs * 2);
+            guard.numAstralPairs = numAstralPairs;
+        }
+
+        int32 bmpIdx = 0;
+        int32 astralIdx = 0;
+        searchIdx = 0;
+        while (toUse->GetNextRange(searchIdx, &lo, &hi))
+        {
+            if (lo <= 0xFFFF)
+            {
+                const char16 bmpHi = hi <= 0xFFFF ? static_cast<char16>(hi) : static_cast<char16>(0xFFFF);
+                guard.bmpPairs[bmpIdx * 2] = static_cast<char16>(lo);
+                guard.bmpPairs[bmpIdx * 2 + 1] = bmpHi;
+                bmpIdx++;
+            }
+            if (hi >= 0x10000)
+            {
+                const codepoint_t astralLo = lo >= 0x10000 ? lo : 0x10000;
+                guard.astralPairs[astralIdx * 2] = astralLo;
+                guard.astralPairs[astralIdx * 2 + 1] = hi;
+                astralIdx++;
+            }
+            if (hi >= 0x10FFFF)
+            {
+                break;
+            }
+            searchIdx = hi + 1;
+        }
+        Assert(bmpIdx == numBmpPairs);
+        Assert(astralIdx == numAstralPairs);
+        toUse->FreeBody(ctAllocator);
+
+        Node* node = BuildPropertyEscapeNode(guard.bmpPairs, numBmpPairs, guard.astralPairs, numAstralPairs);
+        char16* bmpOwned = guard.bmpPairs;
+        codepoint_t* astralOwned = guard.astralPairs;
+        guard.Disarm();
+        UnicodeProperty::GetPropertyCompiledCache().Insert(
+            resolved, isNegation, caseInsensitiveFlagPresent,
+            bmpOwned, numBmpPairs, astralOwned, numAstralPairs);
+        return node;
+    }
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::BuildPropertyEscapeNode(
+        const char16* bmpPairs, int32 numBmpPairs,
+        const codepoint_t* astralPairs, int32 numAstralPairs)
+    {
+        if (numBmpPairs == 0 && numAstralPairs == 0)
+        {
+            return Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+        }
+
+        if (!caseInsensitiveFlagPresent)
+        {
+            if (numBmpPairs == 1 && numAstralPairs == 0 && bmpPairs[0] == bmpPairs[1])
+            {
+                return Anew(ctAllocator, MatchCharNode, bmpPairs[0], false);
+            }
+            if (numBmpPairs == 0 && numAstralPairs == 1 && astralPairs[0] == astralPairs[1])
+            {
+                char16 lowerSurrogate, upperSurrogate;
+                Js::NumberUtilities::CodePointAsSurrogatePair(astralPairs[0], &lowerSurrogate, &upperSurrogate);
+                return CreateSurrogatePairAtom(lowerSurrogate, upperSurrogate);
+            }
+        }
+
+        if (numAstralPairs == 0)
+        {
+            MatchSetNode* simpleToReturn = Anew(ctAllocator, MatchSetNode, false, true, caseInsensitiveFlagPresent);
+            simpleToReturn->set.SetRanges(ctAllocator, numBmpPairs, bmpPairs);
+            return simpleToReturn;
+        }
+
+        MatchCodePointSetNode* node = Anew(ctAllocator, MatchCodePointSetNode, caseInsensitiveFlagPresent);
+        node->noHalfPairFallback = false;
+        if (numBmpPairs > 0)
+        {
+            node->set.SetRanges(ctAllocator, numBmpPairs, bmpPairs);
+            node->firstUnits.SetRanges(ctAllocator, numBmpPairs, bmpPairs);
+        }
+        node->numRanges = numAstralPairs;
+        node->ranges = AnewArray(ctAllocator, codepoint_t, 2 * numAstralPairs);
+        for (int32 i = 0; i < 2 * numAstralPairs; i++)
+        {
+            node->ranges[i] = astralPairs[i];
+        }
+        node->firstUnits.SetRange(ctAllocator, (Char)0xD800, (Char)0xDBFF);
+        return node;
     }
 
     template <typename P, const bool IsLiteral>
@@ -1284,16 +1441,25 @@ namespace UnifiedRegex
         const EncodedChar* literalEnd = this->vLiteralEnd;
         if (literalEnd == nullptr || literalEnd < legacyEnd)
         {
-            literalEnd = legacyEnd;
-            while (literalEnd < inputLim && *literalEnd != 0 &&
-                   *literalEnd != '/' && *literalEnd != '\n' && *literalEnd != '\r')
+            if (IsLiteral)
             {
-                if (*literalEnd == '\\' && literalEnd + 1 < inputLim)
+                literalEnd = legacyEnd;
+                while (literalEnd < inputLim && *literalEnd != 0 &&
+                       *literalEnd != '/' && *literalEnd != '\n' && *literalEnd != '\r')
                 {
-                    literalEnd += 2;
-                    continue;
+                    if (*literalEnd == '\\' && literalEnd + 1 < inputLim)
+                    {
+                        literalEnd += 2;
+                        continue;
+                    }
+                    ++literalEnd;
                 }
-                ++literalEnd;
+            }
+            else
+            {
+                // For dynamic RegExp strings, inputLim is the pattern terminator;
+                // '/' and line terminators inside the pattern do not end a literal.
+                literalEnd = inputLim;
             }
             this->vLiteralEnd = literalEnd;
         }
@@ -1364,6 +1530,16 @@ namespace UnifiedRegex
             {
                 this->vClassSpanStart = newStart;
                 this->vClassSpanEnd = newEnd;
+            }
+        }
+        else if (literalEnd > savedNext)
+        {
+            const EncodedChar* newStart = savedNext - 1;
+            if (!(this->vClassAbortedStart != nullptr &&
+                  newStart >= this->vClassAbortedStart && literalEnd <= this->vClassAbortedEnd))
+            {
+                this->vClassAbortedStart = newStart;
+                this->vClassAbortedEnd = literalEnd;
             }
         }
         next = savedNext;
@@ -4144,13 +4320,23 @@ namespace UnifiedRegex
             ECConsume();
             break;
         case '[':
+        {
+            const EncodedChar* classStart = next;
             ECConsume();
             // v flag (ES2024 Unicode sets): validate the extended class
             // grammar ahead of the legacy scan. This only records
             // deferred-if-v errors (the same text is often a legal u/Annex B
             // class) and restores the cursor, so the legacy scan below and
             // the non-v re-parse in pass 1 see the same input.
-            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+            // Skip re-scanning when an outer VClassPass0() already validated
+            // or aborted across this nested '[' position.
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() &&
+                !(this->vClassSpanStart != nullptr &&
+                  classStart >= this->vClassSpanStart &&
+                  classStart < this->vClassSpanEnd) &&
+                !(this->vClassAbortedStart != nullptr &&
+                  classStart >= this->vClassAbortedStart &&
+                  classStart < this->vClassAbortedEnd))
             {
                 VClassPass0();
             }
@@ -4161,6 +4347,7 @@ namespace UnifiedRegex
             this->tempLocationOfRange = nullptr;
             ECMust(']', JSERR_RegExpNoBracket);
             break;
+        }
         case ')':
         case '|':
             Fail(JSERR_RegExpSyntax);
