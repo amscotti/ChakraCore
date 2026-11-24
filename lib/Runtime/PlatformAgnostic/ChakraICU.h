@@ -47,8 +47,6 @@
 #include "unicode/uldnames.h"
 #include "unicode/ulistformatter.h"
 #include "unicode/uloc.h"
-#include "unicode/ulocale.h"
-#include "unicode/ulocbuilder.h"
 #include "unicode/ulocdata.h"
 #include "unicode/unumberformatter.h"
 #include "unicode/unumsys.h"
@@ -109,8 +107,6 @@ namespace PlatformAgnostic
         typedef ScopedICUObject<UNumberingSystem *, unumsys_close> ScopedUNumberingSystem;
         typedef ScopedICUObject<UDateTimePatternGenerator *, udatpg_close> ScopedUDateTimePatternGenerator;
         typedef ScopedICUObject<UFieldPositionIterator *, ufieldpositer_close> ScopedUFieldPositionIterator;
-        typedef ScopedICUObject<ULocale *, ulocale_close> ScopedULocale;
-        typedef ScopedICUObject<ULocaleBuilder *, ulocbld_close> ScopedULocaleBuilder;
         typedef ScopedICUObject<UListFormatter *, ulistfmt_close> ScopedUListFormatter;
         typedef ScopedICUObject<UFormattedList *, ulistfmt_closeResult> ScopedUFormattedList;
         typedef ScopedICUObject<URelativeDateTimeFormatter *, ureldatefmt_close> ScopedURelativeDateTimeFormatter;

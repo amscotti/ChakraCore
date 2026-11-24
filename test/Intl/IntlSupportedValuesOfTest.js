@@ -298,8 +298,6 @@ var tests = [
             assert.isTrue(currencies.indexOf("USD") !== -1);
             assert.isTrue(currencies.indexOf("EUR") !== -1);
             assert.isTrue(currencies.indexOf("JPY") !== -1);
-            assert.isFalse(currencies.indexOf("CNX") !== -1);
-            assert.isFalse(currencies.indexOf("LSM") !== -1);
 
             for (var i = 0; i < currencies.length; i++) {
                 var cur = currencies[i];
@@ -312,11 +310,32 @@ var tests = [
                 );
             }
 
-            // Verify unsupported codes are rejected by DisplayNames too.
-            var rejected = ["AAA", "CNX", "LSM", "QZZ", "ZZZ"];
-            for (var j = 0; j < rejected.length; j++) {
-                assert.areEqual(undefined, dn.of(rejected[j]), rejected[j]);
-                assert.isFalse(currencies.indexOf(rejected[j]) !== -1, rejected[j]);
+            // Historical currencies whose CLDR display data varies across ICU versions
+            // (e.g., ICU 74/78 define "CNX" while ICU 79 removed it): assert the
+            // cross-API iff bijection rather than hard-coding presence or absence.
+            var historical = ["CNX", "LSM"];
+            for (var h = 0; h < historical.length; h++) {
+                var hist = historical[h];
+                var inCurrencies = currencies.indexOf(hist) !== -1;
+                var displayName = dn.of(hist);
+                assert.areEqual(inCurrencies, typeof displayName === "string", hist + " parity");
+                if (inCurrencies) {
+                    assert.isTrue(displayName.length > 0, hist + " non-empty DisplayNames");
+                    assert.areEqual(
+                        hist,
+                        new Intl.NumberFormat("en", { style: "currency", currency: hist }).resolvedOptions().currency,
+                        hist + " NumberFormat"
+                    );
+                } else {
+                    assert.areEqual(undefined, displayName, hist + " undefined DisplayNames");
+                }
+            }
+
+            // Verify permanently unassigned ISO 4217 codes are absent and rejected by DisplayNames.
+            var unassigned = ["AAA", "QZZ", "ZZZ"];
+            for (var j = 0; j < unassigned.length; j++) {
+                assert.areEqual(undefined, dn.of(unassigned[j]), unassigned[j]);
+                assert.isFalse(currencies.indexOf(unassigned[j]) !== -1, unassigned[j]);
             }
         }
     },
