@@ -9599,7 +9599,7 @@ void
 LowererMD::EmitInt64toFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
 {
     Assert(dst->IsFloat());
-    Assert(src->IsInt64() || src->IsUInt64());
+    Assert(src->IsInt64() || src->IsUint64());
     // ARM64 FCVT supports i64/u64 -> f32/f64 directly via SCVTF/UFCVTF.
     // No need for x86's unsigned 2-step (SHR/AND/OR + ADDSD).
     IR::Instr *instr = IR::Instr::New(Js::OpCode::FCVT, dst, src, this->m_func);
