@@ -190,12 +190,12 @@ assignment, class fields/`#private`/static blocks, `replaceAll`, `matchAll`,
 `WeakRef`, `FinalizationRegistry`, named capture groups/lookbehind, import
 attributes, or RegExp `d`/`v` flags. The modernization branch has since landed
 those C2 surfaces, including `u` Unicode property escapes and `v` Unicode Sets
-mode on ICU 79.1; decorators and `queueMicrotask` remain unimplemented. BigInt
-is enabled by default (S2, kill switch `-ESBigInt-`); RegExp symbols
-and SAB/Atomics remain default-off; the SAB/Atomics flag-on surface now includes
-growable buffers and non-shared Atomics but awaits the product/security
-decision. The repeatable probe is `tools/test262/feature-probe.js`; see
-[modernization-plan.md](modernization-plan.md) §4 for the current gap list and
+mode on ICU 79.1; decorators and `queueMicrotask` remain unimplemented. `ESBigInt`,
+`ESSharedArrayBuffer`, `ES6RegExSymbols`, and `ES6RegExPrototypeProperties` are now
+default-on (`true` in `lib/Common/ConfigFlagsList.h:669,689-700,712`); see
+[open-cards.md](open-cards.md) for current posture and Wave 1–5 closures. The
+repeatable probe is `tools/test262/feature-probe.js`; see
+[modernization-plan.md](modernization-plan.md) §4 for the historical gap list and
 per-batch receipts.
 
 Intl: only Collator/DateTimeFormat/NumberFormat/PluralRules (`InJavascript/Intl.js`,
@@ -212,11 +212,20 @@ placement in `Intl/DateTimeFormat.js`). macOS `--no-icu` fallback
 
 WASM (`ENABLE_WASM`): `WasmBinaryReader` (:39-56); `WasmToAsmJs` reuses the asm.js
 pipeline (:66-70); Module/Instance/Memory/Table in Runtime/Library
-(`WebAssemblyModule.h:30-58`). MVP ON + sign-ext/nontrapping ON; threads OFF,
-multi-value OFF, SIMD flag-only (`lib/Common/ConfigFlagsList.h:428-447`, :996;
-`wasm.simd/rlexe.xml`); `WasmI64` defaults false (:429). GC/tail-calls/EH/stringref/
-extended-const: 0 opcode hits (`WasmBinaryOpCodes.h`); `WasmSpec/features` tracks
-extends/nontrapping/threads only, with a separate `test/WasmSpec.MultiValue/` suite.
+(`WebAssemblyModule.h:30-58`). Default-on (`lib/Common/ConfigFlagsList.h:428-447,986-990`):
+MVP + `WasmSignExtends` (`true`) + `WasmNontrapping` (`true`) + `WasmThreads` (`true` at `:443`,
+though `WasmSpec` threads tests are phase P3). Off by default: `WasmI64` (`false` at `:429`),
+`WasmMultiValue` (`false` at `:444`, enabled with `-WasmMultiValue`; `test/WasmSpec.MultiValue` runs
+in P3, not P1), `WasmExperimental` (`false` at `:447`), and experimental `WasmSimd`
+(`FLAGPR_EXPERIMENTAL_WASM` at `:999`, enabled with `-WasmSimd`; `test/wasm.simd` `14/14` passes
+interpreter + JIT with Wave 3 `J-1`/`J-2` fixed, running in P3, not P1). **Unsupported / NOT
+implemented:** **bulk-memory (`0xFC 0x0A`/`0x0B`: `memory.copy`/`memory.fill`, passive segments —
+zero opcodes in `lib/WasmReader/WasmBinaryOpCodes.h`, no flag in `ConfigFlagsList.h`)**, GC,
+tail-calls, EH, stringref, and extended-const (`0` opcode hits in `WasmBinaryOpCodes.h`).
+`check-wasm` (`382/382` P1) and `check-wasm-jit` (`tools/build/check_wasm_p1.py` against
+`test/wasm-arm64-manifest.json`) cover MVP + sign-extension (`9`) + nontrapping conversions (`2`)
+only (`wabt-free` `1`), NOT multi-value (`3` P3), SIMD (`13` manifest P3 / `14` `test/wasm.simd`),
+or threads (`16` P3).
 
 Extras: SCACore Serializer/Deserializer over StreamWriter/Reader (SCACore.h:12-52);
 `Runtime.h` umbrella (Parser + RuntimeCommon :13-43); TTD time-travel debugging
@@ -378,13 +387,15 @@ feature work is tracked in that plan; decorators and `queueMicrotask` are not
 claimed. (Error `cause`, `flat`/`flatMap`/`includes` were already present in
 the baseline.) (b) Intl 4-constructor subset; embedded ICU 63.2
 (2018), current system-ICU pilot 79.1. ICU upgrade and `--no-icu` behavior need
-explicit dependency/test decisions. (c) WASM MVP + sign-ext /
-nontrapping; threads/multi-value/SIMD gated off; GC/tail-calls/EH/stringref/
-extended-const absent. (d) BigInt is now enabled by default; RegExp symbols
-and SharedArrayBuffer/Atomics remain off by default. The
-SAB+Atomics flag-on surface now includes growable SharedArrayBuffer and
-non-shared Atomics, but the feature remains OFF by default pending the
-product/security decision; keep all three flagged until deliberately enabled. (e) C++17 + Rotor PAL; x86/ARM win-only;
+explicit dependency/test decisions. (c) WASM default-on is MVP + sign-ext +
+nontrapping (`382/382` P1 via `check-wasm` / `check-wasm-jit`) plus `WasmThreads`
+(`true` at `:443`, tests in P3); multi-value (`-WasmMultiValue`) is off by default
+(P3); SIMD (`-WasmSimd`) is experimental and off by default (`14/14` in P3 after
+Wave 3 `J-1`/`J-2` fixes); **bulk-memory (`0xFC 0x0A`/`0x0B`), GC, tail-calls, EH,
+stringref, and extended-const are unsupported / not implemented.** (d) `ESBigInt`,
+`ESSharedArrayBuffer`, `ES6RegExSymbols`, and `ES6RegExPrototypeProperties` are all
+default-on (`true` in `ConfigFlagsList.h:669,689-700,712`); see
+[open-cards.md](open-cards.md) for current posture and Wave 1–5 status. (e) C++17 + Rotor PAL; x64/x86/ARM/ARM64 targets;
 ARM64 JIT now works on macOS (the Zig `jit` profile merged 2026-10-31, with
 documented coverage limits in [arm64-macos-jit.md](arm64-macos-jit.md));
 ARM64 JIT on Linux and native x64 Linux JIT remain unproved (B4). (f) No sandbox/heap cage, no

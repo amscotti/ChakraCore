@@ -4,11 +4,11 @@
 [![Licensed under the MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Microsoft/ChakraCore/blob/master/LICENSE.txt)
 [![PR's Welcome](https://img.shields.io/badge/PRs%20-welcome-brightgreen.svg)](#contribute)
 
-ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4` with `161` exports; v8 / `150` exports on `modernize/baseline`). On `modernize/phase4`, it builds with a single Zig `0.17.0` front end across **macOS ARM64** (certified), **Linux x64** (`G0` baseline verified; `G0-phase4` revalidation queued), and **Windows x64** (`B6` native `x86_64-windows-msvc` `zig build` wired, awaiting native certification), delivering a `~5.5 MB` release package (`~5.3 MB` on `modernize/baseline`), **`99.57%`** certified ES2025 edition conformance (**`80,195 / 80,544`**) and **`88.97%`** broad conformance (**`82,866 / 93,141`**) on macOS ARM64, 3-tier JIT + concurrent `Recycler` GC, and WebAssembly multi-value + SIMD JIT (`382/382` P1).
+ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4` with `161` exports; v8 / `150` exports on `modernize/baseline`). On `modernize/phase4`, it builds with a single Zig `0.17.0` front end across **macOS ARM64** (certified), **Linux x64** (`G0` baseline verified; `G0-phase4` revalidation queued), and **Windows x64** (`B6` native `x86_64-windows-msvc` `zig build` wired, awaiting native certification), delivering a `~5.5 MB` release package (`~5.3 MB` on `modernize/baseline`), **`99.57%`** certified ES2025 edition conformance (**`80,195 / 80,544`**) and **`88.97%`** broad conformance (**`82,866 / 93,141`**) on macOS ARM64, 3-tier JIT + concurrent `Recycler` GC, and WebAssembly JIT (MVP + sign-extension + nontrapping conversions: `382/382` P1 via `check-wasm` / `check-wasm-jit`; multi-value off by default via `-WasmMultiValue`, experimental SIMD off by default via `-WasmSimd`, bulk-memory unsupported).
 
 ## Project Direction: The Embeddable JIT Sweet Spot
 
-This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` `237` exports + `libChakraNodeApi` `161` exports) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and narrow Zig C-ABI leaf wedges outside the C++ engine core. Highlights landed on `modernize/phase4`:
+This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` `237` exports + `libChakraNodeApi` `161` exports) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WebAssembly (MVP/sign-extension/nontrapping default-on; opt-in `-WasmMultiValue` and experimental `-WasmSimd`), and narrow Zig C-ABI leaf wedges outside the C++ engine core. Highlights landed on `modernize/phase4`:
 
 - **`Q1.1` Node-API v9/v10 + Multi-Addon (`161` exports):** `155` `napi_*`/`node_api_*` + `6` host helpers, `--addon` multi-addon registry, per-context shared `Buffer` marker, `19/19` probes, `52/17/0` C matrix.
 - **`Q1.2`–`Q1.5` ES2025 Conformance Sweeps I–III:** Lifted certified ES2025 edition conformance from `98.89%` (`modernize/baseline`) through `99.06%` (`Q1.2`), `99.25%` (`Q1.4`), `99.26%` (`Q2`/`C3.1`), and `99.56%` (`Q1.5`, `+247` non-`waitAsync` fixes across `133` files with `0` JIT diffs) to **`99.57%`** (`Q3`).
@@ -59,10 +59,10 @@ All active platform builds use the Zig `0.17.0` front end pinned in [mise.toml](
 
 ```sh
 mise exec -- zig build                              # default (test) profile -> zig-out/
-mise exec -- zig build check                        # regression (2098/0) + bytecode + native + smoke + metadata + selftest
-mise exec -- zig build -Dprofile=debug-static check # static Debug archive + 8/8 native suites (2150/0)
+mise exec -- zig build check                        # regression (2110/0) + bytecode + native + smoke + metadata + selftest
+mise exec -- zig build -Dprofile=debug-static check # static Debug archive + 8/8 native suites (2162/0)
 mise exec -- zig build -Dprofile=release-shared check-package
-mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-fulljit
+mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-wasm-jit check-fulljit # P1 WASM (382/382 MVP+sign-ext+nontrapping) + FullJit (643/0); multi-value (-WasmMultiValue) & SIMD (-WasmSimd) are P3
 mise exec -- zig build -Dsanitize=address check-sanitize
 mise exec -- zig build -Dsanitize=undefined check-sanitize
 ```
@@ -158,7 +158,7 @@ mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi
 # plus include/nodeapi/{js_native_api,js_native_api_types,node_api,node_api_types}.h
 ```
 
-The exports gate (`check-nodeapi`) stays separate from `zig build check` so engine regression pins in `tools/build/gate_counts.json` remain decoupled. A from-scratch consumer (`zig cc -DNAPI_VERSION=10 -I<installed>/include/nodeapi`, linking the built provider, run through `tools/nodeapi/ch-nodeapi` -- no Node executable) is the packaging proof. macOS ARM64 v10 verification (`19/19` probes, stress, `52/17/0` C matrix, `52/61/6` `node-addon-api` matrix) is recorded in [doc/node-api-receipt.md](doc/node-api-receipt.md) §14; Linux x64 (`G0-phase4`) and Windows x64 (`B6`) validation queues live in [doc/linux-handoff.md](doc/linux-handoff.md) §0A and [doc/windows-handoff.md](doc/windows-handoff.md).
+The exports gate (`check-nodeapi`) stays separate from `zig build check` so engine regression pins in `tools/build/gate_counts.json` remain decoupled. A from-scratch consumer (`zig cc -DNAPI_VERSION=10 -I<installed>/include/nodeapi`, linking the built provider, run through `tools/nodeapi/ch-nodeapi` -- no Node executable; note upstream `include/nodeapi/js_native_api_types.h` defaults `NAPI_VERSION` to `8` when `-DNAPI_VERSION=...` is omitted) is the packaging proof. macOS ARM64 v10 verification (`19/19` probes, stress, `52/17/0` C matrix, `52/61/6` `node-addon-api` matrix) is recorded in [doc/node-api-receipt.md](doc/node-api-receipt.md) §14; Linux x64 (`G0-phase4`) and Windows x64 (`B6`) validation queues live in [doc/linux-handoff.md](doc/linux-handoff.md) §0A and [doc/windows-handoff.md](doc/windows-handoff.md).
 
 ## Contribute
 

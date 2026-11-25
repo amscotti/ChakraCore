@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #-------------------------------------------------------------------------------------------------------
 # Copyright (C) Microsoft. All rights reserved.
 # Copyright (c) ChakraCore Project Contributors. All rights reserved.
 # Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 #-------------------------------------------------------------------------------------------------------
+# HISTORICAL REFERENCE / UNMAINTAINED -- superseded by build.zig and .github/workflows/zig-*.yml
 
 SAFE_RUN() {
     local SF_RETURN_VALUE=$($1 2>&1)

@@ -41,30 +41,24 @@ The unit tests can be run offline with following these steps:
 
 ### a) Windows
 
-* Build `Chakra.Core.sln` for the version of ChakraCore you wish to test e.g. x64 Debug.
-  * Specifically, running tests requires that `rl.exe`, `ch.exe`, and `ChakraCore.dll` be built.
-* Call `test\runtests.cmd` and specify the build config
+Active Windows x64 builds use the Zig `0.17.0` front end from an **x64 Native Tools Command Prompt for VS 2022** with `vcpkg` `icu:x64-windows` (see [README.md](README.md) and [doc/windows-handoff.md](doc/windows-handoff.md)):
 
-e.g.  `test\runtests.cmd -x64debug`
+* `zig build`
+* `zig build check-smoke check-metadata verify-bytecode check-jit check-selftest`
 
-For full coverage, please run unit tests against debug and test for both x86 and x64:
-* `test\runtests.cmd -x64debug`
-* `test\runtests.cmd -x64test`
-* `test\runtests.cmd -x86debug`
-* `test\runtests.cmd -x86test`
-
-`runtests.cmd` can take more switches that are useful for running a subset of tests.  Read the script file for more information.
-`runtests.cmd` looks for the build output in the default build output folder `Build\VcBuild\bin`. If the build output path is changed from this default then use the `-bindir` switch to specify that path.
+Legacy `Build\Chakra.Core.sln` and `test\runtests.cmd` remain in the tree solely as historical references and do not build `lib/ZigCodec` or `libChakraNodeApi`.
 
 ### b) Linux or macOS
 
-Build the version of ChakraCore you wish to test - either a Debug or Test (RelWithDebugInfo) build. You will need the ChakraCore library and the `ch` application built.
+Build and test ChakraCore with the Zig `0.17.0` front end pinned in [mise.toml](mise.toml) (see [README.md](README.md) for all profile quickstarts):
 
-If building with `cmake` you can then use the `make check` or `ninja check` command to run the test suite.
-Alternatively you can directly run `test/runtests.py` you'll need to specify `-t` (Test build) or `-d` (Debug build).
+* `mise exec -- zig build` (default `test` profile -> `zig-out/bin/ch`)
+* `mise exec -- zig build check` (regression suite, bytecode verification, native embedding tests, smoke checks, metadata, and selftests)
+* `mise exec -- zig build -Dprofile=debug-static check` (static Debug archive + native suites)
+* `mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-wasm-jit check-fulljit` (JIT + P1 WASM checks)
 
-`runtests.py` can take more switches that are useful for running a subset of tests.  Read the script file for more information.
-`runtests.py` looks for the build output in the default build output folder `out/test/ch` or `out/debug/ch`. If you've used a different path then use `--binary=path` to specify it
+Alternatively, you can run `test/runtests.py` directly against a Zig-built binary, e.g. `python3 test/runtests.py -t --binary=zig-out/bin/ch` (or `out/debug-static/bin/ch` with `-d`). Read `test/runtests.py` for subset/tag switches.
+Legacy `build.sh` and `cmake` (`make check` / `ninja check`) are unmaintained historical references and no longer link `lib/ZigCodec` or build `libChakraNodeApi`.
 
 ## Issue Labels
 

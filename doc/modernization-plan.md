@@ -1,76 +1,16 @@
 # ChakraCore Modernization Plan
 
-> **Wave 3 update (2026-11-17, `modernize/baseline`):** Tiers 1-5 pre-Linux work is **complete on macOS ARM64**. Gates at `40c2fe5be`: `check` **2064/0**, `debug-static` **2116/0**, `check-wasm` P1 **382/382**, `check-fulljit` **615/0**, sanitizers `address`/`undefined` **26/26** clean, `check-package` PASS. **Certified ES2025 edition conformance: 98.89% (79,648 passed / 896 failed / 80,544 scenarios)**;
-> broad conformance **86.41% (80,486 / 12,655 / 93,141)**; failure buckets post-ES2025 `11,759`,
-> `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16`; negative phase
-> `8,741` passed, `0` shape-suspects, `1` marker downgrade (`refresh-2026-11-17`, macOS ARM64, corpus `2e0a5676`,
-> [baseline-register.json](../tools/test262/baseline-register.json)).
-> Remaining owed: single-pass Linux x64 revalidation ([linux-handoff.md](linux-handoff.md) §0).
->
-> - **Tier 1 (sanitizers & gates):** `-Dsanitize=address|undefined|thread` lanes (`thread` Linux-only; `check-sanitize` 26/26 legs clean for `address` and `undefined` on macOS ARM64), gate targets `check-wasm` (P1 382/382), `check-gcstress` (in-thread + concurrent) and `check-fulljit` (615/0), and the `regenByteCode.py` create-on-refuse edge.
-> - **Tier 2 (RegExp):** `ES6RegExSymbols` and `ES6RegExPrototypeProperties` are now **default-on**; `Lower.cpp` JIT fast-path guards (`GenerateFastReplace`, `GenerateFastInlineStringSplitMatch`), stack regex boxing, and legacy test flag pinning.
-> - **Tier 3 (conformance/engine):** Array/%TypedArray% `toLocaleString(locales, options)` forwarding; integer-index `configurable: true`; `Reflect.set` canonical numeric conversion; `unshift` indexed setter; `join` length capture; `ModuleNamespace` strict `[[Set]]`/`[[Delete]]`; duplicate lexical declaration errors; labelled import/export early errors; anonymous default export names; Tarjan SCC TLA cycle settlement; strict `08`/`09` and template `\08`/`\09`; `NamedEvaluation` for `o[expr] = class{}`; cross-realm derived constructor (`e3-R3`); indirect `eval` (`e3-R4`); and the 4 UBSan/ASan engine fixes.
-> - **Tier 4 (WASM/JIT):** mixed-type multi-value pop order / tuple return; `isBlockParam` register pinning; ARM64 WASM NEON SIMD stack layout and JIT tier-up enablement.
-> - **Tier 5 (packaging):** release packaging (`tools/package/*`), `build.zig` / `tools/build/linux.zig` `package` and `check-package` targets, deterministic `MANIFEST.json` archive.
+> **Authoritative live status register:** **[open-cards.md](open-cards.md)** is the single live source of truth for current gate counts, Test262 scores, and open/closed items across `modernize/phase4` (Waves 1–5), paired with [vision-and-roadmap.md](vision-and-roadmap.md) for Phase-4 tracks. Dated milestone summaries and §6 receipts below preserve historical checkpoint records; current capability facts at HEAD are reconciled consistently throughout.
 
-> Status: **F0–B3 verified**, **Stage 2/3 architectural hardening & Test262
-> refresh complete on `modernize/baseline` (`c24266598`, 2026-11-16)** — all
-> four Mac Zig profiles are green (`test` **2063/0**, `debug-static`
-> **2115/0** + `8/8` static native, `release-shared` green, `jit` + `wasm`
-> `check-jit` + **382/382 P1** WASM green), Node-API is verified (`18/18`
-> probes + `tools/nodeapi/run_probe.sh`, `REPEATS=5` stress, `46/23/0` +
-> `52/61/6` matrices), and the Mac **C4 certified baseline refresh
-> (`refresh-2026-11-16`)** stands at **78,731/1,813 of 80,544 (97.75%)**
-> (`-1,136` failures vs `2026-11-05` after `7412beb56` flipped
-> `ESSharedArrayBuffer=true` and Stage 2/3 fixes landed).
-> **B4 behavior proof completed natively on the Linux proof host**
-> (2026-11-09/10: interpreted **2841/0**, dynapogo **2305/0**, certified
-> Linux test262 **77,354/3,190** — [B4 native run](b4-linux-run.md),
-> [B4 gate verdict update](b4-gate.md)); what remains owed before any
-> Linux default-rollout claim is the post-Stage-2/3 native Linux
-> verification in §6 (`tools/build/linux.zig` variant matrix + Node-API +
-> certified refresh) and green hosted GitHub Actions runs. See
-> [architecture-and-readiness-review.md](architecture-and-readiness-review.md)
-> for the full architecture synthesis, test-coverage matrix, explicit
-> residuals, and Linux bring-up checklist.
-> **C1 is recorded (CONDITIONAL)** — edition
-> policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
-> qualification is conditional on explicit host-reported negative phase
-> before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll, the five S9 sub-batches (named
-> groups, `d` flag/indices, duplicate named groups, lookbehind,
-> ES2025 modifiers), the complete S1 class-elements surface (fields,
-> private methods/accessors incl. async/generator and statics, computed
-> names, `super` in initializers, static blocks, direct-eval/computed-key
-> private visibility), S2 BigInt, S6a–S6e SAB/Atomics (`ESSharedArrayBuffer=true`
-> default-on as of `7412beb56`), S8 resizable/immutable ArrayBuffer/transfer +
-> TypedArray tracking + `Float16Array`, S12 import attributes + JSON modules,
-> S13 WeakRef + FinalizationRegistry, S14 P1–P7, and the
-> S14 block-scope and statement-level early-error clusters are landed
-> (receipts in [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
-> [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
-> [c2-s7-matchall.md](c2-s7-matchall.md),
-> [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
-> [c2-s9-modifiers.md](c2-s9-modifiers.md),
-> [c2-s14-blockscope.md](c2-s14-blockscope.md),
-> [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md),
-> and [c2-flag-audits.md](c2-flag-audits.md)). The native **ARM64 macOS JIT**
-> port merged into this branch on 2026-10-31 (`9004b3ed7`) and is verified
-> across Mac JIT regression + WASM P1 + `cdjs` 5x at `c24266598`
-> (coverage notes in [arm64-macos-jit.md](arm64-macos-jit.md)).
-> Engine/legacy-build references use baseline `97e68c917`; execution evidence
-> and the [B1-B3 review](b1-b3-review.md) are updated through 2026-11-16
-> (`c24266598`). Demonstrated green is Mac no-JIT + Mac ARM64 JIT+WASM +
-> Node-API (`libChakraNodeApi` / `ch-nodeapi`) + prior Linux proof-host
-> (`b4-linux-run.md`). Explicit residuals: post-Stage-2/3 native Linux
-> re-run & hosted Actions runs are pending; Mac ASan/TSan/UBSan lanes are
-> not yet configured; CMake does not build `NodeApi`/`ch-nodeapi`; full
-> concurrent GCStress (`>6s` smoke) and a formal perf gate remain outside
-> current claims; and `ES6RegExSymbols` / `ES6RegExPrototypeProperties` stay
-> `false` due to Stage 2 empirical blockers ([c4-gate.md](c4-gate.md) §3).
-> `JsrtExternalArrayBuffer` finalizer native tests and the Phase-3 JsRT
-> additive API versioning contract (§0.1) are now landed and documented.
-> This is a staged roadmap for a small maintained fork, not a dated delivery promise.
+> **Baseline Tier 1–5 snapshot (2026-11-17, `modernize/baseline` `40c2fe5be`; superseded on `modernize/phase4` by `Q1.1`–`Q3` and Waves 1–5 in [open-cards.md](open-cards.md)):** Tiers 1–5 pre-Linux work completed on macOS ARM64 (`2064/0` `test`, `2116/0` `debug-static`, `382/382` P1 `check-wasm`, `615/0` `check-fulljit`, `98.89%` ES2025 `79,648/80,544`). On `modernize/phase4`, macOS ARM64 stands at **`99.57%` certified ES2025 (`80,195/80,544`)** and **`88.97%` broad (`82,866/93,141`)**, with regression pins **`2110/0` `test`**, **`2162/0` `debug-static`**, and **`643/0` `check-fulljit`** (`tools/build/gate_counts.json`).
+>
+> - **Tier 1 (sanitizers & gates):** `-Dsanitize=address|undefined|thread` lanes (`thread` Linux-only; Mac `address` and `undefined` lanes configured and active — `32/32` legs on `test` and `34/34` on `jit -Dwasm=true` via hardened `check_sanitize.py`), gate targets `check-wasm` / `check-wasm-jit` (P1 `382/382`), `check-gcstress`, `check-fulljit` (`643/0`), `check-perf-smoke` (Wave 4), and `regenByteCode.py` create-on-refuse guard.
+> - **Tier 2 (RegExp):** `ES6RegExSymbols` and `ES6RegExPrototypeProperties` are **default-on** (`true` in `lib/Common/ConfigFlagsList.h:689-700`); `Lower.cpp` JIT fast-path guards (`GenerateFastReplace`, `GenerateFastInlineStringSplitMatch`), stack regex boxing, and legacy test flag pinning.
+> - **Tier 3 (conformance/engine):** Array/%TypedArray% `toLocaleString(locales, options)` forwarding; integer-index `configurable: true`; `Reflect.set` canonical numeric conversion; `unshift` indexed setter; `join` length capture; `ModuleNamespace` strict `[[Set]]`/`[[Delete]]`; duplicate lexical declaration errors; labelled import/export early errors; anonymous default export names; Tarjan SCC TLA cycle settlement; strict `08`/`09` and template `\08`/`\09`; `NamedEvaluation` for `o[expr] = class{}`; cross-realm derived constructor (`e3-R3`); indirect `eval` (`e3-R4`); and UBSan/ASan engine fixes.
+> - **Tier 4 (WASM/JIT):** `check-wasm` (`382/382` P1) and `check-wasm-jit` cover **MVP + sign-extension + nontrapping conversions only** (`test/wasm-arm64-manifest.json`); mixed-type multi-value (`-WasmMultiValue`, off by default, P3 `test/WasmSpec.MultiValue`) and ARM64 WASM NEON SIMD (`-WasmSimd`, experimental, off by default, P3 `test/wasm.simd` `14/14` interp + JIT after Wave 3 `J-1`/`J-2` fixes) are gated outside P1; **bulk-memory (`0xFC 0x0A`/`0x0B`) is not implemented**.
+> - **Tier 5 (packaging):** release packaging (`tools/package/*`), `build.zig` / `tools/build/linux.zig` / `tools/build/windows.zig` `package` and `check-package` targets, bundled macOS ICU dylibs & prefix isolation (Wave 2), and deterministic `MANIFEST.json` archive.
+
+> **Current Program Summary (reconciled with Waves 1–5):** **F0–B3 verified**, **B4 native proof completed (`2026-11-09/10`, [b4-linux-run.md](b4-linux-run.md))**, **G0 Linux baseline completed (`1bf42d1f6`, merged into `modernize/phase4`)**, and **macOS ARM64 `modernize/phase4` certified at `99.57%` ES2025 (`80,195/80,544`) / `88.97%` broad (`82,866/93,141`)**. Hosted GitHub Actions Zig workflows (`.github/workflows/zig-{macos,linux,windows}.yml`) are live on `master` and `modernize/**` with Waves 1–4 remediating the `B-15..B-18` and `B-4` matrix gaps (`G0-phase4` Linux and `B6` Windows native CI runs carry Phase-4 cross-platform revalidation). Active Mac sanitizer lanes (`-Dsanitize=address|undefined`) pass `32/32` (`test`) and `34/34` (`jit -Dwasm=true`) under `check_sanitize.py` (Mac `-Dsanitize=thread` remains unconfigured / Linux-only); `ES6RegExSymbols` and `ES6RegExPrototypeProperties` are **default-on** (`true` in `ConfigFlagsList.h:689-700`); CMake/legacy `build.sh` do not link `lib/ZigCodec` or build `libChakraNodeApi`/`ch-nodeapi` and are retained solely as historical reference; and Wave 4 added `tools/bench/check_perf_smoke.py` (`check-perf-smoke`). `JsrtExternalArrayBuffer` finalizer native tests and the Phase-3 JsRT additive API versioning contract (§0.1) are landed and documented. This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first
 
@@ -94,18 +34,18 @@ handling have been validated before its results are used as a completion gate.
 | F0 | Compiler, behavior-parity and diagnostic-conformance foundation | — | Verified |
 | B1 | Explicit Mac build/PAL configuration contract | F0 | Verified |
 | B2 | Source-only Mac `zig build` and `zig build check` | B1 | Verified |
-| B3 | Mac build profiles, incremental correctness and CI | B2 | Verified* |
-| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Proven on proof host** (native run + certified baseline recorded; post-D1–D4 Linux handoff §5 and hosted-CI green still owed before default rollout) |
-| B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | **Verified on macOS** (`check-package`, [b5-package.md](b5-package.md); Linux run owed in G0) |
-| B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
-| Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | **Scheduled in Q1.3** (`Uint8Array` Base64/Hex C-ABI codec; [vision-and-roadmap.md](vision-and-roadmap.md)) |
-| C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a–S6e growable/cross-agent SAB, `Atomics.pause`, `Atomics.waitAsync` (single-thread + finite timeouts + cross-agent native wake latch), and BigInt64Array/BigUint64Array Atomics — **`ESSharedArrayBuffer=true` now default-on (`7412beb56`)**, verified in `refresh-2026-11-16` and cross-agent Stage 2 hardenings; S8 immutable/resizable ArrayBuffer + TypedArray tracking + Float16 (`DataView`/`Math.f16round`/`Float16Array` + JIT `Lower.cpp` table/stride/bounds hardening); S3-a Unicode property escapes on ICU 79.1; S3-b RegExp `v` mode; S9 u-mode/S9-b/RegExp non-writable `lastIndex` JIT+slow guards; S2 BigInt default-on; S12 import attributes + JSON modules; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7; Node-API `libChakraNodeApi` + `ch-nodeapi` async host services. All 4 Mac Zig profiles green (`test` **2063/0**, `debug-static` **2115/0**, `jit` + `wasm` **382/382 P1**); post-Stage-2/3 native Linux run still gated in §6) |
-| C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects (`Explicit Resource Management`, C-ABI `Temporal`, WASM 2.0) |
-| C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | **98.89% certified on macOS** (`79,648/80,544` at `40c2fe5be`); Linux re-verify owed in G0 |
-| G0 | Single-pass Linux x64 revalidation & matched two-platform `b5` release | B4, B5, C4 | Next gate ([linux-handoff.md](linux-handoff.md) §0) |
-| Q1 | High-ROI quick wins: Node-API v9/v10 (`Q1.1`), ES2025 `~99.3%` tail (`Q1.2`), ES2026 small built-ins + `Z1` Base64/Hex (`Q1.3`) | G0 (or branch) | Planned ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
-| I1 | Modern ECMA-402 `Intl` wrappers over linked `icu4c` (`Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`) | B3/B4 ICU contracts | Planned ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
+| B3 | Mac build profiles, incremental correctness and CI | B2 | **Verified** (hosted `.github/workflows/zig-macos.yml` live; Wave 1–4 remediated `B-15..B-18` & `B-4`) |
+| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Completed baseline (`G0` `1bf42d1f6`, merged into `modernize/phase4`)**; Phase-4 `G0-phase4` queued ([linux-handoff.md](linux-handoff.md) §0A) |
+| B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | **Verified on macOS** (`check-package`, Wave 2 bundled ICU + prefix isolation, [b5-package.md](b5-package.md)); Linux/Windows runs queued |
+| B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | **Wired on `modernize/phase4`** (`windows.zig`/`tables_windows.zig` + `zig-windows.yml`; awaiting native Windows certification) |
+| Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | **Completed (`Q1.3`)** (`lib/ZigCodec/u8a_codec.zig`, [z1-u8a-codec.md](z1-u8a-codec.md)) |
+| C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | **Verified** (`-NegativePhaseReport` host-reported phase landed; [c1-triage.md](c1-triage.md), [c1-negative-phase.md](c1-negative-phase.md)) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | **Completed on macOS ARM64** (`ESBigInt`, `ESSharedArrayBuffer`, `ES6RegExSymbols`, `ES6RegExPrototypeProperties` all default-on `true` in `ConfigFlagsList.h`; `2110/0` `test`, `2162/0` `debug-static`, `643/0` `check-fulljit`, `382/382` P1 `check-wasm`; live status in [open-cards.md](open-cards.md)) |
+| C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | `C3.1` Explicit Resource Management **completed** (`947/0`); `Temporal` / WASM 2.0 remain separate tracks |
+| C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | **99.57% certified ES2025 (`80,195/80,544`) & 88.97% broad (`82,866/93,141`) on macOS ARM64 (`Q3`)** (`98.89%` / `79,648` on `modernize/baseline`); Linux/Windows re-verify queued |
+| G0 | Single-pass Linux x64 revalidation & matched two-platform `b5` release | B4, B5, C4 | **Baseline completed (`1bf42d1f6`)**; `G0-phase4` queued ([linux-handoff.md](linux-handoff.md) §0A) |
+| Q1 | Quick wins: Node-API v9/v10 (`Q1.1`), ES2025 sweeps (`Q1.2`/`Q1.4`/`Q1.5`), ES2026 waves (`Q1.3`/`Q2`/`Q3`) + `Z1` Base64/Hex | G0 (or branch) | **Completed on `modernize/phase4`** ([vision-and-roadmap.md](vision-and-roadmap.md) §3, [open-cards.md](open-cards.md)) |
+| I1 / I2 | Modern ECMA-402 `Intl` wrappers over linked C `icu4c` (`Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `supportedValuesOf`, `DurationFormat`) | B3/B4 ICU contracts | **Completed on `modernize/phase4`** (`I3` legacy `Intl.js` replacement deferred; [vision-and-roadmap.md](vision-and-roadmap.md)) |
 | H1 | Standalone Zig + `libuv` + `libChakraNodeApi` lightweight runtime host ("Option B") | `JsRT` + `libChakraNodeApi` + `Q1.1` | Planned separate host ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
 
 **Default execution order:** F0 → B1 → B2 → B3 → B4. Start C1 after B3;
@@ -113,8 +53,9 @@ release/dependency work at B5 and an approved Z1 pilot can then be scheduled wit
 holding up C++ compatibility fixes. B6 is an expansion decision, not a prerequisite
 for completing the first Mac/Linux build rollout. All entries marked planned are
 future work; command names below describe the intended build interface.
-(*B3's CI clause is CONDITIONAL on the first green post-merge Actions run;
-the recipe is validated by lint plus literal local simulation.)
+(Hosted Zig CI workflows — `.github/workflows/zig-{macos,linux,windows}.yml` — are live
+on `master` and `modernize/**`, and Waves 1–4 remediated the `B-15..B-18` and `B-4`
+matrix gaps; see [open-cards.md](open-cards.md) for current CI status.)
 
 ## 0. Goals and boundaries
 
@@ -151,22 +92,34 @@ optimizing JIT + concurrent collector) and heavyweight browser engines
 (maximum peak speed, but multi-tens-of-MB binaries, sprawling builds, and
 volatile C++ embedding APIs):
 
-- **Small package, fast hermetic build:** `~5.3 MB` deterministic
-  `zig build package` archives (`darwin-arm64` verified; `linux-x64` queued in
-  `G0`) built in under a minute from a single `zig build` front end (`Zig 0.17.0`).
+- **Small package, fast hermetic build:** `~5.5 MB` deterministic
+  `zig build package` archives on `modernize/phase4` (`~5.3 MB` on
+  `modernize/baseline`; `darwin-arm64` verified, `linux-x64` `G0` baseline
+  verified / `G0-phase4` queued, `windows-x64` `B6` wired) built in under a
+  minute from a single `zig build` front end (`Zig 0.17.0`).
 - **Dual flat C ABIs:** Embedders use versioned `JsRT` (`237` exports) while
-  native addons use `libChakraNodeApi` (`150` exports, `NAPI_VERSION=8`), with
-  explicit **non-goals** against `v8.h` C++ shims, upstream `nodejs/node` forks,
+  native addons use `libChakraNodeApi` (**`161` exports / Node-API v10
+  (`-DNAPI_VERSION=10`)** on `modernize/phase4`, matching [README.md](../README.md);
+  note upstream `include/nodeapi/js_native_api_types.h` defines
+  `#define NAPI_VERSION 8` as default when `-DNAPI_VERSION` is not passed;
+  `modernize/baseline` stays at `150` exports / v8), with explicit
+  **non-goals** against `v8.h` C++ shims, upstream `nodejs/node` forks,
   or C++->Zig core rewrites ([zig-strategy.md](zig-strategy.md)).
-- **Modern ES2025 + Multi-Tier JIT + WASM SIMD:** `98.89%` certified ES2025
-  (`79,648/80,544`), 3-tier x64/ARM64 JIT with concurrent GC, and `382/382` P1
-  WASM (plus bulk-memory, multi-value, and NEON/SSE SIMD).
-- **Phase-4 expansion tracks (`G0` → `Q1` → `I1` / `H1`):** Ordered in
-  [vision-and-roadmap.md](vision-and-roadmap.md) — Linux gate (`G0`), quick
-  Node-API v9/v10 + ES2025/ES2026 + `Z1` Base64/Hex Zig wedge (`Q1`), ICU
-  `Intl` wrappers (`I1`), and a standalone Zig + `libuv` + `libChakraNodeApi`
-  runtime host (`H1`, strictly external over `JsRT` + `NodeApiHostApi.h` so
-  Phase 1–3 engine boundaries remain untouched).
+- **Modern ES2025 + ES2026 + Multi-Tier JIT + WASM:** `99.57%` certified ES2025
+  (`80,195/80,544`) and `88.97%` broad (`82,866/93,141`) on macOS ARM64, 3-tier
+  x64/ARM64 JIT with concurrent GC, and `382/382` P1 WASM via `check-wasm` /
+  `check-wasm-jit` (covering **MVP + sign-extension + nontrapping conversions
+  only** per `test/wasm-arm64-manifest.json`; multi-value is off by default via
+  `-WasmMultiValue` in P3, SIMD is experimental off by default via `-WasmSimd`
+  with `test/wasm.simd` `14/14` interp + JIT in P3 after Wave 3 `J-1`/`J-2`
+  fixes, and **bulk-memory `0xFC 0x0A`/`0x0B` is not implemented**).
+- **Phase-4 tracks (`G0` → `Q1`–`Q3` → `I1`/`I2` → `H1`):** `G0` completed on
+  `modernize/baseline` and `Q1.1`–`Q3`/`I1`/`I2`/`P1`/`C3.1` completed on
+  `modernize/phase4` ([vision-and-roadmap.md](vision-and-roadmap.md));
+  `G0-phase4` Linux, `B6` Windows, `I3` Intl, and the standalone Zig + `libuv`
+  + `libChakraNodeApi` host (`H1`, strictly external over `JsRT` +
+  `NodeApiHostApi.h`) are tracked in [vision-and-roadmap.md](vision-and-roadmap.md)
+  and [open-cards.md](open-cards.md).
 
 ### 0.1 Phase-3 JsRT Additive API Versioning Contract
 
@@ -239,9 +192,11 @@ obtained configuration through CMake before replay; B1/B2 made Zig own that
 work, and the Mac ARM64 `jit` profile now compiles and runs the Backend
 (merged 2026-10-31; [arm64-macos-jit.md](arm64-macos-jit.md)).
 Windows, other CPUs, LTO and a hermetic dependency package remain
-unproved; Linux x64 JIT behavior was proved natively on the proof host
-(2026-11-09/10, see Status above), with the post-D1–D4 native handoff
-still owed. The number of diagnostic failures is neither the number of bugs nor an
+unproved at this milestone's verification floor (`B6` Windows x64 `zig build`
+is now wired on `modernize/phase4`, awaiting native certification); Linux x64
+JIT behavior was proved natively on the proof host (`2026-11-09/10`, and `G0`
+baseline completed at `1bf42d1f6`), with Phase-4 `G0-phase4` revalidation
+queued ([linux-handoff.md](linux-handoff.md) §0A). The number of diagnostic failures is neither the number of bugs nor an
 effort estimate: tags overlap, negative tests can pass for unsupported syntax, and
 the corpus contains later proposals (including Temporal).
 
@@ -703,7 +658,7 @@ workstreams above, WeakRef/FinalizationRegistry and weak-collection symbol keys.
 Eval-variable redeclaration is a semantic triage item, not a name-search absence
 claim. Separately expand Intl (RelativeTimeFormat, ListFormat, DisplayNames,
 Locale, Segmenter, DurationFormat) and decide maintained ICU acquisition/versioning;
-separately stabilize WASM multi-value, SIMD and threads, then assess further proposals.
+separately stabilize WASM multi-value (`-WasmMultiValue`, P3), SIMD (`-WasmSimd`, experimental P3) and threads (P3), implement bulk-memory (`0xFC 0x0A`/`0x0B`), then assess further proposals.
 
 **P2 — Longer-range architecture:** ARM64 JIT on further platforms (macOS
 landed 2026-10-31; Linux is B4-adjacent), JIT coverage ports for the
@@ -718,7 +673,7 @@ land; improve embedding samples and host ergonomics; refresh old links/images/to
 floors alongside their relevant build milestone. A dated supported package can
 ship at B5, well before C4.
 
-Decorators remain Stage 2.7 and explicit resource management/Temporal are later
+Decorators remain Stage 2.7 and Explicit Resource Management (since completed in `C3.1`, `947/0`) / Temporal are later
 edition work at verification time. They are tracked stretch items. `queueMicrotask`
 is a host-job-queue decision tied to the embedder's promise/FIFO contract
 (`ChakraCommon.h:757-768`), separate from ECMA-262 edition coverage.
@@ -761,53 +716,42 @@ Decision/rollback points:
 - [x] B2: Clean source-only Mac `zig build` / `zig build check`, 1959/0,
   bytecode/shared native/metadata/API gates.
 - [x] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
-  scoped default rollout. (*CONDITIONAL on the first green post-merge
-  Actions run; recipe validated by lint + literal local simulation.)
+  scoped default rollout. (Hosted Zig CI `.github/workflows/zig-macos.yml` is
+  live on `master` and `modernize/**`; Waves 1–4 remediated `B-15..B-18` and
+  `B-4` matrix gaps.)
 - [x] ARM64 macOS JIT profile (out-of-band worktree port, not a lettered
   milestone): rebased onto `aa42bb4f1`, merged 2026-10-31 (`9004b3ed7`);
-  `zig build -Dprofile=jit check` green, interpreted/dynapogo failing only
-  on the asm.js/WASM Mac gap, no-JIT gates unchanged. Coverage limits and
-  remaining JIT ports are recorded in [arm64-macos-jit.md](arm64-macos-jit.md).
-- [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
-  scoped Linux rollout. Native behavior proof and certified baseline are
-  recorded ([b4-linux-run.md](b4-linux-run.md)), and Stage 2/3 (`9d8d1817a`,
-  `c24266598`) parameterized `tools/build/linux.zig` (`-Dglibc`, `-Dicu-*`,
-  `-Dprofile=test|debug-static|release-shared`, `-Djit=true|false`), wired the
-  Linux Node-API stack, added `tools/linux-gate-tests.zig` (7/7 PASS), and
-  added `.github/workflows/zig-linux.yml`; the box stays unchecked pending
-  native execution of the post-D1–D4 + Stage 2/3 Linux bring-up checklist
-  (below and [b4-d1-d4.md](b4-d1-d4.md) §5) and first green hosted-CI run.
-  The merged Mac ARM64 JIT above is not B4 evidence.
-- [ ] B5: Controlled dependency/artifact package and clean-machine floor
-  testing. The serialized-bytecode GUID rotation is done
-  (§2.2 B5, [b5-guid-rotation.md](b5-guid-rotation.md)).
-- [ ] B6: Windows feasibility, then declared-profile parity; further expansions
-  approved individually.
-- [ ] Z1: One useful C-ABI integration, **if selected**; further replacements
-  decided independently.
-- [x] C1: Edition policy, host/negative-phase qualification and root-cause shortlist.
-  (*CONDITIONAL on explicit host-reported negative phase before any full
-  result is certified; policy, triage and shortlist are recorded in
-  [c1-triage.md](c1-triage.md), qualification limits in its §3.)
-- [ ] C2/C3: Feature-specific receipts and partial releases; required work remains
-  tracked until C4, optional ecosystem scope has separate gates. The residual
-  obligation is now a consolidated register: every card filed across the
-  receipts, re-verified 2026-11-05 with status and owner lane, lives in
-  [open-cards.md](open-cards.md).
-- [ ] C4: Published qualified ES2025 result on the claimed default configurations.
-  (*BLOCKED-with-certified-baseline*: certified 2026-11-02 (`ba796f74f`),
-  refreshed 2026-11-05 (`4e9f95da7`), and **refreshed 2026-11-16 (`c24266598`,
-  `zig-out/bin/ch`)** after `7412beb56` (`ESSharedArrayBuffer=true`), B4
-  D1–D4, A1–A12/JITREG, and Stage 2/3 — controls `25/25`, broad
-  `79,569/13,572` of `93,141` (`85.43%`, `-1,170` failures), edition-selected
-  **78,731/1,813 of 80,544 (97.75%)** (down `-1,136` failures from
-  `77,595/2,949` = `96.34%`, `0` feature regressions), `902` skips, `8,751`
-  negatives, gates **2063/0 test / 2115/0 debug-static / 382/382 WASM P1**
-  green. `ESSharedArrayBuffer` is now **default-on**; only `ES6RegExSymbols`
-  and `ES6RegExPrototypeProperties` stay `false` intentionally per the
-  Stage 2 empirical audit (`Lower.cpp` fast-paths + `5` legacy failures) —
-  [c4-gate.md](c4-gate.md), [c4-manifest.md](c4-manifest.md),
-  [c4-run-evidence.md](c4-run-evidence.md), [c4-refresh.md](c4-refresh.md).*)
+  `zig build -Dprofile=jit check` green (`check-fulljit` `643/0`, `check-wasm`
+  P1 `382/382` after Wave 3). Coverage notes in
+  [arm64-macos-jit.md](arm64-macos-jit.md) and [open-cards.md](open-cards.md).
+- [x] B4: Linux native baseline/pilot (`2026-11-09/10`, [b4-linux-run.md](b4-linux-run.md))
+  and `G0` baseline Linux x64 revalidation completed (`1bf42d1f6`, merged into
+  `modernize/phase4`); Phase-4 `G0-phase4` revalidation on updated
+  `modernize/phase4` is queued in [linux-handoff.md](linux-handoff.md) §0A.
+- [x] B5: Controlled dependency/artifact package on macOS ARM64
+  (`check-package`, Wave 2 bundled ICU + prefix isolation `8c0528d1c`,
+  serialized-bytecode GUID rotation [b5-guid-rotation.md](b5-guid-rotation.md));
+  Linux/Windows clean-machine packaging runs queued.
+- [ ] B6: Windows x64 `zig build` wired (`tools/build/{windows,tables_windows}.zig`,
+  Node-API v10 `161` exports, PE32+ gates, `.github/workflows/zig-windows.yml`);
+  awaiting native Windows certification ([windows-handoff.md](windows-handoff.md)).
+- [x] Z1: Production Zig `0.17.0` C-ABI SIMD codec integrated and tested in
+  `Q1.3` (`lib/ZigCodec/u8a_codec.zig`, [z1-u8a-codec.md](z1-u8a-codec.md)).
+- [x] C1: Edition policy, host/negative-phase qualification (`-NegativePhaseReport`
+  host-reported phase landed) and root-cause shortlist
+  ([c1-triage.md](c1-triage.md), [c1-negative-phase.md](c1-negative-phase.md)).
+- [ ] C2/C3: C2 batches (`ESBigInt`, `ESSharedArrayBuffer`, `ES6RegExSymbols`,
+  `ES6RegExPrototypeProperties` all default-on) and `C3.1` Explicit Resource
+  Management (`947/0`) completed on macOS ARM64; `Temporal` and WASM 2.0
+  remain separate tracks. Consolidated live register: [open-cards.md](open-cards.md).
+- [ ] C4: Latest certified macOS ARM64 ES2025 result (`Q3`): **`99.57%`**
+  edition-selected (**`80,195/80,544`**) and **`88.97%`** broad
+  (**`82,866/93,141`**), with `ES6RegExSymbols` and
+  `ES6RegExPrototypeProperties` default-on (`true` in
+  `lib/Common/ConfigFlagsList.h:689-700`); Linux/Windows Phase-4 re-verify
+  queued ([open-cards.md](open-cards.md)). *(Historical 2026-11-16 snapshot
+  `refresh-2026-11-16` at `c24266598` stood at `97.75%` / `78,731` of `80,544`
+  before Tier 2 enabled both RegExp flags and `Q1.2`–`Q3` landed.)*
 
 **Stage 2/3 hardening + architectural review (2026-11-16, `c24266598`).**
 Following the prior 2026-11-08 swarm review, Stage 2/3 closed all high-priority
@@ -826,20 +770,20 @@ link cleanly against shared libs without `libChakraCoreStatic.a`),
 relocation to `doc/evidence/gc-async-continuation/`. Full synthesis in
 [architecture-and-readiness-review.md](architecture-and-readiness-review.md).
 
-**Restart point (2026-11-16, `c24266598`) — Mac profiles & Stage 3B
-certified baseline complete.** Closing state: **2063/0 test**, **2115/0
+**Historical Restart point (2026-11-16, `c24266598` — superseded by Tier 2 default-on RegExp flags, `G0` `1bf42d1f6`, `Q1.2`–`Q3` `99.57%`, and Waves 1–5 in [open-cards.md](open-cards.md)).** At that `c24266598` checkpoint: **2063/0 test**, **2115/0
 debug-static** (`8/8` static native suites), `release-shared` green,
 `jit` + `wasm` (`check-jit` + **382/382 P1** `check-wasm`), Node-API (`18`
 probes + `run_probe.sh` + `REPEATS=5` stress + `46/23/0` & `52/61/6`), and
-**C4 certified baseline refreshed (`refresh-2026-11-16`)**: edition-selected
+**C4 baseline refresh (`refresh-2026-11-16`)**: edition-selected
 **78,731/1,813 of 80,544 (97.75%)** — broad `79,569/13,572` (`85.43%`) —
 (`disabled-flag` `636` down `-1,098`, `engine-defect-on-existing` `960` down
 `-50`, `required-feature-missing` `200` down `-2`, `host` `17` up `+14`;
-[c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md)). The verdict
-stays **BLOCKED-with-certified-baseline**: `1,813` edition failures and
-two RegExp substrate flags remain. What remains on Mac is targeted RegExp
-fast-path work and decision/card-owned tail work tracked in
-[open-cards.md](open-cards.md).
+[c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md)). At that
+2026-11-16 snapshot, two RegExp substrate flags remained off; Tier 2
+subsequently enabled both `ES6RegExSymbols` and
+`ES6RegExPrototypeProperties` by default (`ConfigFlagsList.h:689-700`) and
+`Q1.2`–`Q3` + Waves 1–5 advanced the certified macOS ARM64 baseline to
+`99.57%` (`80,195/80,544`), documented in [open-cards.md](open-cards.md).
 [c2-jit-finally-globopt.md](c2-jit-finally-globopt.md),
 [c2-jit-eval-fidelity.md](c2-jit-eval-fidelity.md),
 [c2-jit-private-opcodes.md](c2-jit-private-opcodes.md),
@@ -875,67 +819,25 @@ integer radix) and D4 (deferred WASM validation) are implemented and
 reviewed; the Linux native run, the Linux pin re-record, and the full
 certified test262 refresh remain ([b4-d1-d4.md](b4-d1-d4.md) §5).
 
-**Open engineering / decision blockers:**
+**Reconciliation of former 2026-11-16 blockers (current status in [open-cards.md](open-cards.md)):**
 
-- **Two remaining RegExp substrate flags (`ES6RegExSymbols` and
-  `ES6RegExPrototypeProperties`) — `712` mapped edition failures**
-  (`558` `disabled-flag` + `154` `built-ins/RegExp` `rfm`). **`ESSharedArrayBuffer`
-  is now default-on (`7412beb56`)**, leaving only a `94`-scenario flag-on
-  tail (`78` policy-mapped `disabled-flag` + `16` `host` `Atomics`
-  timeouts/kills). Meanwhile, an empirical Stage 2 audit intentionally kept
-  both RegExp flags **`false`** because of concrete JIT and legacy blockers:
-  `GenerateFastReplace` (`Lower.cpp:20779`) and
-  `GenerateFastInlineStringSplitMatch` (`Lower.cpp:20859`) fast-path
-  `VtableJavascriptRegExp` without delegating to `Symbol.replace`/
-  `Symbol.split`, plus `5` interpreted / `5` dynapogo legacy failures
-  (`Regex/regexSplitOptimization.js`, `Regex/crossContext.js` x2,
-  `es6/proto_basic.js`, `es6/RegExpApisTestWithStickyFlag.js` #16). Each flip
-  owes targeted fixes plus its
-  recorded B4/JIT re-checks.
-- **B3's CI clause still needs a push** — the Actions recipe is
-  validated (lint + literal local simulation) but the first green
-  post-merge run has not happened.
-- **Linux hardware/environment for B4 (synced bring-up checklist):**
-  1. Pre-flight on native `x86_64-linux-gnu` (`zig 0.17.0` from `mise.toml`,
-     `libicu-dev`, `binutils`, `clang`, `make`, `python3`; defaults Ubuntu 24.04
-     `-Dglibc=2.39 -Dicu-major=74`, or override `-Dglibc`/`-Dicu-*` for the host):
-     run StyleChecks (`check_style_portable.py --self-test` + all 4 `.sh` scripts
-     vs `origin/master`), `check_metadata_linux.py --self-test`, `zig test
-     tools/linux-gate-tests.zig` (7/7), and `test_build_tools.py` (81/81).
-  2. Default `test` profile (`mise exec -- zig build && zig build check`):
-     verify `95/95` PAL checks, `check-selftest`, `check-smoke`, `check-jit`,
-     `check-native`, `check-metadata` (237 `.so` exports / 669 archive members),
-     and `verify-bytecode`; run `AsyncSuspendedResume.js` and
-     `AsyncSuspendedDetach.js` (20–30x) + `test/wasm/deferred-invalid-body.js` +
-     `WasmSpec/jsapi`, re-verify A3 helper arg-order on x64, and update
-     `RECORDED_BASELINE` in `tools/build/check_regression_linux.py` from
-     `2841/0` & `2305/0` only after green native runs; diff regenerated
-     `linux_exports_{so,ch}.txt` against legacy CMake artifacts if parity is
-     claimed (`check_metadata_linux.py:31-46`).
-  3. Parameterized variant matrix (`.github/workflows/zig-linux.yml`
-     `zig-variants`): `-Djit=false` (`check-smoke check-metadata verify-bytecode
-     check-native`), `-Dprofile=release-shared` (`check-smoke check-metadata
-     check-jit check-native`), and `-Dprofile=debug-static -Doptimize=debug`
-     (`check-smoke check-metadata verify-bytecode`, static `check-native`, and
-     `runtests.py --debug --variants=interpreted test/wasm`).
-  4. Node-API Linux stack (`zig build libChakraNodeApi ch-nodeapi check-nodeapi`):
-     verify `150` ELF exports, run `tools/nodeapi/run_probe.sh` + all `18`
-     `test/nodeapi/probes/run_*.sh` (`SKIP_BUILD=1`), `REPEATS=5
-     test/nodeapi/stress/run_stress.sh`, `run_matrix.py --suite all --host
-     ch-nodeapi`, and `run_node_addon_api_matrix.py --hosts ch-nodeapi` (0
-     unexpected failures outside the 6 `test/object/*` V8 message diffs).
-  5. Certified Linux Test262 refresh (`tools/test262/refresh_baseline.py
-     --binary "$PWD/zig-out/bin/ch" --jobs 8`) + first green hosted GitHub
-     Actions runs (`zig-linux.yml` and `zig-macos.yml`).
-- **Windows (B6)** — feasibility slice when chosen.
+- **RegExp substrate flags (`ES6RegExSymbols` and `ES6RegExPrototypeProperties`):**
+  Subsequently flipped **default-on** (`true` in
+  `lib/Common/ConfigFlagsList.h:689-700`) with `Lower.cpp` fast-path guards
+  in Tier 2, eliminating the `712`-scenario `disabled-flag` bucket (`99.57%`
+  ES2025 after `Q3`: `80,195` passed / `349` failed of `80,544`).
+- **Hosted GitHub Actions CI:** `.github/workflows/zig-{macos,linux,windows}.yml`
+  are live on `master` and `modernize/**`, and Waves 1–4 remediated
+  `B-15..B-18` and `B-4` matrix gaps (`check-fulljit`, `check-gcstress`,
+  `check-sanitize` wired).
+- **Linux (`G0-phase4`) and Windows (`B6`) execution:** Baseline Linux `G0`
+  completed at `1bf42d1f6` ([b4-linux-run.md](b4-linux-run.md) §12); current
+  Phase-4 `G0-phase4` Linux and `B6` Windows runbooks live in
+  [linux-handoff.md](linux-handoff.md) §0A and
+  [windows-handoff.md](windows-handoff.md), and the live open/deferred register
+  lives in [open-cards.md](open-cards.md).
 
-After `refresh-2026-11-16`, the re-ranked path to green ([c4-gate.md](c4-gate.md) §3)
-is: clear the empirical RegExp fast-path/5-test blockers and flip
-`ES6RegExSymbols` + `ES6RegExPrototypeProperties` (`1,813 -> ~1,101`), then
-work the `engine-defect-on-existing` register (`960`, down `-50` since
-`2026-11-05`), remaining `required-feature-missing` beyond RegExp (`46`),
-and `host` (`17`: `1` labeled-import parser gap + `16` cross-agent
-`Atomics` hang/kill cases).
+### Historical chronological log (Oct–Nov 2026 checkpoints; superseded at HEAD by [open-cards.md](open-cards.md))
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
 **2038/0 test** and **2090/0 debug-static** gates (re-verified after every
@@ -1397,13 +1299,12 @@ checkpoint above), the next batch candidates are the S12
 import-attributes cluster (pending its host-contract decision),
 Float16Array (S8 remainder), or the S1 tail residuals.
 
-**Next platform gate:** B4 native execution. Provision a native x64 Linux
-runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),
-record the legacy then Zig interpreted/dynapogo counts natively, and judge
-behavior/ABI parity only from that native execution — not from emulation
-or cross-linking from Mac. The merged Mac ARM64 JIT does not substitute
-for this gate; it only retires the "JIT untested anywhere" caveat for the
-Mac profile.
+**Historical B4 milestone note (completed):** B4 native execution completed
+on the Linux proof host on 2026-11-09/10 ([b4-linux-run.md](b4-linux-run.md))
+and `G0` baseline Linux revalidation completed at `1bf42d1f6` (merged into
+`modernize/phase4`). Current Phase-4 Linux (`G0-phase4`) and Windows (`B6`)
+validation tracking lives in [linux-handoff.md](linux-handoff.md) §0A,
+[windows-handoff.md](windows-handoff.md), and [open-cards.md](open-cards.md).
 
 ## Appendix — Evidence and deferred research
 
