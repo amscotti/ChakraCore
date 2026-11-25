@@ -1785,9 +1785,24 @@ pub fn build(b: *std.Build) void {
     // Hermetic (no install dependency, no profile dependence), so every
     // profile registers it. Run `zig build check-selftest`.
     const selftest_top = b.step("check-selftest", "Negative controls for every check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py", "check_wasm_p1.py", "check_gcstress.py", "check_fulljit.py", "check_sanitize.py" }) |script| {
+    for ([_][]const u8{
+        "tools/build/check_regression.py",
+        "tools/build/check_native.py",
+        "tools/build/check_smoke.py",
+        "tools/build/check_metadata.py",
+        "tools/build/check_regression_linux.py",
+        "tools/build/check_smoke_linux.py",
+        "tools/build/check_metadata_linux.py",
+        "tools/build/check_nodeapi.py",
+        "tools/build/gen_nodeapi_exports.py",
+        "tools/build/check_wasm_p1.py",
+        "tools/build/check_gcstress.py",
+        "tools/build/check_fulljit.py",
+        "tools/build/check_sanitize.py",
+        "tools/bench/check_perf_smoke.py",
+    }) |script| {
         const st = b.addSystemCommand(&.{python});
-        st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
+        st.addFileArg(b.path(script));
         st.addArg("--self-test");
         st.stdio = .inherit;
         selftest_top.dependOn(&st.step);
@@ -1796,6 +1811,10 @@ pub fn build(b: *std.Build) void {
     tools_test.addFileArg(b.path("tools/build/test_build_tools.py"));
     tools_test.stdio = .inherit;
     selftest_top.dependOn(&tools_test.step);
+    const bench_tools_test = b.addSystemCommand(&.{python});
+    bench_tools_test.addFileArg(b.path("tools/bench/test_bench_tools.py"));
+    bench_tools_test.stdio = .inherit;
+    selftest_top.dependOn(&bench_tools_test.step);
     // Native-owner example tests (doc/memory-management.md section 5):
     // hermetic, host-only, no engine build required.
     const owned_bytes_tests = b.addTest(.{
@@ -1882,6 +1901,23 @@ pub fn build(b: *std.Build) void {
         jit_fulljit_step = &fj_step.step;
     } else {
         registerFailStep(b, python, "check-fulljit", "Not applicable without -Dprofile=jit|jit-debug", "check-fulljit requires -Dprofile=jit or -Dprofile=jit-debug (JIT must be enabled with debug/test flags)");
+    }
+
+    // Opt-in same-host interleaved performance smoke gate (T-2 / PE-7): requires a JIT profile.
+    if (profile.isJit()) {
+        const perf_step = b.addSystemCommand(&.{python});
+        perf_step.addFileArg(b.path("tools/bench/check_perf_smoke.py"));
+        perf_step.addArg("--binary");
+        perf_step.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
+        perf_step.addArg("--iterations");
+        perf_step.addArg("3");
+        perf_step.addFileInput(ch.bin);
+        perf_step.step.dependOn(&copy_out.?.step);
+        perf_step.stdio = .inherit;
+        const perf_top = b.step("check-perf-smoke", "Run same-host interleaved A/B performance smoke gate (-Dprofile=jit|jit-debug|release-jit; not part of the default build or check)");
+        perf_top.dependOn(&perf_step.step);
+    } else {
+        registerFailStep(b, python, "check-perf-smoke", "Not applicable without -Dprofile=jit|jit-debug|release-jit", "check-perf-smoke requires a JIT profile (-Dprofile=jit, -Dprofile=jit-debug, or -Dprofile=release-jit)");
     }
 
     // Sanitizer verification gate: requires -Dsanitize=address|undefined.

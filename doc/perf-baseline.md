@@ -252,3 +252,94 @@ Notable deltas & notes:
 - `Octane/navier-stokes.js` jumped `3262.0 -> 31990.0` (**`9.81x`**); `Octane/crypto.js` jumped `2654.0 -> 24830.0` (**`9.36x`**); `SunSpider/crypto-aes.js` dropped `23.0 -> 8.0 ms` (**`2.88x`**); `Octane/splay.js` `22090 -> 31295` (**`1.42x`**); `Octane/pdfjs.js` `29867 -> 35402` (**`1.19x`**); `Kraken/stanford-crypto-pbkdf2.js` `217 -> 147 ms` (**`1.48x`**).
 - Two benchmarks scored lower than the Nov 16 `4b2077687` baseline: `Octane/regexp.js` (`6903 -> 5513` 3-iter / `5551` 5-iter, `3.78x` vs interp, `28` bailout/rejit trace lines total) and `Kraken/stanford-crypto-ccm.js` (`169 -> 205` ms 3-iter / `210` ms 5-iter, `1.98x` vs interp; runs in `61.0 ms` with `-ESBigInt-` when `LossyIntTypeSpec` is not inhibited after `AggressiveIntTypeSpec`+`FloatTypeSpec` disablement under `ESBigInt`).
 
+---
+
+## Wave 4 Addendum (2026-11-24, `modernize/phase4`)
+
+Wave 4 recovered JIT integer/lossy specialization with default `ESBigInt` enabled, implemented ARM64 `AtomTag_Int` fast power-of-two division (`J-8`, `PE-1`, `PE-2`, `J-5`), and added the same-host interleaved A/B smoke gate (`T-2` / `PE-7`):
+
+- **`J-8` (postfix `x++` / `x--` expression specialization):** Modeled `Conv_Numeric`, `Incr_Num_A`, and `Decr_Num_A` alongside `Conv_Num` / `Incr_A` / `Decr_A` in `lib/Backend/GlobOpt.cpp`, `GlobOptIntBounds.cpp`, and `IR.cpp`, preserving BigInt semantics while eliminating the `Conv_Numeric` penalty on expression-used `j++` / `j--`.
+- **`PE-1` / `PE-2` (lossy int32 specialization & BigInt-safe slow path):** Decoupled `CanLossyIntTypeSpecForInstr` / `DoLossyIntTypeSpec` from `AggressiveIntTypeSpec` / `FloatTypeSpec`, updated bitwise/`Not_A`/`Incr*`/`Decr*` `ValueNumberDst` guards to `IsPrimitive()` / `IsLikelyNumber()`, removed forced `AggressiveInt` -> `Float` downgrades in `ToTypeSpecUse` and hoisting, and added a `TypeIds_BigInt` guard before `HelperConv_ToInt32_NoObjects` in `lib/Backend/Lower.cpp` (`LowerUnaryHelperMemWithBoolReference`).
+- **`J-5` (ARM64 `AtomTag_Int` `GenerateFastDivByPow2`):** Replaced the commented 31-bit stub in `lib/Backend/arm64/LowerMD.cpp` with a 64-bit `AtomTag_Int` fast path (`ASR` for exact multiples, `HelperOp_FinishOddDivByPow2*` for exact `.5` halves, early return for `src2Value == 1`).
+- **`T-2` / `PE-7` (`tools/bench/check_perf_smoke.py`):** Added an interleaved `A, B, A, B, ...` same-host performance smoke gate (wired as opt-in `zig build -Dprofile=jit check-perf-smoke`), unit/negative-control suite `tools/bench/test_bench_tools.py`, and `--flags` support in `tools/bench/run.py`.
+
+### Provenance (`modernize/phase4`, same host Apple M1 Max, `darwin/arm64`)
+
+| Build | Command | Binary SHA-256 (`ch`) | Shared library SHA-256 (`libChakraCore.dylib`) |
+|---|---|---|---|
+| `jit` (`-Dwasm=true`) | `mise exec -- zig build -Dprofile=jit -Dwasm=true` | `2cfa9f1e305494474323ac00ae3616a510e03ce9125660c490642ff45c2f1e5b` | `5b6c3ad7567108a76176da6372fab9a5177aae17998da97f727dcc872f1914da` |
+| `release-jit` (plain JS) | `mise exec -- zig build -Dprofile=release-jit` | `764ad24599882bb57e0687927dcdc730fc45acd6a0e52b4af3ecb5b26b93e6d2` | `960d7c23da4badc2056de2e3611a4896a074f34318c7d3d2f8732083741311ee` |
+
+### Interleaved `check_perf_smoke.py` A/B Receipts (3 iterations)
+
+1. **`out/jit/bin/ch` `-ESBigInt-` (A) vs default `ESBigInt` (B)** via `mise exec -- zig build -Dprofile=jit -Dwasm=true check-perf-smoke`:
+
+| Test | Kind | A (`ESBigInt-off`) | B (`default`) | B/A | Delta | Status |
+|---|---|---|---|---:|---:|---|
+| `Kraken/stanford-crypto-ccm.js` | time (ms) | `63.0 +/- 0.0` | `62.0 +/- 1.0` | `0.984x` | `-1.6%` | PASS |
+| `Kraken/stanford-crypto-aes.js` | time (ms) | `81.0 +/- 0.0` | `82.0 +/- 1.0` | `1.012x` | `+1.2%` | PASS |
+| `Kraken/audio-fft.js` | time (ms) | `83.0 +/- 1.0` | `84.0 +/- 2.0` | `1.012x` | `+1.2%` | PASS |
+| `Octane/crypto.js` | score | `34470.0 +/- 108.0` | `34553.0 +/- 163.0` | `1.002x` | `+0.2%` | PASS |
+| `Octane/richards.js` | score | `24740.0 +/- 21.0` | `24570.0 +/- 21.0` | `0.993x` | `-0.7%` | PASS |
+| `Octane/splay.js` | score | `31392.0 +/- 294.0` | `31252.0 +/- 116.0` | `0.996x` | `-0.4%` | PASS |
+| `Micro/postfix-incr.js` | time (ms) | `52.0 +/- 0.0` | `52.0 +/- 0.0` | `1.000x` | `+0.0%` | PASS |
+| `Micro/prefix-incr.js` | time (ms) | `51.0 +/- 0.0` | `52.0 +/- 0.0` | `1.020x` | `+2.0%` | PASS |
+
+- Micro `j++/++j` ratio: `A=1.02x`, `B=1.00x` (`8/8 PASS`, 15% tolerance).
+
+2. **`out/jit/bin/ch` (A) vs `out/release-jit/bin/ch` (B)** via `python3 tools/bench/check_perf_smoke.py --binary-a out/jit/bin/ch --binary-b out/release-jit/bin/ch --label-a jit --label-b release-jit --iterations 3`:
+
+| Test | Kind | A (`jit`) | B (`release-jit`) | B/A | Delta | Status |
+|---|---|---|---|---:|---:|---|
+| `Kraken/stanford-crypto-ccm.js` | time (ms) | `64.0 +/- 1.0` | `62.0 +/- 0.0` | `0.969x` | `-3.1%` | PASS |
+| `Kraken/stanford-crypto-aes.js` | time (ms) | `84.0 +/- 1.0` | `82.0 +/- 0.0` | `0.976x` | `-2.4%` | PASS |
+| `Kraken/audio-fft.js` | time (ms) | `85.0 +/- 0.0` | `85.0 +/- 0.0` | `1.000x` | `+0.0%` | PASS |
+| `Octane/crypto.js` | score | `34340.0 +/- 245.0` | `34211.0 +/- 126.0` | `0.996x` | `-0.4%` | PASS |
+| `Octane/richards.js` | score | `24017.0 +/- 149.0` | `24514.0 +/- 116.0` | `1.021x` | `+2.1%` | PASS |
+| `Octane/splay.js` | score | `31525.0 +/- 261.0` | `35074.0 +/- 130.0` | `1.113x` | `+11.3%` | PASS |
+| `Micro/postfix-incr.js` | time (ms) | `51.0 +/- 0.0` | `51.0 +/- 0.0` | `1.000x` | `+0.0%` | PASS |
+| `Micro/prefix-incr.js` | time (ms) | `54.0 +/- 0.0` | `53.0 +/- 0.0` | `0.981x` | `-1.9%` | PASS |
+
+- Micro `j++/++j` ratio: `A=0.94x`, `B=0.96x` (`8/8 PASS`, 15% tolerance).
+
+### 4-Suite `run.py --tier jit --iterations 3` Receipt (`jit` vs `release-jit` vs Post-P1)
+
+Both `out/jit/bin/ch` (`140.9 s` total run wall) and `out/release-jit/bin/ch` (`160.0 s` total run wall) passed `64/64` applicable tests (`Octane/zlib.js` excluded on `darwin/arm64`, `0` failures). Note `out/release-jit/bin/ch` was built without `-Dwasm=true` (`ENABLE_ASMJS` off), so `JetStream` C/C++ kernels run as plain JS there.
+
+| Suite | Metric (`n`) | Post-P1 `jit` (`head-jit`) | Wave 4 `jit` (`-Dwasm=true`) | Wave 4 `release-jit` (plain JS) | Wave 4 `jit` vs Post-P1 | `release-jit` vs Wave 4 `jit` |
+|---|---|---:|---:|---:|---:|---:|
+| `SunSpider` | sum ms (`26`) | `172.0` (`gm 5.30`) | **`170.0`** (`gm 5.25`) | **`166.0`** (`gm 5.20`) | `1.008x` gm | `1.011x` gm |
+| `Kraken` | sum ms (`14`) | `2081.0` (`gm 86.58`) | **`1948.0`** (`gm 80.46`) | **`1955.0`** (`gm 77.98`) | **`1.076x`** gm | `1.032x` gm |
+| `Octane` | score geomean (`14`) | `32382.13` | **`32590.89`** | **`33618.25`** | `1.006x` | **`1.032x`** |
+| `JetStream` | score geomean (`10`) | `346.45` | `341.22` | `243.42` (plain JS) | `0.985x` | `0.713x` (`ENABLE_ASMJS` off) |
+| **Non-JetStream** | geomean (`54` tests) | -- | -- | -- | **`1.0250x`** | **`1.0215x`** |
+| **Overall** | geomean (`64` tests) | -- | -- | -- | **`1.0186x`** | `0.9657x` |
+
+Key Wave 4 shifts:
+- `Kraken/stanford-crypto-ccm.js`: `205.0 ms` -> **`65.0 ms`** (`3.15x` faster in `jit`, `61.0 ms` in `release-jit`; `196` `BailOut` / `29` `Rejit` lines under `-trace:BailOut,ReJIT` vs `64 ms` execution).
+- `Octane/crypto.js`: `24830.0` -> **`34442.0`** (`1.39x` faster in `jit`, `34198.0` in `release-jit`).
+- `Kraken/imaging-desaturate.js`: `90.0 ms` -> **`77.0 ms`** (`1.17x` in `jit`, `76.0 ms` in `release-jit`); `SunSpider/crypto-sha1.js`: `5.0 -> 3.0 ms` (`1.67x`); `SunSpider/3d-raytrace.js`: `13.0 -> 9.0 ms` (`1.44x`).
+- `Octane/splay.js`: `30419.0` (`jit`) -> **`34670.0`** (`release-jit`, **`+14.0%`** from Release `-DNDEBUG`).
+
+### Using `tools/bench/check_perf_smoke.py`
+
+```sh
+# 1. Single-binary A/B (-ESBigInt- vs default on flaglist JIT builds; smoke invariants on Release):
+mise exec -- zig build -Dprofile=jit -Dwasm=true check-perf-smoke
+# or directly:
+python3 tools/bench/check_perf_smoke.py --binary out/jit/bin/ch --iterations 3
+
+# 2. Same-host interleaved A/B across two binaries (e.g. jit vs release-jit):
+python3 tools/bench/check_perf_smoke.py \
+    --binary-a out/jit/bin/ch --binary-b out/release-jit/bin/ch \
+    --label-a jit --label-b release-jit --iterations 3
+
+# 3. Advisory comparison against a recorded run.py JSON receipt (pass --strict-baseline to fail on regression):
+python3 tools/bench/check_perf_smoke.py --binary out/jit/bin/ch \
+    --baseline-json tools/bench/results/head-jit-darwin-arm64.json
+
+# 4. Self-test and unit suite (also wired into `zig build check-selftest`):
+python3 tools/bench/check_perf_smoke.py --self-test
+python3 tools/bench/test_bench_tools.py
+```
+

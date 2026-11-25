@@ -1674,4 +1674,19 @@
       <files>arm64_math_floor_ceil_negzero.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>wave4_bigint_postfix_incdec.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>wave4_bigint_lossy_bitwise.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>wave4_arm64_div_pow2.js</files>
+    </default>
+  </test>
 </regress-exe>
