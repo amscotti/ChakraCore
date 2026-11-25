@@ -297,6 +297,55 @@ namespace Js
         }
     }
 
+    // Ownership record (doc/memory-management.md section 3) for Detach vs DetachAndRelease:
+    //   Resource: HeapNew'd RefCountedBuffer wrapper and backing bytes (malloc or
+    //     FreeMemAlloc virtual block for JavascriptArrayBuffer, CoTaskMemAlloc for
+    //     ProjectionArrayBuffer, host-owned bytes for ExternalArrayBuffer /
+    //     JsrtExternalArrayBuffer or JsExternalizeArrayBuffer buffers).
+    //   Owner & transfer points:
+    //     - Detach() preserves ownership transfer: callers DetachAndGetState() and
+    //       WebAssemblyArrayBuffer::GrowMemory() capture this->bufferContent before
+    //       calling Detach(), which intentionally nulls this->bufferContent without
+    //       releasing it.
+    //     - DetachAndRelease() is used only by JsDetachArrayBuffer (non-transferring
+    //       neuter). Subclasses capture physical provenance (UsesVirtualAllocation(),
+    //       externalized flag, bufferContent) BEFORE Detach() zeroes lengths and
+    //       bufferContent. After Detach() reports external memory free once and
+    //       detaches all live TypedArray/DataView parents, DetachAndReleaseWith
+    //       decrements RefCountedBuffer and, on refCount == 0, frees owned backing
+    //       bytes (when !externalized) and HeapDeletes RefCountedBuffer.
+    //     - ExternalArrayBuffer / JsrtExternalArrayBuffer never free host bytes;
+    //       JsrtExternalArrayBuffer retains (finalizeCallback, callbackState) until
+    //       GC Finalize(isShutdown) (or Node-API claims its external record).
+    //   Thread/context & invalidation: runs on the bound script thread via
+    //     ContextAPINoScriptWrapper_NoRecord with no user JS callbacks; subsequent
+    //     Finalize(isShutdown) sees bufferContent == nullptr and skips release.
+    template <typename FreeFN>
+    void ArrayBuffer::DetachAndReleaseWith(FreeFN freeFunction, bool shouldFreeBuffer)
+    {
+        RefCountedBuffer* content = this->bufferContent;
+        Detach();
+
+        if (content != nullptr)
+        {
+            long refCount = content->Release();
+            if (refCount == 0)
+            {
+                BYTE* buffer = content->GetBuffer();
+                if (shouldFreeBuffer && buffer != nullptr)
+                {
+                    freeFunction(buffer);
+                }
+                HeapDelete(content);
+            }
+        }
+    }
+
+    void ArrayBuffer::DetachAndRelease()
+    {
+        DetachAndReleaseWith(NoOpFree, false);
+    }
+
     ArrayBufferDetachedStateBase* ArrayBuffer::DetachAndGetState(bool queueForDelayFree/* = true*/)
     {
         // Save the state before detaching. The delayed-free scan must cover the
@@ -1584,6 +1633,16 @@ namespace Js
         /* See JavascriptArrayBuffer::Finalize */
     }
 
+    void JavascriptArrayBuffer::DetachAndRelease()
+    {
+        Assert(!this->IsWebAssemblyArrayBuffer());
+        // Capture physical allocation provenance before Detach() clears
+        // allocatedByteLength (which UsesVirtualAllocation() inspects).
+        FreeFn freeFn = GetArrayBufferFreeFn();
+        const bool shouldFreeBuffer = !this->externalized;
+        DetachAndReleaseWith(freeFn, shouldFreeBuffer);
+    }
+
 #if ENABLE_TTD
     TTD::NSSnapObjects::SnapObjectType JavascriptArrayBuffer::GetSnapTag_TTD() const
     {
@@ -1877,6 +1936,11 @@ namespace Js
     void ProjectionArrayBuffer::Dispose(bool isShutdown)
     {
         /* See ProjectionArrayBuffer::Finalize */
+    }
+
+    void ProjectionArrayBuffer::DetachAndRelease()
+    {
+        DetachAndReleaseWith(CoTaskMemFree, !this->externalized);
     }
 
     ArrayBufferContentForDelayedFreeBase* ProjectionArrayBuffer::CopyBufferContentForDelayedFree(RefCountedBuffer * content, DECLSPEC_GUARD_OVERFLOW uint32 bufferLength)

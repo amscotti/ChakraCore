@@ -9632,10 +9632,11 @@ LowererMD::EmitSignExtend(IR::Instr * instr)
     IR::Opnd* src2 = instr->GetSrc2();
     Assert(dst && src1 && src2);
     Assert(src2->GetSize() < dst->GetSize());
-    IRType fromType = src2->GetType();
     int32 fromBits = (int32)(src2->GetSize() * MachBits); // 8,16,32
-    // ARM64: use SBFX 0, fromBits for sign extension
-    IR::Instr *sbfx = IR::Instr::New(Js::OpCode::SBFX, dst, src1->UseWithNewType(fromType, m_func),
+    IRType opndType = dst->IsInt64() ? TyInt64 : TyInt32;
+    // ARM64: use SBFX 0, fromBits for sign extension; keep src1 register width
+    // equal to dst so LegalizeRegOpnd / EncoderMD::EmitBitfield see matching sizes.
+    IR::Instr *sbfx = IR::Instr::New(Js::OpCode::SBFX, dst, src1->UseWithNewType(opndType, m_func),
         IR::IntConstOpnd::New(BITFIELD(0, fromBits), TyMachReg, m_func, true), m_func);
     instr->InsertBefore(sbfx);
     LegalizeMD::LegalizeInstr(sbfx);

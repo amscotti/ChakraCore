@@ -88,24 +88,32 @@ else
     EXTENSION="so"
 fi
 
-RUN "test-shared-basic"
-
-if [[ -f "test-timer-cancel.cpp" && -f "test-shared-basic/Makefile" ]] && ! grep -q "# IGNORE_THIS_TEST" "test-shared-basic/Makefile"; then
-    TEST_PATH="test-timer-cancel"
-    echo "Testing ${TEST_PATH}"
-    printf 'include Makefile\ntimer-cancel:\n\t$(CC) ../test-timer-cancel.cpp $(CFLAGS) -std=c++11 $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(filter-out -o sample.o,$(LIBS)) -o test-timer-cancel.o\n' > test-shared-basic/Makefile.timer-cancel
-    SAFE_RUN "cd test-shared-basic && make -f Makefile.timer-cancel CC=\"${CC}\" CXX=\"${CXX}\" timer-cancel"
-    RES=$(cd test-shared-basic && ./test-timer-cancel.o)
-    timer_status=$?
-    if [[ $timer_status != 0 ]]; then
-        echo "${TEST_PATH} FAILED"
-        echo "test-timer-cancel.o exited ${timer_status}"
-        echo -e "$RES"
-        exit 1
+RUN_SHARED_SINGLE_CPP () {
+    local SRC_FILE=$1
+    TEST_PATH=$2
+    if [[ -f "${SRC_FILE}" && -f "test-shared-basic/Makefile" ]] && ! grep -q "# IGNORE_THIS_TEST" "test-shared-basic/Makefile"; then
+        echo "Testing ${TEST_PATH}"
+        local OBJ_FILE="${TEST_PATH}.o"
+        local MK_FILE="Makefile.${TEST_PATH}"
+        printf "include Makefile\n%s:\n\t\$(CC) ../%s \$(CFLAGS) -std=c++11 \$(FORCE_STARTS) \$(LDIR) \$(FORCE_ENDS) \$(filter-out -o sample.o,\$(LIBS)) -o %s\n" \
+            "${TEST_PATH}" "${SRC_FILE}" "${OBJ_FILE}" > "test-shared-basic/${MK_FILE}"
+        SAFE_RUN "cd test-shared-basic && make -f ${MK_FILE} CC=\"${CC}\" CXX=\"${CXX}\" ${TEST_PATH}"
+        RES=$(cd test-shared-basic && ./${OBJ_FILE})
+        local cpp_status=$?
+        if [[ $cpp_status != 0 ]]; then
+            echo "${TEST_PATH} FAILED"
+            echo "${OBJ_FILE} exited ${cpp_status}"
+            echo -e "$RES"
+            exit 1
+        fi
+        TEST "PASS"
+        SAFE_RUN "cd test-shared-basic && rm -rf ./${OBJ_FILE} ./${MK_FILE}"
     fi
-    TEST "PASS"
-    SAFE_RUN "cd test-shared-basic && rm -rf ./test-timer-cancel.o ./Makefile.timer-cancel"
-fi
+}
+
+RUN "test-shared-basic"
+RUN_SHARED_SINGLE_CPP "test-timer-cancel.cpp" "test-timer-cancel"
+RUN_SHARED_SINGLE_CPP "test-detach-arraybuffer.cpp" "test-detach-arraybuffer"
 
 # test python
 #RUN_CMD "test-python" "python helloWorld.py ${BUILD_TYPE} ${CH_DIR%/*}/libChakraCore.${EXTENSION}"

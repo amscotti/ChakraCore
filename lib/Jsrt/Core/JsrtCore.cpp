@@ -627,12 +627,14 @@ JsDetachArrayBuffer(
         }
 
         Js::ArrayBuffer* arrayBufferObject = Js::VarTo<Js::ArrayBuffer>(arrayBuffer);
-        if (arrayBufferObject->IsImmutable() || arrayBufferObject->IsDetached())
+        if (arrayBufferObject->IsImmutable() ||
+            arrayBufferObject->IsDetached() ||
+            arrayBufferObject->IsWebAssemblyArrayBuffer())
         {
             return JsErrorInvalidArgument;
         }
 
-        arrayBufferObject->Detach();
+        arrayBufferObject->DetachAndRelease();
         return JsNoError;
     });
 }

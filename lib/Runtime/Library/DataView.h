@@ -9,6 +9,40 @@
 
 namespace Js
 {
+    namespace DataViewDetail
+    {
+        template<size_t Size>
+        struct UnsignedStorage;
+
+        template<>
+        struct UnsignedStorage<1>
+        {
+            using Type = uint8;
+            static Type Swap(Type value) { return value; }
+        };
+
+        template<>
+        struct UnsignedStorage<2>
+        {
+            using Type = uint16;
+            static Type Swap(Type value) { return RtlUshortByteSwap(value); }
+        };
+
+        template<>
+        struct UnsignedStorage<4>
+        {
+            using Type = uint32;
+            static Type Swap(Type value) { return RtlUlongByteSwap(value); }
+        };
+
+        template<>
+        struct UnsignedStorage<8>
+        {
+            using Type = uint64;
+            static Type Swap(Type value) { return RtlUlonglongByteSwap(value); }
+        };
+    }
+
     class DataView : public ArrayBufferParent
     {
         friend ArrayBuffer;
@@ -94,19 +128,6 @@ namespace Js
             return nullptr;
         }
     private:
-        template<typename TypeName>
-        void SwapRoutine(TypeName* input, TypeName* dest);
-
-        template<> void SwapRoutine(int8* input, int8* dest) {*dest =  *input; }
-        template<> void SwapRoutine(uint8* input, uint8* dest) {*dest =  *input; }
-        template<> void SwapRoutine(int16* input, int16* dest) {*dest =  RtlUshortByteSwap(*input); }
-        template<> void SwapRoutine(uint16* input, uint16* dest) {*dest =  RtlUshortByteSwap(*input);}
-        template<> void SwapRoutine(int32* input, int32* dest) {*dest =  RtlUlongByteSwap(*input);}
-        template<> void SwapRoutine(uint32* input, uint32* dest) {*dest =  RtlUlongByteSwap(*input);}
-        // we don't want type conversion here, we just want to swap the bytes.
-        template<> void SwapRoutine(float* input, float* dest) { *((uint32*)dest) = RtlUlongByteSwap(*((uint32*)input)); }
-        template<> void SwapRoutine(double* input, double* dest) {*((uint64*)dest) = RtlUlonglongByteSwap(*((uint64*)input)); }
-
         // ToIndex(requestIndex) is performed before the detached/range checks
         // (test262 getFloat16/setFloat16 detached-buffer ordering), so these
         // helpers are shared by the templates and the Float16 entries.
@@ -114,47 +135,34 @@ namespace Js
         uint32 GetWritableViewIndex(Var offset, const char16* funcName);
         void CheckViewRange(uint32 byteOffset, uint32 elementSize, const char16* funcName);
 
-        template<typename TypeName, typename PointerAccessTypeName>
+        template<typename TypeName>
         TypeName ReadViewBytesAt(uint32 byteOffset, BOOL isLittleEndian, const char16* funcName)
         {
             CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
-            TypeName item;
-            TypeName* typedBuffer = (TypeName*)(buffer + byteOffset);
+            using Storage = DataViewDetail::UnsignedStorage<sizeof(TypeName)>;
+            typename Storage::Type bits = 0;
+            memcpy(&bits, this->buffer + byteOffset, sizeof(TypeName));
             if (!isLittleEndian)
             {
-                SwapRoutine<TypeName>(typedBuffer, &item);
+                bits = Storage::Swap(bits);
             }
-            else
-            {
-                item = *static_cast<PointerAccessTypeName>(typedBuffer);
-            }
+            TypeName item;
+            memcpy(&item, &bits, sizeof(TypeName));
             return item;
         }
 
         template<typename TypeName>
         Var GetValueAt(uint32 byteOffset, const char16* funcName, BOOL isLittleEndian = FALSE)
         {
-            return GetValueAtImpl<TypeName, TypeName*>(byteOffset, isLittleEndian, funcName);
-        }
-
-        template<typename TypeName, typename PointerAccessTypeName>
-        Var GetValueAtImpl(uint32 byteOffset, BOOL isLittleEndian, const char16* funcName)
-        {
-            TypeName item = ReadViewBytesAt<TypeName, PointerAccessTypeName>(byteOffset, isLittleEndian, funcName);
+            TypeName item = ReadViewBytesAt<TypeName>(byteOffset, isLittleEndian, funcName);
             return JavascriptNumber::ToVar(item, GetScriptContext());
         }
 
         template<typename TypeName>
         inline Var GetValueAtWithCheck(uint32 byteOffset, const char16* funcName, BOOL isLittleEndian = FALSE)
         {
-            return GetValueAtWithCheckImpl<TypeName, TypeName*>(byteOffset, isLittleEndian, funcName);
-        }
-
-        template<typename TypeName, typename PointerAccessTypeName>
-        Var GetValueAtWithCheckImpl(uint32 byteOffset, BOOL isLittleEndian, const char16* funcName)
-        {
-            TypeName item = ReadViewBytesAt<TypeName, PointerAccessTypeName>(byteOffset, isLittleEndian, funcName);
+            TypeName item = ReadViewBytesAt<TypeName>(byteOffset, isLittleEndian, funcName);
             return JavascriptNumber::ToVarWithCheck(item, GetScriptContext());
         }
 
@@ -164,23 +172,16 @@ namespace Js
         template<typename TypeName>
         inline void SetValueAt(uint32 byteOffset, TypeName value, const char16 *funcName, BOOL isLittleEndian = FALSE)
         {
-            SetValueAtImpl<TypeName, TypeName*>(byteOffset, value, isLittleEndian, funcName);
-        }
-
-        template<typename TypeName, typename PointerAccessTypeName>
-        void SetValueAtImpl(uint32 byteOffset, TypeName value, BOOL isLittleEndian, const char16 *funcName)
-        {
             CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
-            TypeName* typedBuffer = (TypeName*)(buffer + byteOffset);
+            using Storage = DataViewDetail::UnsignedStorage<sizeof(TypeName)>;
+            typename Storage::Type bits = 0;
+            memcpy(&bits, &value, sizeof(TypeName));
             if (!isLittleEndian)
             {
-                SwapRoutine<TypeName>(&value, typedBuffer);
+                bits = Storage::Swap(bits);
             }
-            else
-            {
-                *static_cast<PointerAccessTypeName>(typedBuffer) = value;
-            }
+            memcpy(this->buffer + byteOffset, &bits, sizeof(TypeName));
         }
 
         template<typename TypeName, Var (DataView::*GetFn)(uint32, const char16*, BOOL)>
@@ -188,15 +189,6 @@ namespace Js
 
         template<typename TypeName, TypeName (*ConvertFn)(Var, ScriptContext*)>
         static Var EntrySetValue(ScriptContext* scriptContext, const Arguments& args, const char16* funcName);
-
-#ifdef _M_ARM
-        // For ARM, memory access for float/double address causes data alignment exception if the address is not aligned.
-        // Provide template specialization (only) for these scenarios.
-        template<> Var GetValueAtWithCheck<float>(uint32 byteOffset, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
-        template<> Var GetValueAtWithCheck<double>(uint32 byteOffset, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
-        template<> void SetValueAt<float>(uint32 byteOffset, float value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
-        template<> void SetValueAt<double>(uint32 byteOffset, double value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
-#endif
 
         Field(uint32) byteOffset;
         Field(BYTE*) buffer;   // beginning of buffer

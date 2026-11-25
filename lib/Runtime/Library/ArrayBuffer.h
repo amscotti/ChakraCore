@@ -314,6 +314,7 @@ namespace Js
         static int GetByteLengthOffset() { return offsetof(ArrayBuffer, bufferLength); }
 
         void Detach();
+        virtual void DetachAndRelease();
 #if defined(TARGET_64)
         //maximum 2G -1  for amd64
         static const uint32 MaxArrayBufferLength = 0x7FFFFFFF;
@@ -337,6 +338,9 @@ namespace Js
 
         // This function will be called from External buffer and projection buffer as they pass the buffer
         virtual void ReleaseBufferContent();
+
+        template <typename FreeFN>
+        void DetachAndReleaseWith(FreeFN freeFunction, bool shouldFreeBuffer);
 
         FieldNoBarrier(RefCountedBuffer *) bufferContent;
         Field(uint32) bufferLength;       // Current [[ArrayBufferByteLength]]
@@ -409,6 +413,7 @@ namespace Js
         static JavascriptArrayBuffer* Create(RefCountedBuffer* buffer, DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type);
         virtual void Dispose(bool isShutdown) override;
         virtual void Finalize(bool isShutdown) override;
+        virtual void DetachAndRelease() override;
 
         static bool IsValidAsmJsBufferLengthAlgo(uint length, bool forceCheck);
         virtual bool IsValidAsmJsBufferLength(uint length, bool forceCheck = false) override;
@@ -483,6 +488,7 @@ namespace Js
 
         virtual void Dispose(bool isShutdown) override;
         virtual void Finalize(bool isShutdown) override;
+        virtual void DetachAndRelease() override;
     private:
         ProjectionArrayBuffer(uint32 length, DynamicType * type);
         ProjectionArrayBuffer(byte* buffer, uint32 length, DynamicType * type);

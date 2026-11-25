@@ -215,7 +215,8 @@ namespace Js
           byteOffset(byteoffset),
           lengthTracking(lengthTracking)
     {
-        buffer = arrayBuffer->GetBuffer() + byteoffset;
+        BYTE* base = arrayBuffer->GetBuffer();
+        buffer = base != nullptr ? base + byteoffset : nullptr;
     }
 
     bool DataView::IsOutOfBounds(uint32 bufferByteLength) const
@@ -821,32 +822,5 @@ namespace Js
         this->buffer = nullptr;
 #endif
     }
-
-#ifdef _M_ARM
-    // Provide template specialization (only) for memory access at unaligned float/double address which causes data alignment exception otherwise.
-    template<>
-    Var DataView::GetValueAtWithCheck<float>(uint32 byteOffset, const char16 *funcName, BOOL isLittleEndian)
-    {
-        return this->GetValueAtWithCheckImpl<float, float UNALIGNED*>(byteOffset, isLittleEndian, funcName);
-    }
-
-    template<>
-    Var DataView::GetValueAtWithCheck<double>(uint32 byteOffset, const char16 *funcName, BOOL isLittleEndian)
-    {
-        return this->GetValueAtWithCheckImpl<double, double UNALIGNED*>(byteOffset, isLittleEndian, funcName);
-    }
-
-    template<>
-    void DataView::SetValueAt<float>(uint32 byteOffset, float value, const char16 *funcName, BOOL isLittleEndian)
-    {
-        this->SetValueAtImpl<float, float UNALIGNED*>(byteOffset, value, isLittleEndian, funcName);
-    }
-
-    template<>
-    void DataView::SetValueAt<double>(uint32 byteOffset, double value, const char16 *funcName, BOOL isLittleEndian)
-    {
-        this->SetValueAtImpl<double, double UNALIGNED*>(byteOffset, value, isLittleEndian, funcName);
-    }
-#endif
 
 }
