@@ -1,7 +1,10 @@
-//
-// Copyright (c) Microsoft. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for full license information.
-//
+//-------------------------------------------------------------------------------------------------------
+// ChakraCore/Pal
+// Contains portions (c) copyright Microsoft, portions copyright (c) the .NET Foundation and Contributors
+// and edits (c) copyright the ChakraCore Contributors.
+// See THIRD-PARTY-NOTICES.txt in the project root for .NET Foundation license
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 
 /*++
 
@@ -346,6 +349,13 @@ memory. Rationale :
  between threads of the same process. This could be resolved by using 2
  spinlocks, but this would introduce more busy-wait.
 */
+/* NOTE: never destroyed: PAL threads may still touch shared memory while
+   the process runs static destructors. */
+#if defined(__clang__) && defined(__has_attribute)
+#if __has_attribute(no_destroy)
+__attribute__((no_destroy))
+#endif
+#endif
 static CCLock shm_critsec(false);
 
 /* number of segments the current process knows about */
@@ -783,9 +793,10 @@ Return value :
 int SHMRelease(void)
 {
     lock_count--;
+    int result = lock_count;
     shm_critsec.Leave();
 
-    return lock_count;
+    return result;
 }
 
 /*++

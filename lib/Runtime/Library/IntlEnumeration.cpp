@@ -9,7 +9,7 @@
 #ifdef INTL_ICU
 
 // Ownership record (doc/memory-management.md section 3):
-//   Resource:  ICU UEnumeration*, UResourceBundle*, UNumberingSystem*, ULocaleDisplayNames* handles
+//   Resource:  ICU UEnumeration*, UNumberingSystem*, ULocaleDisplayNames* handles
 //              created inside IntlEnumeration::EntrySupportedValuesOf, plus local AsciiStringSet
 //              storage (char pool and size_t offset table).
 //   Domain:    ICU library heap for ICU handles; stack scratch (2 KiB pool / 128 offsets) with
@@ -612,60 +612,11 @@ namespace Js
             }
         }
 
-        void CollectCurrencyCandidatesFromBundle(
-            const char* packageName,
-            const char* localeName,
-            bool openDirect,
-            AsciiStringSet& set,
-            ScriptContext* scriptContext)
-        {
-            UErrorCode status = U_ZERO_ERROR;
-            PlatformAgnostic::ICUHelpers::ScopedUResourceBundle bundle(
-                openDirect ? ures_openDirect(packageName, localeName, &status)
-                           : ures_open(packageName, localeName, &status));
-            CheckIcuOom(status, scriptContext);
-            if (U_FAILURE(status) || bundle == nullptr)
-            {
-                return;
-            }
-
-            UErrorCode tblStatus = U_ZERO_ERROR;
-            PlatformAgnostic::ICUHelpers::ScopedUResourceBundle currencies(
-                ures_getByKey(bundle, "Currencies", nullptr, &tblStatus));
-            CheckIcuOom(tblStatus, scriptContext);
-            if (U_FAILURE(tblStatus) || currencies == nullptr)
-            {
-                return;
-            }
-
-            int32_t count = ures_getSize(currencies);
-            for (int32_t i = 0; i < count; ++i)
-            {
-                UErrorCode itemStatus = U_ZERO_ERROR;
-                PlatformAgnostic::ICUHelpers::ScopedUResourceBundle entry(
-                    ures_getByIndex(currencies, i, nullptr, &itemStatus));
-                CheckIcuOom(itemStatus, scriptContext);
-                if (U_FAILURE(itemStatus) || entry == nullptr)
-                {
-                    continue;
-                }
-                const char* key = ures_getKey(entry);
-                if (key != nullptr)
-                {
-                    size_t keyLen = strlen(key);
-                    if (keyLen == 3)
-                    {
-                        TryAddCurrencyCandidate(key, 3, set, scriptContext);
-                    }
-                }
-            }
-        }
-
         void CollectAvailableCurrencies(AsciiStringSet& set, ScriptContext* scriptContext)
         {
             UErrorCode status = U_ZERO_ERROR;
             PlatformAgnostic::ICUHelpers::ScopedUEnumeration isoCurrencies(
-                ucurr_openISOCurrencies(UCURR_ALL, &status));
+                ucurr_openISOCurrencies(UCURR_COMMON | UCURR_NON_DEPRECATED, &status));
             CheckIcuOom(status, scriptContext);
 
             if (U_SUCCESS(status) && isoCurrencies != nullptr)
@@ -682,12 +633,6 @@ namespace Js
                     TryAddCurrencyCandidate(elem, elemLen, set, scriptContext);
                 }
             }
-
-            // Also scan resource bundle Currencies tables so every DisplayNames-known code is covered.
-            CollectCurrencyCandidatesFromBundle("ICUDATA-curr", "en", false, set, scriptContext);
-            CollectCurrencyCandidatesFromBundle("ICUDATA-curr", "root", false, set, scriptContext);
-            CollectCurrencyCandidatesFromBundle(nullptr, "en", false, set, scriptContext);
-            CollectCurrencyCandidatesFromBundle(nullptr, "root", true, set, scriptContext);
         }
 
         void CollectAvailableNumberingSystems(AsciiStringSet& set, ScriptContext* scriptContext)

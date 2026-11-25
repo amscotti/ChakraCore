@@ -114,6 +114,14 @@ static Volatile<CPalThread*> free_threads_list PAL_GLOBAL = NULL;
 
 /* lock to access list of free THREAD structures */
 /* NOTE: can't use a CRITICAL_SECTION here (see comment in FreeTHREAD) */
+/* Deliberately never destroyed: detached PAL threads can call FreeTHREAD
+   while the process is running static destructors, and destroying this
+   mutex underneath them is a shutdown race. */
+#if defined(__clang__) && defined(__has_attribute)
+#if __has_attribute(no_destroy)
+__attribute__((no_destroy))
+#endif
+#endif
 static CCLock free_threads_spinlock;
 
 /* lock to access iEndingThreads counter, condition variable to signal shutdown

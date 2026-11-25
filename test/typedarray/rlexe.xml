@@ -338,6 +338,8 @@ Below test fails with difference in space. Investigate the cause and re-enable t
       <files>Uint8ClampedArray2.js</files>
       <tags>typedarray</tags>
       <compile-flags>-minInterpretCount:1 -maxInterpretCount:1 -off:simpleJit</compile-flags>
+      <!-- Linux debug-static takes ~90 s on the 4 vCPU host; default 60 s timeout is too tight. -->
+      <timeout>180</timeout>
     </default>
   </test>
   <test>

@@ -55,7 +55,10 @@ SHARED_PROFILES = frozenset({
 })
 STATIC_PROFILES = frozenset({"debug-static", "jit-debug"})
 ALL_PROFILES = SHARED_PROFILES | STATIC_PROFILES
-DEFAULT_TIMEOUT = 120.0
+# Probe compilation and execution timeout. Slow 4 vCPU hosts can need more
+# than 120 s to compile Node-API probe addons under clang++ sanitizer
+# instrumentation; callers can override via --timeout.
+DEFAULT_TIMEOUT = 600.0
 
 CORE_LEG_NAMES = (
     "smoke:version",
@@ -356,7 +359,7 @@ def probe_wasm_supported(ch, env, tmp_dir):
 
 
 def run_probe_binary(label, probe_src, cxx, mode, engine_lib, sdk_path,
-                     env, tmp_dir, root=ROOT):
+                     env, tmp_dir, root=ROOT, timeout=DEFAULT_TIMEOUT):
     """Compile and run a Node-API C++ probe against engine_lib with sanitizer."""
     if mode not in VALID_MODES:
         return False, "[%s] invalid sanitizer mode %r" % (label, mode), ""
@@ -401,7 +404,7 @@ def run_probe_binary(label, probe_src, cxx, mode, engine_lib, sdk_path,
     cmd.append(os.path.join(out_dir, lib_name))
     cmd += link_sys + ["-o", out_bin]
 
-    rc_c, out_c = run_env_capture(cmd, env, timeout=DEFAULT_TIMEOUT)
+    rc_c, out_c = run_env_capture(cmd, env, timeout=timeout)
     if rc_c != 0:
         return False, "[%s] compile failed rc=%d" % (label, rc_c), out_c
 
@@ -409,7 +412,7 @@ def run_probe_binary(label, probe_src, cxx, mode, engine_lib, sdk_path,
         label, [out_bin], env,
         lambda txt: None if ("PASS" in txt and "FAIL" not in txt)
         else "missing PASS / unexpected FAIL in probe output",
-        cwd=out_dir,
+        cwd=out_dir, timeout=timeout,
     )
 
 
@@ -785,7 +788,7 @@ def run_all(prefix_or_ch, mode="address", cxx=None, sdk_path=None,
                     continue
                 ok, msg, out = run_probe_binary(
                     label, src, cxx_bin, mode, engine_lib, sdk_path,
-                    env, tmp_dir, root=root)
+                    env, tmp_dir, root=root, timeout=timeout)
                 print("check_sanitize: %s" % msg)
                 sys.stdout.flush()
                 if ok:

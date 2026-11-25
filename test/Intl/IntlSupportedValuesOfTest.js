@@ -310,25 +310,15 @@ var tests = [
                 );
             }
 
-            // Historical currencies whose CLDR display data varies across ICU versions
-            // (e.g., ICU 74/78 define "CNX" while ICU 79 removed it): assert the
-            // cross-API iff bijection rather than hard-coding presence or absence.
-            var historical = ["CNX", "LSM"];
-            for (var h = 0; h < historical.length; h++) {
-                var hist = historical[h];
-                var inCurrencies = currencies.indexOf(hist) !== -1;
-                var displayName = dn.of(hist);
-                assert.areEqual(inCurrencies, typeof displayName === "string", hist + " parity");
-                if (inCurrencies) {
-                    assert.isTrue(displayName.length > 0, hist + " non-empty DisplayNames");
-                    assert.areEqual(
-                        hist,
-                        new Intl.NumberFormat("en", { style: "currency", currency: hist }).resolvedOptions().currency,
-                        hist + " NumberFormat"
-                    );
-                } else {
-                    assert.areEqual(undefined, displayName, hist + " undefined DisplayNames");
-                }
+            // Deprecated/historical currency codes (e.g. "ADP", "CNX", "LSM")
+            // must be excluded from canonical common/non-deprecated enumeration.
+            // Note: ICU 74/78 and Node still return historical display names for
+            // "CNX"/"ADP" via Intl.DisplayNames, so DisplayNames fallback("none")
+            // is asserted only on permanently unassigned ISO 4217 codes below.
+            var deprecatedOrHistorical = ["ADP", "CNX", "LSM"];
+            for (var h = 0; h < deprecatedOrHistorical.length; h++) {
+                var code = deprecatedOrHistorical[h];
+                assert.isFalse(currencies.indexOf(code) !== -1, code + " absent from supportedValuesOf");
             }
 
             // Verify permanently unassigned ISO 4217 codes are absent and rejected by DisplayNames.

@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 namespace UnifiedRegex
@@ -21,6 +22,12 @@ namespace UnifiedRegex
         // they can be called easily from template functions.
         bool RangeToEquivClass(uint& tblidx, uint l, uint h, uint& acth, __out_ecount(EquivClassSize) char16 equivl[EquivClassSize]);
         bool RangeToEquivClass(uint& tblidx, uint l, uint h, uint& acth, __out_ecount(EquivClassSize) codepoint_t equivl[EquivClassSize]);
+
+        // Returns the canonical representative of cp's equivalence class. The
+        // v-flag \q string-set matcher uses this for per-code-point folding so
+        // it agrees with ordinary class folding across ICU versions, including
+        // cross-plane members such as U+1DF95 <-> U+00DF.
+        codepoint_t Canonicalize(codepoint_t cp);
 
         // Returns equivalents only from the given source. Some case-folding mappings already exist in
         // UnicodeData, so this function doesn't return them when CaseFolding is passed as the source.

@@ -1,7 +1,9 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
+#include <atomic>
 namespace Memory
 {
 enum IdleDecommitSignal
@@ -68,7 +70,7 @@ private:
     uint maxIdleDecommitFreePageCount;
     uint maxNonIdleDecommitFreePageCount;
 #ifdef IDLE_DECOMMIT_ENABLED
-    bool hasDecommitTimer;
+    std::atomic<bool> hasDecommitTimer;
     bool hadDecommitTimer;
     DWORD decommitTime;
     uint idleDecommitTryEnterWaitFactor;

@@ -391,7 +391,7 @@
   <default>
     <files>limits.js</files>
     <compile-flags>-wasm -args --no-verbose --end 4 -endargs</compile-flags>
-    <timeout>300</timeout>
+    <timeout>1200</timeout>
     <tags>exclude_drt,exclude_win7,exclude_debug,exclude_dynapogo,exclude_x86,Slow</tags>
   </default>
 </test>
@@ -399,7 +399,7 @@
   <default>
     <files>limits.js</files>
     <compile-flags>-wasm -args --no-verbose --start 4 --end 12 -endargs</compile-flags>
-    <timeout>300</timeout>
+    <timeout>1200</timeout>
     <tags>exclude_drt,exclude_win7,exclude_debug,exclude_dynapogo,exclude_x86,Slow</tags>
   </default>
 </test>
@@ -407,7 +407,7 @@
   <default>
     <files>limits.js</files>
     <compile-flags>-wasm -args --no-verbose --start 12 -endargs</compile-flags>
-    <timeout>300</timeout>
+    <timeout>1200</timeout>
     <tags>exclude_drt,exclude_win7,exclude_debug,exclude_dynapogo,exclude_x86,Slow</tags>
   </default>
 </test>

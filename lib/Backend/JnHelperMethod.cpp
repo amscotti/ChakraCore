@@ -227,7 +227,15 @@ DECLSPEC_GUARDIGNORE  _NOINLINE intptr_t GetNonTableMethodAddress(ThreadContextI
         return ShiftCdeclAddr(context, (double(__cdecl *)(double))cos);
 
     case HelperDirectMath_Exp:
+#ifdef __linux__
+        // Zig's compiler-rt links a local exp into libChakraCore.so on Linux,
+        // so the CRT helper address would bypass Math::Exp's glibc-resolved
+        // lookup. Route the Linux JIT helper through Js::Math::Exp so
+        // interpreter, built-in, and JIT share the same glibc exp().
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))Js::Math::Exp);
+#else
         return ShiftCdeclAddr(context, (double(__cdecl *)(double))exp);
+#endif
 
     case HelperDirectMath_Log:
         return ShiftCdeclAddr(context, (double(__cdecl *)(double))log);

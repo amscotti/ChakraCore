@@ -1163,10 +1163,14 @@ namespace UnifiedRegex
             return;
         }
         // Canonicalize each code point, then encode to UTF-16 in a scratch
-        // buffer (a canonicalized code point never changes unit count).
-        CharCount needed = 0;
-        for (CharCount i = 0; i < numCps; i++)
-            needed += cps[i] >= 0x10000 ? 2 : 1;
+        // buffer. A canonicalized code point can cross a UTF-16 unit boundary
+        // (for example U+1DF95 canonicalizes to U+00DF), so reserve numCps * 2
+        // units after checking against MaxCharCount / 2 to avoid overflow.
+        if (numCps > MaxCharCount / 2)
+        {
+            Fail(JSERR_RegExpSyntax);
+        }
+        CharCount needed = numCps * 2;
         if (needed > vScratchUnitsCap)
         {
             CharCount newCap = vScratchUnitsCap == 0 ? 32 : vScratchUnitsCap;
@@ -1231,21 +1235,13 @@ namespace UnifiedRegex
     }
 
     // Canonicalization for one code point under the effective i state: the
-    // representative of its case-equivalence class, matching how the runtime
-    // matches case-insensitive literals/backreferences under u/v programs.
+    // representative of its engine case-equivalence class. Using the same table
+    // as ordinary class folding keeps \q string members consistent across ICU
+    // versions, including cross-plane members such as U+1DF95 <-> U+00DF.
     template <typename P, const bool IsLiteral>
-    // Simple case folding for v string members under i (ES2027
-    // MaybeSimpleCaseFolding): map every code point with Unicode simple
-    // case folding (ICU u_foldCase, U_FOLD_CASE_DEFAULT). scf folds
-    // U+212A (KELVIN SIGN) onto 'k' and U+017F (LATIN SMALL LETTER LONG S)
-    // onto 's', so a \q member 'k'/'ss' matches those inputs, while U+00DF
-    // (whose simple folding is itself) does not match 'ss'. Node 26.5.0/V8
-    // applies an asymmetric subset for single-character members (misses
-    // U+212A there) -- documented oracle divergence; this engine implements
-    // the spec's symmetric scf(x) == scf(y) comparison.
     codepoint_t Parser<P, IsLiteral>::VCanonicalizeCodePoint(codepoint_t cp) const
     {
-        return (codepoint_t)u_foldCase((UChar32)cp, U_FOLD_CASE_DEFAULT);
+        return CaseInsensitive::Canonicalize(cp);
     }
 
     template <typename P, const bool IsLiteral>

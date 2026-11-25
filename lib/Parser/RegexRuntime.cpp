@@ -4,7 +4,6 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "ParserPch.h"
-#include <unicode/uchar.h> // u_toupper for MatchLiteralCanonicalInst (v-flag \q strings under i)
 
 namespace UnifiedRegex
 {
@@ -2022,18 +2021,13 @@ namespace UnifiedRegex
     // MatchLiteralCanonicalInst (v-flag string members under i)
     // ----------------------------------------------------------------------
     // Ownership: the instruction carries only the standard LiteralMixin
-    // offset/length into the program's literal buffer (the unchanged
-    // transfer passes copy the folded bytes there); no extra retained
-    // state, in line with MatchLiteralInst. Folding is Unicode simple case
-    // folding (ES2027 MaybeSimpleCaseFolding), implemented with ICU
-    // u_foldCase/U_FOLD_CASE_DEFAULT -- a const table lookup on the
-    // matcher's calling thread, same rental-threading shape as the
-    // parse-time ICU use. The stored literal holds the folded pattern code
-    // points; an input code point matches iff scf(input) equals the stored
-    // folded code point (surrogate-pair aware).
+    // offset/length into the program's literal buffer; no extra retained state.
+    // Folding uses the engine's Unicode case-equivalence table rather than
+    // host ICU u_foldCase so \q string literals agree with class folding
+    // across ICU versions (including cross-plane U+1DF95 <-> U+00DF).
     inline codepoint_t CanonicalCodePoint(codepoint_t cp)
     {
-        return (codepoint_t)u_foldCase((UChar32)cp, U_FOLD_CASE_DEFAULT);
+        return CaseInsensitive::Canonicalize(cp);
     }
 
     inline bool MatchLiteralCanonicalInst::Exec(REGEX_INST_EXEC_PARAMETERS) const

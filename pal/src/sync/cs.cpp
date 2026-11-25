@@ -1,7 +1,10 @@
-//
-// Copyright (c) Microsoft. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for full license information.
-//
+//-------------------------------------------------------------------------------------------------------
+// ChakraCore/Pal
+// Contains portions (c) copyright Microsoft, portions copyright (c) the .NET Foundation and Contributors
+// and edits (c) copyright the ChakraCore Contributors.
+// See THIRD-PARTY-NOTICES.txt in the project root for .NET Foundation license
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -166,6 +169,38 @@ typedef struct _PAL_CRITICAL_SECTION {
     Volatile<PalCsInitState> cisInitState;
     PAL_CRITICAL_SECTION_NATIVE_DATA csndNativeData;
 } PAL_CRITICAL_SECTION, *PPAL_CRITICAL_SECTION, *LPPAL_CRITICAL_SECTION;
+
+// OwningThread is published after the lock bit and read by contenders while
+// deciding whether the CS is already owned by this thread. Plain reads of
+// OwningThread or LockCount are C++ data races under TSan against atomic RMWs,
+// so use acquire/release atomic accessors (with pure acquire loads for
+// read-only LockCount checks instead of cache-line-dirtying RMWs).
+static inline SIZE_T PalCsLoadOwningThread(PAL_CRITICAL_SECTION * pPalCriticalSection)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(&pPalCriticalSection->OwningThread, __ATOMIC_ACQUIRE);
+#else
+    return pPalCriticalSection->OwningThread;
+#endif
+}
+
+static inline void PalCsStoreOwningThread(PAL_CRITICAL_SECTION * pPalCriticalSection, SIZE_T threadId)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(&pPalCriticalSection->OwningThread, threadId, __ATOMIC_RELEASE);
+#else
+    pPalCriticalSection->OwningThread = threadId;
+#endif
+}
+
+static inline LONG PalCsLoadLockCount(PAL_CRITICAL_SECTION * pPalCriticalSection)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(pPalCriticalSection->LockCount.GetPointer(), __ATOMIC_ACQUIRE);
+#else
+    return pPalCriticalSection->LockCount.Load();
+#endif
+}
 
 #ifdef _DEBUG
 namespace CorUnix
@@ -364,20 +399,22 @@ VOID InternalDeleteCriticalSection(
     CPalThread * pThread =
         (PALIsThreadDataInitialized() ? GetCurrentPalThread() : NULL);
 
-    if (0 != pPalCriticalSection->LockCount)
+    LONG lInitLockCount = PalCsLoadLockCount(pPalCriticalSection);
+    if (0 != lInitLockCount)
     {
         SIZE_T tid;
         tid = ObtainCurrentThreadId(pThread);
-        int iWaiterCount = (int)PALCS_GETWCOUNT(pPalCriticalSection->LockCount);
+        int iWaiterCount = (int)PALCS_GETWCOUNT(lInitLockCount);
 
-        if (0 != (PALCS_LOCK_BIT & pPalCriticalSection->LockCount))
+        if (0 != (PALCS_LOCK_BIT & lInitLockCount))
         {
+            SIZE_T owner = PalCsLoadOwningThread(pPalCriticalSection);
             // CS is locked
-            if (tid != pPalCriticalSection->OwningThread)
+            if (tid != owner)
             {
                 // not owner
                 ASSERT("Thread tid=%u deleting a CS owned by thread tid=%u\n",
-                       tid, pPalCriticalSection->OwningThread);
+                       tid, owner);
             }
             else
             {
@@ -627,7 +664,7 @@ namespace CorUnix
         pPalCriticalSection->LockCount         = 0;
         pPalCriticalSection->RecursionCount    = 0;
         pPalCriticalSection->SpinCount         = dwSpinCount;
-        pPalCriticalSection->OwningThread      = NULL;
+        PalCsStoreOwningThread(pPalCriticalSection, NULL);
         pPalCriticalSection->LockSemaphore     = NULL;
         pPalCriticalSection->fInternal         = fInternal;
 
@@ -710,18 +747,13 @@ namespace CorUnix
         threadId = ObtainCurrentThreadId(pThread);
 
 
-        // Check if the current thread already owns the CS
+        // Check if the current thread already owns the CS.
         //
-        // Note: there is no need for this double check to be atomic. In fact
-        // if the first check fails, the second doesn't count (and it's not
-        // even executed). If the first one succeeds and the second one
-        // doesn't, it doesn't matter if LockCount has already changed by the
-        // time OwningThread is tested. Instead, if the first one succeeded,
-        // and the second also succeeds, LockCount cannot have changed in the
-        // meanwhile, since this is the owning thread and only the owning
-        // thread can change the lock bit when the CS is owned.
-        if ((pPalCriticalSection->LockCount & PALCS_LOCK_BIT) &&
-            (pPalCriticalSection->OwningThread == threadId))
+        // The lock bit can be changed by a competing thread, so read the
+        // combined lock/owner state with acquire atomic loads rather than
+        // plain volatile reads or cache-line-dirtying RMWs.
+        if ((PalCsLoadLockCount(pPalCriticalSection) & PALCS_LOCK_BIT) &&
+            (PalCsLoadOwningThread(pPalCriticalSection) == threadId))
         {
             pPalCriticalSection->RecursionCount += 1;
 #ifdef _DEBUG
@@ -750,7 +782,7 @@ namespace CorUnix
                      PALCS_LOCK_AWAKENED_WAITER == lWaitInc);
 
             do {
-                lVal = pPalCriticalSection->LockCount;
+                lVal = PalCsLoadLockCount(pPalCriticalSection);
 
                 while (0 == (lVal & PALCS_LOCK_BIT))
                 {
@@ -778,9 +810,9 @@ namespace CorUnix
                     CS_TRACE("[ECS %p] ==> %s LockCount={%d, %d, %d} "
                         "lVal={%d, %d, %d}\n", pPalCriticalSection,
                         (lNewVal == lVal) ? "OK" : "NO",
-                        PALCS_GETWCOUNT(pPalCriticalSection->LockCount),
-                        PALCS_GETAWBIT(pPalCriticalSection->LockCount),
-                        PALCS_GETLBIT(pPalCriticalSection->LockCount),
+                        PALCS_GETWCOUNT(PalCsLoadLockCount(pPalCriticalSection)),
+                        PALCS_GETAWBIT(PalCsLoadLockCount(pPalCriticalSection)),
+                        PALCS_GETLBIT(PalCsLoadLockCount(pPalCriticalSection)),
                         PALCS_GETWCOUNT(lVal), PALCS_GETAWBIT(lVal), PALCS_GETLBIT(lVal));
 
                     if (lNewVal == lVal)
@@ -810,7 +842,7 @@ namespace CorUnix
                 //
                 // In the fair lock case, when a waiter wakes up the CS
                 // must be locked (i.e. ownership passed on to the waiter)
-                _ASSERTE(0 != (PALCS_LOCK_BIT & pPalCriticalSection->LockCount));
+                _ASSERTE(0 != (PALCS_LOCK_BIT & PalCsLoadLockCount(pPalCriticalSection)));
 
                 // CS successfully acquired
                 goto IECS_set_ownership;
@@ -819,7 +851,7 @@ namespace CorUnix
                 //
                 // Unfair Critical Sections
                 //
-                _ASSERTE(PALCS_LOCK_AWAKENED_WAITER & pPalCriticalSection->LockCount);
+                _ASSERTE(PALCS_LOCK_AWAKENED_WAITER & PalCsLoadLockCount(pPalCriticalSection));
 
                 lBitsToChange = PALCS_LOCK_BIT | PALCS_LOCK_AWAKENED_WAITER;
                 lWaitInc = PALCS_LOCK_AWAKENED_WAITER;
@@ -829,7 +861,7 @@ namespace CorUnix
 
     IECS_set_ownership:
         // Critical section acquired: set ownership data
-        pPalCriticalSection->OwningThread = threadId;
+        PalCsStoreOwningThread(pPalCriticalSection, threadId);
         pPalCriticalSection->RecursionCount = 1;
 #ifdef _DEBUG
         if (NULL != pPalCriticalSection->DebugInfo)
@@ -862,10 +894,10 @@ namespace CorUnix
         _ASSERTE(PalCsNotInitialized != pPalCriticalSection->cisInitState);
 
         threadId = ObtainCurrentThreadId(pThread);
-        _ASSERTE(threadId == pPalCriticalSection->OwningThread);
+        _ASSERTE(threadId == PalCsLoadOwningThread(pPalCriticalSection));
 #endif // _DEBUG
 
-        _ASSERT_MSG(PALCS_LOCK_BIT & pPalCriticalSection->LockCount,
+        _ASSERT_MSG(PALCS_LOCK_BIT & PalCsLoadLockCount(pPalCriticalSection),
                     "Trying to release an unlocked CS\n");
         _ASSERT_MSG(0 < pPalCriticalSection->RecursionCount,
                     "Trying to release an unlocked CS\n");
@@ -877,10 +909,11 @@ namespace CorUnix
         }
 
         // Reset CS ownership
-        pPalCriticalSection->OwningThread = NULL;
+        PalCsStoreOwningThread(pPalCriticalSection, NULL);
 
-        // Load the current LockCount value
-        lVal = pPalCriticalSection->LockCount;
+        // Load the current LockCount value atomically: waiters and new
+        // lockers update it concurrently.
+        lVal = PalCsLoadLockCount(pPalCriticalSection);
 
         while (true)
         {
@@ -1011,7 +1044,7 @@ namespace CorUnix
         if (lNewVal == PALCS_LOCK_INIT)
         {
             // CS successfully acquired: setting ownership data
-            pPalCriticalSection->OwningThread = threadId;
+            PalCsStoreOwningThread(pPalCriticalSection, threadId);
             pPalCriticalSection->RecursionCount = 1;
 #ifdef _DEBUG
             if (NULL != pPalCriticalSection->DebugInfo)
@@ -1026,7 +1059,7 @@ namespace CorUnix
 
         // check if the current thread already owns the criticalSection
         if ((lNewVal & PALCS_LOCK_BIT) &&
-            (pPalCriticalSection->OwningThread == threadId))
+            (PalCsLoadOwningThread(pPalCriticalSection) == threadId))
         {
             pPalCriticalSection->RecursionCount += 1;
 #ifdef _DEBUG
@@ -1174,7 +1207,7 @@ namespace CorUnix
                  PALCS_LOCK_AWAKENED_WAITER == lInc);
 
         do {
-            lVal = pPalCriticalSection->LockCount;
+            lVal = PalCsLoadLockCount(pPalCriticalSection);
 
             // Make sure the waiter increment is compatible with the
             // awakened waiter bit value
@@ -1449,7 +1482,7 @@ namespace CorUnix
                    "\tfInternal \t= %d\n"
                    "\teInitState \t= %u\n"
                    "\tpNativeData \t= %p ->\n",
-                   pCS->LockCount.Load(), pCS->RecursionCount, (void *)pCS->OwningThread,
+                   PalCsLoadLockCount(pCS), pCS->RecursionCount, (void *)PalCsLoadOwningThread(pCS),
                    pCS->LockSemaphore, (unsigned)pCS->SpinCount, (int)pCS->fInternal,
                    pCS->cisInitState.Load(), &pCS->csndNativeData);
 
@@ -1497,7 +1530,7 @@ namespace CorUnix
         threadId = ObtainCurrentThreadId(pThread);
 
         /* check if the current thread already owns the criticalSection */
-        if (pPalCriticalSection->OwningThread == threadId)
+        if (PalCsLoadOwningThread(pPalCriticalSection) == threadId)
         {
             _ASSERTE(0 < pPalCriticalSection->RecursionCount);
             pPalCriticalSection->RecursionCount += 1;
@@ -1507,7 +1540,7 @@ namespace CorUnix
         iRet = pthread_mutex_lock(&pPalCriticalSection->csndNativeData.mutex);
         _ASSERTE(0 == iRet);
 
-        pPalCriticalSection->OwningThread = threadId;
+        PalCsStoreOwningThread(pPalCriticalSection, threadId);
         pPalCriticalSection->RecursionCount = 1;
     }
 
@@ -1537,7 +1570,7 @@ namespace CorUnix
         _ASSERTE(PalCsNotInitialized != pPalCriticalSection->cisInitState);
 
         threadId = ObtainCurrentThreadId(pThread);
-        _ASSERTE(threadId == pPalCriticalSection->OwningThread);
+        _ASSERTE(threadId == PalCsLoadOwningThread(pPalCriticalSection));
 
         if (0 >= pPalCriticalSection->RecursionCount)
             DebugBreak();
@@ -1548,7 +1581,7 @@ namespace CorUnix
         if (0 < --pPalCriticalSection->RecursionCount)
             return;
 
-        pPalCriticalSection->OwningThread = 0;
+        PalCsStoreOwningThread(pPalCriticalSection, 0);
 
         iRet = pthread_mutex_unlock(&pPalCriticalSection->csndNativeData.mutex);
         _ASSERTE(0 == iRet);
@@ -1581,7 +1614,7 @@ namespace CorUnix
         threadId = ObtainCurrentThreadId(pThread);
 
         /* check if the current thread already owns the criticalSection */
-        if (pPalCriticalSection->OwningThread == threadId)
+        if (PalCsLoadOwningThread(pPalCriticalSection) == threadId)
         {
             pPalCriticalSection->RecursionCount += 1;
             fRet = true;
@@ -1592,7 +1625,7 @@ namespace CorUnix
 
         if (fRet)
         {
-            pPalCriticalSection->OwningThread = threadId;
+            PalCsStoreOwningThread(pPalCriticalSection, threadId);
             pPalCriticalSection->RecursionCount = 1;
         }
 

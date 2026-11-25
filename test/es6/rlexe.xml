@@ -470,7 +470,7 @@
     <default>
       <files>ES6TypedArrayExtensions.js</files>
       <compile-flags>-CollectGarbage -ES6ObjectLiterals -ESSharedArrayBuffer -args summary -endargs</compile-flags>
-      <timeout>120</timeout> <!-- debug-static on 4 vCPU exceeds 60 s -->
+      <timeout>300</timeout> <!-- debug-static on 4 vCPU Linux host: 70 s standalone, >120 s under 4-way gate load -->
     </default>
   </test>
   <test>

@@ -9,6 +9,9 @@
 #include "Math/CrtSSE2Math.h"
 
 #include <math.h>
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
 
 const LPCWSTR UCrtC99MathApis::LibraryName = _u("api-ms-win-crt-math-l1-1-0.dll");
 
@@ -476,6 +479,25 @@ namespace Js
     /// Exp() returns e^x, as described in (ES5.0: S15.8.2.8).
     ///----------------------------------------------------------------------------
 
+#ifdef __linux__
+    // Zig's compiler-rt links a local `exp` into libChakraCore.so on Linux,
+    // shadowing glibc libm. Resolve the dynamic libm `exp` (skipping the DSO's
+    // own local symbol via RTLD_NEXT first) so Math.exp keeps glibc precision.
+    typedef double (*SystemExpFn)(double);
+    static SystemExpFn GetSystemExp()
+    {
+        static SystemExpFn systemExp = []() -> SystemExpFn {
+            void* sym = dlsym(RTLD_NEXT, "exp");
+            if (sym == nullptr)
+            {
+                sym = dlsym(RTLD_DEFAULT, "exp");
+            }
+            return reinterpret_cast<SystemExpFn>(sym);
+        }();
+        return systemExp;
+    }
+#endif
+
     Var Math::Exp(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -519,7 +541,12 @@ namespace Js
         else
 #endif
         {
+#ifdef __linux__
+            SystemExpFn systemExp = GetSystemExp();
+            result = systemExp != nullptr ? systemExp(x) : ::exp(x);
+#else
             result = ::exp(x);
+#endif
         }
 
         return result;

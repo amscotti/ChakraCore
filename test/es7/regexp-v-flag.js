@@ -815,6 +815,14 @@ var tests = [
             assert.areEqual("\u212Aa", /^[\q{ka|cd}]+$/iv.exec("\u212Aa")[0], "folding inside alternation members");
             assert.areEqual("ab", /[\q{ab}]/v.exec("ab")[0], "no i: exact");
             assert.areEqual(null, /[\q{ab}]/iv.exec("ba"), "order still matters");
+
+            // Cross-plane {U+00DF, U+1E9E, U+1DF95} equivalence in \q under /iv
+            assert.isTrue(/^[\q{a\u00DF}]$/iv.test("a\u00DF"), "\\q{a\\u00df} matches sharp s");
+            assert.isTrue(/^[\q{a\u00DF}]$/iv.test("a\u1E9E"), "\\q{a\\u00df} matches capital sharp s");
+            assert.isTrue(/^[\q{a\u00DF}]$/iv.test("a\u{1DF95}"), "\\q{a\\u00df} matches astral U+1DF95");
+            assert.isTrue(/^[\q{a\u{1DF95}}]$/iv.test("a\u00DF"), "\\q{a\\u{1DF95}} matches BMP sharp s");
+            assert.isTrue(/^[\q{a\u{1DF95}}]$/iv.test("a\u1E9E"), "\\q{a\\u{1DF95}} matches capital sharp s");
+            assert.isTrue(/^[\q{a\u1E9E}]$/iv.test("a\u{1DF95}"), "\\q{a\\u1E9E} matches astral U+1DF95");
         }
     },
     {

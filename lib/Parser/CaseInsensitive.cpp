@@ -661,5 +661,51 @@ namespace UnifiedRegex
                 return mappingSource == actualSource;
             });
         }
+
+        constexpr bool IsTransformsSorted()
+        {
+            for (int i = 1; i < numTransforms; i++)
+            {
+                if (transforms[i].lo < transforms[i - 1].lo || transforms[i].hi < transforms[i - 1].hi)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        static_assert(IsTransformsSorted(), "transforms[] must be non-decreasing by lo and hi for binary search");
+
+        codepoint_t Canonicalize(codepoint_t cp)
+        {
+            if (cp < 0x80)
+            {
+                return (cp >= 'a' && cp <= 'z') ? (cp - 32) : cp;
+            }
+            uint lo = 0;
+            uint hi = static_cast<uint>(numTransforms);
+            while (lo < hi)
+            {
+                uint mid = lo + (hi - lo) / 2;
+                if (transforms[mid].hi < cp)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+            if (lo >= static_cast<uint>(numTransforms) || transforms[lo].lo > cp)
+            {
+                return cp;
+            }
+            uint actualHigh = 0;
+            codepoint_t equivClass[EquivClassSize];
+            if (RangeToEquivClass(lo, cp, cp, actualHigh, equivClass))
+            {
+                return equivClass[0];
+            }
+            return cp;
+        }
     }
 }

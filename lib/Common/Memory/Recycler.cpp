@@ -6422,7 +6422,7 @@ Recycler::ThreadProc()
     do
     {
 #ifdef IDLE_DECOMMIT_ENABLED
-        needIdleDecommitSignal = IdleDecommitSignal_None;
+        ::InterlockedExchange(&needIdleDecommitSignal, IdleDecommitSignal_None);
 
         DWORD waitTime = autoHeap.IdleDecommit();
         if (waitTime == INFINITE)
