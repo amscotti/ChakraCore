@@ -140,10 +140,15 @@ napi_status NAPI_CDECL napi_run_script(napi_env env, napi_value script,
   if (ec != JsNoError) {
     return MapRun(env, ec, "napi_run_script: JsCreateString (sourceUrl)");
   }
+  // Pin source-URL string across JsRun (which can invoke GC) and balance with
+  // matching JsRelease (doc/memory-management.md Recycler JsAddRef/JsRelease).
+  const bool url_rooted = (JsAddRef(url, nullptr) == JsNoError);
   JsValueRef run_result = JS_INVALID_REFERENCE;
   ec = JsRun(jsv, kSourceCookie, url, JsParseScriptAttributeNone,
              &run_result);
-  (void)JsRelease(url, nullptr);
+  if (url_rooted) {
+    (void)JsRelease(url, nullptr);
+  }
   if (ec != JsNoError) {
     /* Exception stays pending (never cleared implicitly). *result is
      * left untouched (nothing published). */

@@ -299,7 +299,7 @@ void NodeApiPromise_FreeState(NodeApiPromiseState* state) {
 void NodeApiPromise_EnsureContinuationInstalled(napi_env env) {
   if (env == nullptr) return;
   nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) return;
   NodeApiPromiseState* raw = NodeApiEnv_PromiseState(env);
   if (raw == nullptr) return;
   auto* st = reinterpret_cast<PromiseState*>(raw);
@@ -366,7 +366,7 @@ napi_status NodeApiPromise_Pump(napi_env env, size_t max_tasks,
                             /*allowPending=*/true, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) {
     return napi_invalid_arg;
   }
   PromiseQueue* q = nullptr;

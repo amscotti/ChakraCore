@@ -181,7 +181,7 @@ void clear_exception(const char* what) {
   if (JsHasException(&has) == JsNoError && has) {
     JsValueRef ex = JS_INVALID_REFERENCE;
     if (JsGetAndClearException(&ex) == JsNoError) {
-      JsAddRef(ex, nullptr);
+      const bool ex_rooted = (JsAddRef(ex, nullptr) == JsNoError);
       std::string msg = js_to_utf8(ex);
       std::fprintf(stderr, "ch-nodeapi: %s: %s\n", what, msg.c_str());
       // Best-effort stack for triage (Node prints stacks; Chakra may
@@ -197,7 +197,7 @@ void clear_exception(const char* what) {
           }
         }
       }
-      JsRelease(ex, nullptr);
+      if (ex_rooted) JsRelease(ex, nullptr);
     } else {
       std::fprintf(stderr, "ch-nodeapi: %s (exception; get failed)\n", what);
     }
@@ -940,13 +940,20 @@ JsValueRef load_commonjs_module(RequireState* rs,
   JsValueRef script_val = JS_INVALID_REFERENCE;
   JsValueRef url_val = JS_INVALID_REFERENCE;
   JsValueRef run_result = JS_INVALID_REFERENCE;
+  // Pin script_val before creating url_val (which can trigger GC) and pin
+  // url_val across JsRun; run_result is unused and never JsAddRef'd.
   JsCreateString(wrapper.c_str(), wrapper.size(), &script_val);
+  const bool script_rooted =
+      (script_val != JS_INVALID_REFERENCE &&
+       JsAddRef(script_val, nullptr) == JsNoError);
   JsCreateString(abs_path.c_str(), abs_path.size(), &url_val);
+  const bool url_rooted =
+      (url_val != JS_INVALID_REFERENCE &&
+       JsAddRef(url_val, nullptr) == JsNoError);
   JsErrorCode err = JsRun(script_val, JS_SOURCE_CONTEXT_NONE, url_val,
                           JsParseScriptAttributeNone, &run_result);
-  if (script_val != JS_INVALID_REFERENCE) JsRelease(script_val, nullptr);
-  if (url_val != JS_INVALID_REFERENCE) JsRelease(url_val, nullptr);
-  if (run_result != JS_INVALID_REFERENCE) JsRelease(run_result, nullptr);
+  if (url_rooted) JsRelease(url_val, nullptr);
+  if (script_rooted) JsRelease(script_val, nullptr);
   if (prev_mod != JS_INVALID_REFERENCE) host_set_global("__nodeapi_module__", prev_mod);
   if (prev_exp != JS_INVALID_REFERENCE) host_set_global("__nodeapi_exports__", prev_exp);
   if (prev_fn != JS_INVALID_REFERENCE) host_set_global("__filename__", prev_fn);
@@ -1962,14 +1969,22 @@ int main(int argc, char** argv) {
     JsValueRef script_val = JS_INVALID_REFERENCE;
     JsValueRef url_val = JS_INVALID_REFERENCE;
     JsValueRef run_result = JS_INVALID_REFERENCE;
-    if (JsCreateString(wrapped.c_str(), wrapped.size(), &script_val) != JsNoError ||
-        JsCreateString(abs_driver.c_str(), abs_driver.size(), &url_val) != JsNoError) {
+    if (JsCreateString(wrapped.c_str(), wrapped.size(), &script_val) != JsNoError) {
       std::fprintf(stderr, "ch-nodeapi: JsCreateString (driver) failed\n");
       return shutdown_all(1);
     }
+    const bool script_rooted = (JsAddRef(script_val, nullptr) == JsNoError);
+    if (JsCreateString(abs_driver.c_str(), abs_driver.size(), &url_val) != JsNoError) {
+      if (script_rooted) JsRelease(script_val, nullptr);
+      std::fprintf(stderr, "ch-nodeapi: JsCreateString (driver) failed\n");
+      return shutdown_all(1);
+    }
+    const bool url_rooted = (JsAddRef(url_val, nullptr) == JsNoError);
     JsErrorCode err =
         JsRun(script_val, JS_SOURCE_CONTEXT_NONE, url_val,
               JsParseScriptAttributeNone, &run_result);
+    if (url_rooted) JsRelease(url_val, nullptr);
+    if (script_rooted) JsRelease(script_val, nullptr);
     if (err != JsNoError) {
       bool has = false;
       if (JsHasException(&has) == JsNoError && has) {
@@ -2053,10 +2068,6 @@ int main(int argc, char** argv) {
         }
       }
     }
-    // Release host roots on temporaries before teardown (R5).
-    if (script_val != JS_INVALID_REFERENCE) JsRelease(script_val, nullptr);
-    if (url_val != JS_INVALID_REFERENCE) JsRelease(url_val, nullptr);
-    if (run_result != JS_INVALID_REFERENCE) JsRelease(run_result, nullptr);
   } else {
     // Registration-only: still pump once so queued continuations / tasks from
     // the register call run before teardown.

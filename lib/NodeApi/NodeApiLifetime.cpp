@@ -42,29 +42,43 @@ struct napi_async_cleanup_hook_handle__ {
 
 namespace nodeapi {
 
-// Global async-handle live registry: handle value -> owner env.
+// Global async-handle live registry: handle value -> {owner env, owner_thread}.
 // Consulted BY VALUE before dereferencing any handle (mirrors the env
-// registry in NodeApiEnv.cpp). Entries are added on add, removed on
+// registry in NodeApiEnv.cpp). owner_thread is verified under g_async_mutex
+// before returning owner so an off-thread caller never dereferences a
+// concurrently-freed NodeEnv*. Entries are added on add, removed on
 // remove (including self-remove during destroy step 4) and at discard.
 // Never held across user callbacks. `static` = internal linkage (used
 // only in this TU) while remaining in namespace nodeapi so the
 // extern "C" entries below can name them qualified.
+struct AsyncHandleEntry {
+  NodeEnv* owner = nullptr;
+  std::thread::id owner_thread;
+};
 static std::mutex g_async_mutex;
-static std::unordered_map<void*, NodeEnv*> g_async_live;
+static std::unordered_map<void*, AsyncHandleEntry> g_async_live;
 
-static bool LookupAsyncHandle(void* handle_value, NodeEnv** out_owner) {
-  if (handle_value == nullptr || out_owner == nullptr) return false;
+static bool LookupAsyncHandleForOwner(void* handle_value, NodeEnv** out_owner,
+                                      bool* out_wrong_thread) {
+  if (out_owner != nullptr) *out_owner = nullptr;
+  if (out_wrong_thread != nullptr) *out_wrong_thread = false;
+  if (handle_value == nullptr) return false;
   std::lock_guard<std::mutex> lk(g_async_mutex);
   auto it = g_async_live.find(handle_value);
   if (it == g_async_live.end()) return false;
-  *out_owner = it->second;
+  if (it->second.owner_thread != std::this_thread::get_id()) {
+    if (out_wrong_thread != nullptr) *out_wrong_thread = true;
+    return false;
+  }
+  if (out_owner != nullptr) *out_owner = it->second.owner;
   return true;
 }
 
 static bool RegisterAsyncHandle(void* handle_value, NodeEnv* owner) noexcept {
   try {
     std::lock_guard<std::mutex> lk(g_async_mutex);
-    g_async_live.emplace(handle_value, owner);
+    g_async_live.emplace(handle_value,
+                         AsyncHandleEntry{owner, owner->owner_thread});
     return true;
   } catch (...) {
     return false;
@@ -138,18 +152,19 @@ static void MarkViolation(NodeEnv* env) noexcept {
 }
 
 // Resolve a node_api_basic_env value to a live NodeEnv without
-// dereferencing dead/fabricated values (R-ENV-10). Also checks the
-// owner thread (R-ENV-11). Returns nullptr if not live or wrong
-// thread; caller maps to napi_invalid_arg (debug asserts).
+// dereferencing dead/fabricated values (R-ENV-10). Checks the
+// owner thread under g_registry_mutex (R-ENV-11). Returns nullptr if not live
+// or wrong thread; caller maps to napi_invalid_arg (debug asserts).
 static NodeEnv* ResolveEnv(node_api_basic_env env_raw) {
   if (env_raw == nullptr) return nullptr;
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(const_cast<void*>(static_cast<const void*>(env_raw)),
-                     &env)) {
-    return nullptr;
-  }
-  if (env->owner_thread != std::this_thread::get_id()) {
-    assert(false && "NodeApiLifetime: napi_* call from wrong thread (R-ENV-11)");
+  std::thread::id owner_tid{};
+  if (!LookupLiveEnvForOwner(
+          const_cast<void*>(static_cast<const void*>(env_raw)), &env,
+          &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
+      assert(false && "NodeApiLifetime: napi_* call from wrong thread (R-ENV-11)");
+    }
     return nullptr;
   }
   return env;
@@ -157,25 +172,27 @@ static NodeEnv* ResolveEnv(node_api_basic_env env_raw) {
 
 // Validate for lifetime entries with Closing parity.
 // allowClosing=true for getters/removers (teardown-compatible);
-// false for setters/adders. Never dereferences dead values.
-// Records last_error on failure when an env is available.
+// false for setters/adders. Never dereferences dead values or off-thread
+// NodeEnv pointers. Records last_error on failure when an env is available.
 static napi_status ValidateLifetime(node_api_basic_env env_raw,
                                     bool allowClosing, NodeEnv** out_env) {
   if (out_env) *out_env = nullptr;
   if (env_raw == nullptr) return napi_invalid_arg;
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(const_cast<void*>(static_cast<const void*>(env_raw)),
-                     &env)) {
-    return napi_invalid_arg;
-  }
-  if (env->owner_thread != std::this_thread::get_id()) {
-    // Wrong thread (R-ENV-11): debug assert, release invalid_arg.
+  std::thread::id owner_tid{};
+  if (!LookupLiveEnvForOwner(
+          const_cast<void*>(static_cast<const void*>(env_raw)), &env,
+          &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
 #if !defined(NDEBUG)
-    std::fprintf(stderr,
-                 "NodeApiLifetime: wrong thread env=%p owner=%zu cur=%zu\n",
-                 static_cast<void*>(env), std::hash<std::thread::id>{}(env->owner_thread), std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    assert(false);
+      std::fprintf(stderr,
+                   "NodeApiLifetime: wrong thread env=%p owner=%zu cur=%zu\n",
+                   static_cast<const void*>(env_raw),
+                   std::hash<std::thread::id>{}(owner_tid),
+                   std::hash<std::thread::id>{}(std::this_thread::get_id()));
+      assert(false);
 #endif
+    }
     return napi_invalid_arg;
   }
   if (allowClosing) {
@@ -530,18 +547,22 @@ napi_status NAPI_CDECL napi_add_async_cleanup_hook(
 napi_status NAPI_CDECL napi_remove_async_cleanup_hook(
     napi_async_cleanup_hook_handle remove_handle) {
   if (remove_handle == nullptr) return napi_invalid_arg;
-  // Consult the live map by value BEFORE dereferencing: unknown /
-  // fabricated / double-removed handles return invalid_arg safely.
+  // Consult the live map by value and validate owner_thread BEFORE
+  // dereferencing: unknown / fabricated / double-removed / wrong-thread
+  // handles return invalid_arg without touching NodeEnv*.
   nodeapi::NodeEnv* owner = nullptr;
-  if (!nodeapi::LookupAsyncHandle(static_cast<void*>(remove_handle),
-                                  &owner)) {
+  bool wrong_thread = false;
+  if (!nodeapi::LookupAsyncHandleForOwner(
+          static_cast<void*>(remove_handle), &owner, &wrong_thread)) {
+    if (wrong_thread) {
+      assert(false && "napi_remove_async_cleanup_hook wrong thread (R-ENV-11)");
+    }
     return napi_invalid_arg;
   }
-  // Handle is live (in the map): dereferencing to find the owner is
-  // safe. Owner must be live (handle unregistered before env free).
-  // Thread check on the owner (R-ENV-11).
-  if (owner->owner_thread != std::this_thread::get_id()) {
-    assert(false && "napi_remove_async_cleanup_hook wrong thread (R-ENV-11)");
+  // Confirm owner is still live on this owner thread.
+  nodeapi::NodeEnv* live_owner = nullptr;
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(owner), &live_owner) ||
+      live_owner != owner) {
     return napi_invalid_arg;
   }
   // Alive and Closing both allow removal (completion signal).

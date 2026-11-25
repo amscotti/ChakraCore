@@ -466,6 +466,54 @@ int main() {
     (void)sum_after;
   }
 
+  /* --- Concurrent destroy vs off-thread napi_get_undefined(env, nullptr) --- */
+  constexpr int kConcurrentDestroyIters = 40;
+  constexpr int kRaceWorkers = 4;
+  for (int it = 0; it < kConcurrentDestroyIters; ++it) {
+    FakeHost host;
+    chakra_nodeapi_host_services svc = ServicesFor(&host);
+    napi_env race_env = chakra_nodeapi_create_env(
+        g_runtime, g_context, "concurrent-undef", &svc, &host);
+    Check(race_env != nullptr, "CONC create env");
+    if (!race_env) break;
+
+    std::atomic<bool> start_workers{false};
+    std::atomic<bool> stop_workers{false};
+    std::atomic<long> undef_calls{0};
+    std::atomic<long> undef_bad{0};
+    std::vector<std::thread> racers;
+    racers.reserve(kRaceWorkers);
+    for (int t = 0; t < kRaceWorkers; ++t) {
+      racers.emplace_back([&, t]() {
+        while (!start_workers.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+        for (int iter = 0; !stop_workers.load(std::memory_order_acquire);
+             ++iter) {
+          napi_status s = napi_get_undefined(race_env, nullptr);
+          if (s != napi_invalid_arg) {
+            undef_bad.fetch_add(1, std::memory_order_relaxed);
+          }
+          undef_calls.fetch_add(1, std::memory_order_relaxed);
+          if (t == 0 && iter > 200000) break;
+          if ((iter & 0x3F) == 0) std::this_thread::yield();
+        }
+      });
+    }
+    start_workers.store(true, std::memory_order_release);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    chakra_nodeapi_destroy_env(race_env);
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
+    stop_workers.store(true, std::memory_order_release);
+    for (auto& th : racers) th.join();
+    Check(undef_bad.load(std::memory_order_acquire) == 0,
+          "CONC off-thread napi_get_undefined(env, nullptr) invalid_arg");
+    Check(undef_calls.load(std::memory_order_acquire) > 0,
+          "CONC off-thread workers executed calls");
+    Check(chakra_nodeapi_test_root_count(race_env) == static_cast<size_t>(-1),
+          "CONC dead env root count is -1");
+  }
+
   std::fprintf(stdout,
                "TSFN_TEARDOWN_STRESS totals: ok=%ld fail=%ld delivered=%ld "
                "repeats=%d (checks=%d failures=%d)\n",

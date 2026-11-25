@@ -18,10 +18,12 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <new>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -219,19 +221,12 @@ void SetMismatchPending() {
 
 void AsyncCleanupHook(void* arg);
 
-/* Fetch services/host_ctx for a live env (registry lookup by value;
- * never dereferences a dead env). Returns false if the env is not live.
- * Must only be called when the caller has already validated env
- * liveness on the owner thread (or from cross-thread paths that treat
- * not-live as generic_failure without touching last_error). */
+/* Fetch services/host_ctx for a live env on the owner thread (copied under
+ * g_registry_mutex inside FetchLiveEnvServices; never dereferences unlocked
+ * NodeEnv*). Off-thread callers must use nodeapi::DispatchHostPostTask instead. */
 bool FetchServices(napi_env env, chakra_nodeapi_host_services* out_services,
                    void** out_host_ctx) {
-  if (env == nullptr) return false;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return false;
-  if (out_services != nullptr) *out_services = nenv->services;
-  if (out_host_ctx != nullptr) *out_host_ctx = nenv->host_ctx;
-  return true;
+  return nodeapi::FetchLiveEnvServices(env, out_services, out_host_ctx);
 }
 
 bool HasSchedulingServices(const chakra_nodeapi_host_services& s) {
@@ -437,13 +432,12 @@ void WorkCompleteTramp(void* arg) {
    * Cancel only ever wins before user execute runs, so a failed
    * execute here was not cancelled. */
   int state_after = cancelled ? kWorkCancelled : kWorkCompleted;
-  /* Env liveness by value (never dereference a dead env). Complete
-   * delivery requires a live Alive env on the owner thread. */
+  /* Env liveness by value (never dereference a dead or off-thread env).
+   * Complete delivery requires a live Alive env on the owner thread. */
   nodeapi::NodeEnv* nenv = nullptr;
   bool deliver = false;
-  if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-    if (nenv->state == nodeapi::EnvState::Alive &&
-        nenv->owner_thread == std::this_thread::get_id()) {
+  if (nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) {
+    if (nenv->state == nodeapi::EnvState::Alive) {
       deliver = true;
     }
   }
@@ -512,9 +506,8 @@ void TsfnDrainTramp(void* arg) {
   napi_env env = st->env;
   nodeapi::NodeEnv* nenv = nullptr;
   bool alive = false;
-  if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-    if (nenv->state == nodeapi::EnvState::Alive &&
-        nenv->owner_thread == std::this_thread::get_id()) {
+  if (nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) {
+    if (nenv->state == nodeapi::EnvState::Alive) {
       alive = true;
     }
   }
@@ -630,10 +623,9 @@ void TsfnFinalizeTramp(void* arg) {
   napi_env env = st->env;
   nodeapi::NodeEnv* nenv = nullptr;
   bool allowed = false;
-  if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-    if ((nenv->state == nodeapi::EnvState::Alive ||
-         nenv->state == nodeapi::EnvState::Closing) &&
-        nenv->owner_thread == std::this_thread::get_id()) {
+  if (nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) {
+    if (nenv->state == nodeapi::EnvState::Alive ||
+        nenv->state == nodeapi::EnvState::Closing) {
       allowed = true;
     }
   }
@@ -719,25 +711,15 @@ bool ScheduleFinalize(TsfnState* st) {
     if (st->finalizing || st->finalized) return false;
     st->finalizing = true;
   }
-  chakra_nodeapi_host_services svc{};
-  void* host_ctx = nullptr;
-  if (!FetchServices(st->env, &svc, &host_ctx) ||
-      svc.post_task == nullptr) {
-    /* Env gone or no scheduler: mark finalized to prevent a later task
-     * from running finalize twice; the teardown path (or the last drop)
-     * owns cleanup. If the env is dead, teardown already finalized.
-     * If the env is live but post_task is null, creation would have
-     * failed (G1/G2), so this state cannot exist. Unwind the flag. */
-    std::lock_guard<std::mutex> lk(st->mutex);
-    st->finalizing = false;
-    return false;
-  }
   // A8-2: the finalize task carries (state, generation); the tramp owns
   // the arg on post success and deletes it inline otherwise.
+  // DispatchHostPostTask reads services/host_ctx under g_registry_mutex
+  // and holds an active_host_dispatches lease across post_task so
+  // concurrent destroy_env cannot free NodeEnv or host_ctx mid-call.
   TsfnTaskArg* task_arg = MakeTsfnTaskArg(st);
   bool ok = false;
   if (task_arg != nullptr) {
-    ok = svc.post_task(host_ctx, TsfnFinalizeTramp, task_arg);
+    ok = nodeapi::DispatchHostPostTask(st->env, TsfnFinalizeTramp, task_arg);
     if (ok) task_arg = nullptr;
     delete task_arg;
   }
@@ -901,9 +883,9 @@ void AsyncCleanupHook(void* arg) {
 
 /* Async-resource coercion (create functions). Returns napi_ok when the
  * resource converts (or is C-NULL / already an object/function), else
- * the specific status. Discards the converted value (validation only):
- * fresh wrappers are released; identity (same pointer) is caller-owned
- * and not released. Null/undefined resource => napi_object_expected
+ * the specific status. Discards the converted temporary (validation
+ * only; JsConvertValueToObject/String return unpinned JsValueRefs so no
+ * JsRelease is called). Null/undefined resource => napi_object_expected
  * (with engine TypeError left pending, cf. coerce_to_object). User
  * valueOf/toString throws => napi_pending_exception. Symbol resource
  * name => napi_string_expected (ToString throws TypeError; Node's
@@ -934,9 +916,7 @@ napi_status CheckResourceObject(napi_env env, napi_value resource,
     nodeapi::SetLastError(env, napi_object_expected, what);
     return napi_object_expected;
   }
-  if (tmp != JS_INVALID_REFERENCE && tmp != ToJs(resource)) {
-    (void)JsRelease(tmp, nullptr); /* fresh wrapper, ours */
-  }
+  (void)tmp;
   return napi_ok;
 }
 
@@ -962,9 +942,7 @@ napi_status CheckResourceString(napi_env env, napi_value name,
     nodeapi::SetLastError(env, napi_string_expected, what);
     return napi_string_expected;
   }
-  if (tmp != JS_INVALID_REFERENCE && tmp != ToJs(name)) {
-    (void)JsRelease(tmp, nullptr);
-  }
+  (void)tmp;
   return napi_ok;
 }
 
@@ -1409,12 +1387,7 @@ napi_status NAPI_CDECL napi_create_threadsafe_function(
   st->env = env;
   // A8-2: issue the ABA generation BEFORE map publication (immutable after).
   st->tsfn_generation = NextTsfnGeneration();
-  {
-    nodeapi::NodeEnv* nenv = nullptr;
-    if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-      st->owner_thread = nenv->owner_thread;
-    }
-  }
+  st->owner_thread = std::this_thread::get_id();
   st->context = context;
   st->func = (func != nullptr) ? ToJs(func) : JS_INVALID_REFERENCE;
   st->call_js_cb = call_js_cb;
@@ -1498,6 +1471,8 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
     napi_threadsafe_function func, void* data,
     napi_threadsafe_function_call_mode is_blocking) {
   if (func == nullptr) return napi_invalid_arg;
+  std::underlying_type_t<napi_threadsafe_function_call_mode> raw_blocking = 0;
+  std::memcpy(&raw_blocking, &is_blocking, sizeof(raw_blocking));
   bool needs_drop = false;
   TsfnState* st = LookupTsfn(func, &needs_drop);
   if (st == nullptr) return napi_generic_failure; /* stale (G3) */
@@ -1518,7 +1493,7 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
       bool full = (st->max_queue_size != 0 &&
                    st->queue.size() >= st->max_queue_size);
       if (!full) break;
-      if (is_blocking != napi_tsfn_blocking) {
+      if (raw_blocking != static_cast<decltype(raw_blocking)>(napi_tsfn_blocking)) {
         wait_result = napi_queue_full;
         break;
       }
@@ -1561,20 +1536,14 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
     }
   }
   if (need_drain) {
-    chakra_nodeapi_host_services svc{};
-    void* host_ctx = nullptr;
     bool posted = false;
     // A8-2: the posted task carries (state, generation); arg OOM behaves
     // like a post failure (existing rollback below). The tramp owns the
-    // arg on post success.
+    // arg on post success. DispatchHostPostTask reads services/host_ctx
+    // under g_registry_mutex and holds a dispatch lease across post_task.
     TsfnTaskArg* task_arg = MakeTsfnTaskArg(st);
-    if (task_arg != nullptr && FetchServices(st->env, &svc, &host_ctx) &&
-        svc.post_task != nullptr) {
-      try {
-        posted = svc.post_task(host_ctx, TsfnDrainTramp, task_arg);
-      } catch (...) {
-        posted = false;
-      }
+    if (task_arg != nullptr) {
+      posted = nodeapi::DispatchHostPostTask(st->env, TsfnDrainTramp, task_arg);
       if (posted) task_arg = nullptr;
     }
     delete task_arg;
@@ -1598,19 +1567,13 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
       delete item;
       DropTsfnRef(st); /* item ref */
       if (keep_flag) {
-        chakra_nodeapi_host_services svc2{};
-        void* host_ctx2 = nullptr;
         bool retried = false;
         // A8-2: retry carries a fresh (state, generation) arg; owned by
         // the task on success, deleted inline otherwise.
         TsfnTaskArg* retry_arg = MakeTsfnTaskArg(st);
-        if (retry_arg != nullptr && FetchServices(st->env, &svc2, &host_ctx2) &&
-            svc2.post_task != nullptr) {
-          try {
-            retried = svc2.post_task(host_ctx2, TsfnDrainTramp, retry_arg);
-          } catch (...) {
-            retried = false;
-          }
+        if (retry_arg != nullptr) {
+          retried = nodeapi::DispatchHostPostTask(st->env, TsfnDrainTramp,
+                                                  retry_arg);
           if (retried) retry_arg = nullptr;
         }
         delete retry_arg;
@@ -1650,6 +1613,8 @@ napi_status NAPI_CDECL napi_acquire_threadsafe_function(
 napi_status NAPI_CDECL napi_release_threadsafe_function(
     napi_threadsafe_function func, napi_threadsafe_function_release_mode mode) {
   if (func == nullptr) return napi_invalid_arg;
+  std::underlying_type_t<napi_threadsafe_function_release_mode> raw_mode = 0;
+  std::memcpy(&raw_mode, &mode, sizeof(raw_mode));
   bool needs_drop = false;
   TsfnState* st = LookupTsfn(func, &needs_drop);
   if (st == nullptr) return napi_generic_failure; /* stale (G3) */
@@ -1668,7 +1633,8 @@ napi_status NAPI_CDECL napi_release_threadsafe_function(
     st->thread_count.store(before - 1, std::memory_order_release);
     if (before - 1 == 0) {
       reached_zero = true;
-      st->abort_on_finalize = (mode == napi_tsfn_abort);
+      st->abort_on_finalize =
+          (raw_mode == static_cast<decltype(raw_mode)>(napi_tsfn_abort));
       /* Abort mode drops the queue immediately (synchronously on the
        * releasing thread -- no JS, just native frees). Graceful mode
        * leaves the queue for the drain task (delivered before the

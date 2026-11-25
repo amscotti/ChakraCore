@@ -247,9 +247,22 @@ struct NodeEnv {
   // only; no lock (env is single-threaded). Additive field (A1).
   bool pending_registrations_consumed = false;
 
+  // Off-thread host dispatch lease counter (guarded by g_registry_mutex).
+  // Incremented by DispatchHostPostTask under g_registry_mutex before
+  // calling services.post_task(host_ctx, ...) unlocked, and decremented after
+  // post_task returns. chakra_nodeapi_destroy_env erases this env from the
+  // live registry under g_registry_mutex and waits until
+  // active_host_dispatches == 0 before deleting NodeEnv and returning (so the
+  // host cannot delete host_ctx/host_loop while a worker post_task is in
+  // flight).
+  size_t active_host_dispatches = 0;
+
   // Per-env last error (plan section 3.10 storage half; N1.5 owns the
   // mapping discipline). `message` is owned (fixed buffer);
   // `info.error_message` borrows it (refresh on every record).
+  // Guarded by g_registry_mutex; SetLastError/ClearLastError verify live
+  // registry membership and owner_thread == this_thread under lock before
+  // mutating (off-thread calls are refused without dereferencing NodeEnv).
   // N1.1 never clears on success (see N1.5 disagreement with
   // N0.6/C in the N1.1 report).
   struct LastError {
@@ -262,11 +275,35 @@ struct NodeEnv {
 
 // Registry lookup by pointer value WITHOUT dereferencing the pointer
 // first (R-ENV-10: freed env must never be validated through). Returns
-// true + *out (live env) iff the value is a currently-live NodeEnv
-// and the registry generation matches NodeEnv::generation (the two
-// mirrors agree). Never crashes on a dead/fabricated value: it only
-// consults the provider-global live set (mutex-protected).
+// true + *out (live env) iff the value is a currently-live NodeEnv,
+// the registry generation matches NodeEnv::generation, and the caller is
+// on env->owner_thread (checked under g_registry_mutex so an unlocked
+// NodeEnv* can never be exposed off-thread and race delete env).
 bool LookupLiveEnv(void* env_value, NodeEnv** out);
+
+// Owner-thread registry lookup: same checks as LookupLiveEnv, and on a
+// wrong-thread hit populates *out_owner (under lock) while returning false
+// with *out == nullptr so callers can diagnose wrong-thread use without
+// ever dereferencing NodeEnv after unlock.
+bool LookupLiveEnvForOwner(void* env_value, NodeEnv** out,
+                           std::thread::id* out_owner = nullptr);
+
+// Pure generation query under g_registry_mutex (safe on any thread; never
+// exposes or dereferences NodeEnv* after unlock). Returns false if not live.
+bool LookupLiveEnvGeneration(void* env_value, std::uint64_t* out_generation);
+
+// Owner-thread snapshot of services/host_ctx under g_registry_mutex.
+// Returns false if not live, wrong thread, or state == Dead.
+bool FetchLiveEnvServices(napi_env env_value,
+                          chakra_nodeapi_host_services* out_services,
+                          void** out_host_ctx);
+
+// Thread-safe host post_task dispatch synchronized against destroy_env:
+// under g_registry_mutex validates live env (state != Dead, post_task !=
+// nullptr), copies post_task/host_ctx, and acquires an active_host_dispatches
+// lease; invokes post_task unlocked; releases lease and notifies destroy_env
+// waiters. Guarantees neither NodeEnv nor host_ctx can be destroyed mid-call.
+bool DispatchHostPostTask(napi_env env_value, void (*fn)(void*), void* arg);
 
 // Generation-aware lookup: same as LookupLiveEnv but additionally
 // requires the live-registry generation to equal expected_generation.

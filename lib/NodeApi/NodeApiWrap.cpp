@@ -256,7 +256,7 @@ std::unordered_map<nodeapi::NodeEnv*, WrapState*> g_wrap_states;
 nodeapi::NodeEnv* ToNodeEnv(napi_env env_value) {
   if (!env_value) return nullptr;
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) {
     return nullptr;
   }
   return env;
@@ -1333,54 +1333,38 @@ void nodeapi_wrap_teardown(napi_env env) {
      * without touching the (freed) state. */
   };
 
-  /* Snapshot every remaining live record (env thread). Finalizers
-   * running below may mutate the maps (Closing-tolerant removes), so
-   * iterate a stable vector when allocation succeeds; on OOM fall back
-   * to draining one live record at a time without throwing. */
-  std::vector<WrapRecord*> wraps;
-  std::vector<WrapRecord*> externals;
-  bool snapshot_ok = true;
-  try {
-    wraps.reserve(st->wraps.size());
-    externals.reserve(st->externals.size());
+  /* Drain live records directly from st->wraps / st->externals one entry
+   * at a time (env thread). Never snapshot raw WrapRecord* into a vector
+   * across RunFinalizer: during kClosing, a finalizer may synchronously
+   * delete a sibling wrap via napi_delete_reference(sibling_ref) or
+   * napi_remove_wrap(sibling_obj), which erases and deletes the sibling
+   * WrapRecord before teardown visits it. Ownership stays solely in the
+   * map/set until RemoveContainers runs immediately before RunFinalizer;
+   * MaybeDrain flushes any records enqueued by GC during a finalizer. */
+  for (;;) {
+    MaybeDrain(env, st);
+    WrapRecord* next = nullptr;
     for (auto& kv : st->wraps) {
-      if (kv.second) wraps.push_back(kv.second);
+      if (kv.second &&
+          kv.second->state.load(std::memory_order_acquire) == kLive) {
+        next = kv.second;
+        break;
+      }
     }
-    for (WrapRecord* r : st->externals) {
-      if (r) externals.push_back(r);
-    }
-  } catch (...) {
-    wraps.clear();
-    externals.clear();
-    snapshot_ok = false;
+    if (!next) break;
+    finalize_wrap_record(next);
   }
-
-  if (snapshot_ok) {
-    for (WrapRecord* rec : wraps) finalize_wrap_record(rec);
-    for (WrapRecord* rec : externals) finalize_external_record(rec);
-  } else {
-    for (;;) {
-      WrapRecord* next = nullptr;
-      for (auto& kv : st->wraps) {
-        if (kv.second && kv.second->state.load(std::memory_order_acquire) == kLive) {
-          next = kv.second;
-          break;
-        }
+  for (;;) {
+    MaybeDrain(env, st);
+    WrapRecord* next = nullptr;
+    for (WrapRecord* r : st->externals) {
+      if (r && r->state.load(std::memory_order_acquire) == kLive) {
+        next = r;
+        break;
       }
-      if (!next) break;
-      finalize_wrap_record(next);
     }
-    for (;;) {
-      WrapRecord* next = nullptr;
-      for (WrapRecord* r : st->externals) {
-        if (r && r->state.load(std::memory_order_acquire) == kLive) {
-          next = r;
-          break;
-        }
-      }
-      if (!next) break;
-      finalize_external_record(next);
-    }
+    if (!next) break;
+    finalize_external_record(next);
   }
 
   /* Pick up anything enqueued while backstop finalizers ran (a

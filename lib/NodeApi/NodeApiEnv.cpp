@@ -55,6 +55,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -83,6 +84,7 @@ struct LiveEntry {
   std::uint64_t generation;
 };
 static std::mutex g_registry_mutex;
+static std::condition_variable g_registry_cv;
 static std::unordered_map<void*, LiveEntry> g_live_envs;
 static std::unordered_map<void*, std::uint64_t> g_dead_envs;
 static std::deque<void*> g_dead_order;
@@ -180,40 +182,116 @@ std::string FormatModuleFileUrl(const std::string& filename) {
 } /* namespace */
 
 bool LookupLiveEnv(void* env_value, NodeEnv** out) {
-  if (env_value == nullptr || out == nullptr) return false;
+  return LookupLiveEnvForOwner(env_value, out, nullptr);
+}
+
+bool LookupLiveEnvForOwner(void* env_value, NodeEnv** out,
+                           std::thread::id* out_owner) {
+  if (out != nullptr) *out = nullptr;
+  if (out_owner != nullptr) *out_owner = std::thread::id{};
+  if (env_value == nullptr) return false;
   std::lock_guard<std::mutex> lk(g_registry_mutex);
   auto it = g_live_envs.find(env_value);
   if (it == g_live_envs.end()) return false;
-  // Generation mirror check: the registry copy must equal the
-  // NodeEnv's field. After the map hit the memory is live, so the
-  // single-field read is safe; a mismatch means the bytes at that
-  // address are no longer the published NodeEnv (corruption / ABA
-  // without registry update) and must fail without returning it.
-  // Pointer-only callers cannot detect routine reuse (same pointer,
-  // new generation, both mirrors updated together); see A5.
-  if (it->second.env == nullptr ||
-      it->second.env->generation != it->second.generation) {
+  // Generation mirror check + owner-thread validation all happen under
+  // g_registry_mutex so an unlocked NodeEnv* is never exposed off-thread
+  // where chakra_nodeapi_destroy_env could concurrently delete it.
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) {
     return false;
   }
-  *out = it->second.env;
+  if (env->owner_thread != std::this_thread::get_id()) {
+    if (out_owner != nullptr) *out_owner = env->owner_thread;
+    return false;
+  }
+  if (out != nullptr) *out = env;
   return true;
+}
+
+bool LookupLiveEnvGeneration(void* env_value, std::uint64_t* out_generation) {
+  if (out_generation != nullptr) *out_generation = 0;
+  if (env_value == nullptr) return false;
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(env_value);
+  if (it == g_live_envs.end()) return false;
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) {
+    return false;
+  }
+  if (out_generation != nullptr) *out_generation = it->second.generation;
+  return true;
+}
+
+bool FetchLiveEnvServices(napi_env env_value,
+                          chakra_nodeapi_host_services* out_services,
+                          void** out_host_ctx) {
+  if (env_value == nullptr) return false;
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(static_cast<void*>(env_value));
+  if (it == g_live_envs.end()) return false;
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) return false;
+  if (env->owner_thread != std::this_thread::get_id()) return false;
+  if (env->state == EnvState::Dead) return false;
+  if (out_services != nullptr) *out_services = env->services;
+  if (out_host_ctx != nullptr) *out_host_ctx = env->host_ctx;
+  return true;
+}
+
+bool DispatchHostPostTask(napi_env env_value, void (*fn)(void*), void* arg) {
+  if (env_value == nullptr || fn == nullptr) return false;
+  bool (*post_task)(void*, void (*)(void*), void*) = nullptr;
+  void* host_ctx = nullptr;
+  NodeEnv* env = nullptr;
+  {
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    auto it = g_live_envs.find(static_cast<void*>(env_value));
+    if (it == g_live_envs.end()) return false;
+    env = it->second.env;
+    if (env == nullptr || env->generation != it->second.generation) return false;
+    if (env->state == EnvState::Dead) return false;
+    post_task = env->services.post_task;
+    host_ctx = env->host_ctx;
+    if (post_task == nullptr) return false;
+    env->active_host_dispatches++;
+  }
+  bool ok = false;
+  try {
+    ok = post_task(host_ctx, fn, arg);
+  } catch (...) {
+    ok = false;
+  }
+  {
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    if (env->active_host_dispatches > 0) {
+      env->active_host_dispatches--;
+    }
+    if (env->active_host_dispatches == 0) {
+      g_registry_cv.notify_all();
+    }
+  }
+  return ok;
 }
 
 bool LookupLiveEnvWithGeneration(void* env_value,
                                  std::uint64_t expected_generation,
                                  NodeEnv** out) {
-  if (env_value == nullptr || out == nullptr) return false;
+  if (out != nullptr) *out = nullptr;
+  if (env_value == nullptr) return false;
   std::lock_guard<std::mutex> lk(g_registry_mutex);
   auto it = g_live_envs.find(env_value);
   if (it == g_live_envs.end()) return false;
   // Decide from the registry record alone: on mismatch fail
   // WITHOUT dereferencing the (possibly new) env.
   if (it->second.generation != expected_generation) return false;
-  if (it->second.env == nullptr ||
-      it->second.env->generation != expected_generation) {
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != expected_generation) {
     return false;
   }
-  *out = it->second.env;
+  // Never expose an unlocked NodeEnv* to a non-owner thread.
+  if (out != nullptr && env->owner_thread == std::this_thread::get_id()) {
+    *out = env;
+  }
   return true;
 }
 
@@ -231,7 +309,7 @@ ContextGuard::ContextGuard(napi_env env_value) noexcept {
 void ContextGuard::Enter(napi_env env_value) noexcept {
   if (entered_ || !env_value) return;
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) return;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) return;
   if (!env->runtime || !env->context) return;
   JsContextRef cur = JS_INVALID_REFERENCE;
   if (JsGetCurrentContext(&cur) != JsNoError) return;
@@ -250,25 +328,21 @@ ContextGuard::~ContextGuard() noexcept {
 napi_status CheckAlive(napi_env env_value) {
   if (!env_value) return napi_invalid_arg;
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    // Dead or fabricated value: never validate through the
-    // pointer (R-ENV-10). Public entries treat this as an
-    // invalid argument (no env to record into).
-    return napi_invalid_arg;
-  }
-  std::thread::id cur = std::this_thread::get_id();
-  if (cur != env->owner_thread) {
-    // Wrong thread (semantics R-ENV-11): debug assert with
-    // env pointer + threads in the diagnostic, release
-    // napi_invalid_arg WITHOUT entering the wrong context and
-    // WITHOUT mutating env state cross-thread.
+  std::thread::id owner_tid{};
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env, &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
+      // Wrong thread (semantics R-ENV-11): debug assert with
+      // env pointer + threads in the diagnostic, release
+      // napi_invalid_arg WITHOUT entering the wrong context and
+      // WITHOUT touching NodeEnv after unlock.
 #if !defined(NDEBUG)
-    std::fprintf(stderr,
-                 "nodeapi: wrong-thread call env=%p owner=%zu current=%zu\n",
-                 static_cast<void*>(env_value), TidHash(env->owner_thread),
-                 TidHash(cur));
-    assert(false);
+      std::fprintf(stderr,
+                   "nodeapi: wrong-thread call env=%p owner=%zu current=%zu\n",
+                   static_cast<void*>(env_value), TidHash(owner_tid),
+                   TidHash(std::this_thread::get_id()));
+      assert(false);
 #endif
+    }
     return napi_invalid_arg;
   }
   if (env->state != EnvState::Alive) {
@@ -288,19 +362,18 @@ napi_status CheckAliveAllowClosing(napi_env env_value) {
   // delete/get, exception queries). See header for parity.
   if (!env_value) return napi_invalid_arg;
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    return napi_invalid_arg;
-  }
-  std::thread::id cur = std::this_thread::get_id();
-  if (cur != env->owner_thread) {
+  std::thread::id owner_tid{};
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env, &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
 #if !defined(NDEBUG)
-    std::fprintf(stderr,
-                 "nodeapi: wrong-thread call (allow-closing) env=%p "
-                 "owner=%zu current=%zu\n",
-                 static_cast<void*>(env_value), TidHash(env->owner_thread),
-                 TidHash(cur));
-    assert(false);
+      std::fprintf(stderr,
+                   "nodeapi: wrong-thread call (allow-closing) env=%p "
+                   "owner=%zu current=%zu\n",
+                   static_cast<void*>(env_value), TidHash(owner_tid),
+                   TidHash(std::this_thread::get_id()));
+      assert(false);
 #endif
+    }
     return napi_invalid_arg;
   }
   if (env->state == EnvState::Dead) {
@@ -314,12 +387,6 @@ napi_status CheckAliveAllowClosing(napi_env env_value) {
 void SetLastError(napi_env env_value, napi_status status,
                   const char* message) {
   if (!env_value) return;
-  NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) return;
-  // Caller guarantees Alive + owner thread (checked before).
-  // NOTE: during Closing, SetLastError still records (for
-  // teardown-compatible entries that fail in Closing). The
-  // pointer is still live until step 7, so this is safe.
   // Normalize argument-validation messages to the Node (V8) spellings
   // the vendored js-native-api drivers assert on (PR-12: statuses are
   // conformance; the text below matches Node so those drivers pass
@@ -353,8 +420,17 @@ void SetLastError(napi_env env_value, napi_status status,
   } else if (status == napi_arraybuffer_expected) {
     stored = "An arraybuffer was expected";
   }
-  env->last_error.status = status;
   if (!stored) stored = "";
+  // Acquire g_registry_mutex, validate live env + generation + owner_thread
+  // under lock, and mutate last_error under lock so off-thread null-arg
+  // callers cannot touch NodeEnv or race chakra_nodeapi_destroy_env.
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(static_cast<void*>(env_value));
+  if (it == g_live_envs.end()) return;
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) return;
+  if (env->owner_thread != std::this_thread::get_id()) return;
+  env->last_error.status = status;
   std::strncpy(env->last_error.message, stored,
                sizeof(env->last_error.message) - 1);
   env->last_error.message[sizeof(env->last_error.message) - 1] = 0;
@@ -367,11 +443,14 @@ void SetLastError(napi_env env_value, napi_status status,
 void ClearLastError(napi_env env_value) {
   // AMB-STATUS-1 decided rule: success clears. This is the sole
   // write of napi_ok into last_error (other than create).
-  // No-op for NULL/dead/wrong-thread (same checks as SetLastError).
+  // No-op for NULL/dead/wrong-thread (same locked checks as SetLastError).
   if (!env_value) return;
-  NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) return;
-  if (std::this_thread::get_id() != env->owner_thread) return;
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(static_cast<void*>(env_value));
+  if (it == g_live_envs.end()) return;
+  NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) return;
+  if (env->owner_thread != std::this_thread::get_id()) return;
   // Closing still allows clearing (teardown-compatible getters
   // that succeed in Closing clear as well); Dead-before-free is
   // still live until step 7, so clearing is safe there too.
@@ -402,20 +481,18 @@ EntryGuard::EntryGuard(napi_env env_value, bool allowClosing,
     return;
   }
   NodeEnv* env = nullptr;
-  if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    status_ = napi_invalid_arg;
-    return;
-  }
-  std::thread::id cur = std::this_thread::get_id();
-  if (cur != env->owner_thread) {
+  std::thread::id owner_tid{};
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env, &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
 #if !defined(NDEBUG)
-    std::fprintf(stderr,
-                 "nodeapi: wrong-thread entry-guard env=%p owner=%zu "
-                 "current=%zu\n",
-                 static_cast<void*>(env_value), TidHash(env->owner_thread),
-                 TidHash(cur));
-    assert(false);
+      std::fprintf(stderr,
+                   "nodeapi: wrong-thread entry-guard env=%p owner=%zu "
+                   "current=%zu\n",
+                   static_cast<void*>(env_value), TidHash(owner_tid),
+                   TidHash(std::this_thread::get_id()));
+      assert(false);
 #endif
+    }
     status_ = napi_invalid_arg;
     return;
   }
@@ -684,17 +761,17 @@ napi_status chakra_nodeapi_set_module_api_version(napi_env env_value,
                                                    int32_t version) {
   if (!env_value) return napi_invalid_arg;
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    return napi_invalid_arg;
-  }
-  std::thread::id cur = std::this_thread::get_id();
-  if (cur != env->owner_thread) {
+  std::thread::id owner_tid{};
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env,
+                                      &owner_tid)) {
+    if (owner_tid != std::thread::id{}) {
 #if !defined(NDEBUG)
-    std::fprintf(stderr,
-                 "nodeapi: wrong-thread set_module_api_version env=%p\n",
-                 static_cast<void*>(env_value));
-    assert(false);
+      std::fprintf(stderr,
+                   "nodeapi: wrong-thread set_module_api_version env=%p\n",
+                   static_cast<void*>(env_value));
+      assert(false);
 #endif
+    }
     return napi_invalid_arg;
   }
   if (env->state != nodeapi::EnvState::Alive || version < 1 || version > 10) {
@@ -725,6 +802,8 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
   // without touching freed memory (debug assert + release no-op).
   nodeapi::NodeEnv* env = nullptr;
   std::uint64_t live_generation = 0;
+  bool wrong_thread = false;
+  nodeapi::EnvState cur_state = nodeapi::EnvState::Alive;
   {
     std::lock_guard<std::mutex> lk(g_registry_mutex);
     auto it = g_live_envs.find(key);
@@ -746,9 +825,14 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
     }
     env = it->second.env;
     live_generation = it->second.generation;
+    wrong_thread = (env->owner_thread != std::this_thread::get_id());
+    cur_state = env->state;
+    if (!wrong_thread && cur_state == nodeapi::EnvState::Alive) {
+      // Step 1: Closing (published under g_registry_mutex).
+      env->state = nodeapi::EnvState::Closing;
+    }
   }
-  // Live: dereference is now safe.
-  if (env->owner_thread != std::this_thread::get_id()) {
+  if (wrong_thread) {
     assert(false && "chakra_nodeapi_destroy_env from wrong thread (R-ENV-6)");
     std::fprintf(stderr,
                  "chakra_nodeapi_destroy_env: wrong thread for env %p: "
@@ -756,17 +840,16 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
                  key);
     return;
   }
-  if (env->state != nodeapi::EnvState::Alive) {
+  if (cur_state != nodeapi::EnvState::Alive) {
     // Reentrant destroy from a hook/finalizer during Closing.
     assert(false && "chakra_nodeapi_destroy_env reentrant during Closing");
     std::fprintf(stderr,
                  "chakra_nodeapi_destroy_env: env %p already %s: ignored\n",
-                 key, nodeapi::DescribeState(env->state));
+                 key, nodeapi::DescribeState(cur_state));
     return;
   }
 
-  // Step 1: Closing.
-  env->state = nodeapi::EnvState::Closing;
+  // Step 1: emit Closing marker outside g_registry_mutex.
   nodeapi::EmitTeardownEvent(env, "closing");
 
   // Steps 2-6 run with the env's context current (plan section 3.2).
@@ -820,14 +903,20 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
   }
 
   // Step 7: Dead + free.
-  env->state = nodeapi::EnvState::Dead;
+  {
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    env->state = nodeapi::EnvState::Dead;
+  }
   nodeapi::EmitTeardownEvent(env, "dead");
 
   nodeapi::Lifetime_DiscardEnvState(env);
   {
-    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    std::unique_lock<std::mutex> lk(g_registry_mutex);
     g_live_envs.erase(key);
     DeadInsertLocked(key, live_generation);
+    while (env->active_host_dispatches > 0) {
+      g_registry_cv.wait(lk);
+    }
   }
   // A8-1: discard stragglers queued for this (now dead) generation without
   // invocation. Runs AFTER the live entry is erased, so no new record for
@@ -843,23 +932,35 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
 void chakra_nodeapi_test_set_teardown_log(
     napi_env env_value, void (*sink)(void* ctx, const char* event),
     void* ctx) {
-  nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) return;
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(static_cast<void*>(env_value));
+  if (it == g_live_envs.end()) return;
+  nodeapi::NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) return;
+  if (env->owner_thread != std::this_thread::get_id()) return;
   env->teardown_sink = sink;
   env->teardown_ctx = ctx;
 }
 
 bool chakra_nodeapi_test_is_live(napi_env env_value) {
-  nodeapi::NodeEnv* env = nullptr;
-  return nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env);
+  std::uint64_t gen = 0;
+  return nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env_value), &gen);
 }
 
 const char* chakra_nodeapi_test_state_name(napi_env env_value) {
-  nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    return "dead";
+  if (env_value == nullptr) return "dead";
+  nodeapi::EnvState st = nodeapi::EnvState::Dead;
+  {
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    auto it = g_live_envs.find(static_cast<void*>(env_value));
+    if (it == g_live_envs.end()) return "dead";
+    nodeapi::NodeEnv* env = it->second.env;
+    if (env == nullptr || env->generation != it->second.generation) {
+      return "dead";
+    }
+    st = env->state;
   }
-  switch (env->state) {
+  switch (st) {
   case nodeapi::EnvState::Alive: return "alive";
   case nodeapi::EnvState::Closing: return "closing";
   case nodeapi::EnvState::Dead: return "dead-before-free";
@@ -868,11 +969,11 @@ const char* chakra_nodeapi_test_state_name(napi_env env_value) {
 }
 
 std::uint64_t chakra_nodeapi_test_env_generation(napi_env env_value) {
-  nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  std::uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env_value), &gen)) {
     return 0;
   }
-  return env->generation;
+  return gen;
 }
 
 size_t chakra_nodeapi_test_dead_count(void) {
@@ -894,7 +995,7 @@ std::uint64_t chakra_nodeapi_test_dead_generation(napi_env env_value) {
 
 NodeApiScopeState* NodeApiEnv_ScopeState(napi_env env_value) {
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) {
     return nullptr;
   }
   return env->scope_state;
@@ -902,7 +1003,7 @@ NodeApiScopeState* NodeApiEnv_ScopeState(napi_env env_value) {
 
 NodeApiRefsState* NodeApiEnv_RefsState(napi_env env_value) {
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) {
     return nullptr;
   }
   return env->refs_state;
@@ -910,7 +1011,7 @@ NodeApiRefsState* NodeApiEnv_RefsState(napi_env env_value) {
 
 NodeApiPromiseState* NodeApiEnv_PromiseState(napi_env env_value) {
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) {
     return nullptr;
   }
   return env->promise_state;
@@ -918,17 +1019,19 @@ NodeApiPromiseState* NodeApiEnv_PromiseState(napi_env env_value) {
 
 NodeApiScriptState* NodeApiEnv_ScriptState(napi_env env_value) {
   nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env_value), &env)) {
     return nullptr;
   }
   return env->script_state;
 }
 
 int /*bool*/ NodeApiEnv_IsAlive(napi_env env_value) {
-  nodeapi::NodeEnv* env = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
-    return 0;
-  }
+  if (env_value == nullptr) return 0;
+  std::lock_guard<std::mutex> lk(g_registry_mutex);
+  auto it = g_live_envs.find(static_cast<void*>(env_value));
+  if (it == g_live_envs.end()) return 0;
+  nodeapi::NodeEnv* env = it->second.env;
+  if (env == nullptr || env->generation != it->second.generation) return 0;
   return env->state == nodeapi::EnvState::Alive ? 1 : 0;
 }
 
@@ -943,12 +1046,7 @@ napi_status NAPI_CDECL napi_get_version(node_api_basic_env env_raw,
   // node_api_basic_env and napi_env are the same pointer type.
   napi_env env = reinterpret_cast<napi_env>(env_raw);
   if (!result) {
-    nodeapi::NodeEnv* te = nullptr;
-    if (env &&
-        nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) &&
-        te->owner_thread == std::this_thread::get_id() &&
-        (te->state == nodeapi::EnvState::Alive ||
-         te->state == nodeapi::EnvState::Closing)) {
+    if (env) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "napi_get_version: result is NULL");
     }
@@ -965,12 +1063,7 @@ napi_status NAPI_CDECL napi_get_node_version(
     node_api_basic_env env_raw, const napi_node_version** version) {
   napi_env env = reinterpret_cast<napi_env>(env_raw);
   if (!version) {
-    nodeapi::NodeEnv* te = nullptr;
-    if (env &&
-        nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) &&
-        te->owner_thread == std::this_thread::get_id() &&
-        (te->state == nodeapi::EnvState::Alive ||
-         te->state == nodeapi::EnvState::Closing)) {
+    if (env) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "napi_get_node_version: version is NULL");
     }
@@ -987,12 +1080,7 @@ NAPI_EXTERN napi_status NAPI_CDECL node_api_get_module_file_name(
     node_api_basic_env env_raw, const char** result) {
   napi_env env = const_cast<napi_env>(env_raw);
   if (result == nullptr) {
-    nodeapi::NodeEnv* te = nullptr;
-    if (env &&
-        nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) &&
-        te->owner_thread == std::this_thread::get_id() &&
-        (te->state == nodeapi::EnvState::Alive ||
-         te->state == nodeapi::EnvState::Closing)) {
+    if (env) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "node_api_get_module_file_name: result is NULL");
     }
@@ -1001,7 +1089,8 @@ NAPI_EXTERN napi_status NAPI_CDECL node_api_get_module_file_name(
   napi_status v = nodeapi::CheckAliveAllowClosing(env);
   if (v != napi_ok) return v;
   nodeapi::NodeEnv* te = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) || te == nullptr) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &te) ||
+      te == nullptr) {
     return napi_invalid_arg;
   }
   *result = te->module_file_url.c_str();
@@ -1022,7 +1111,7 @@ napi_status NAPI_CDECL napi_get_last_error_info(
   napi_status vs = nodeapi::CheckAliveAllowClosing(env);
   if (vs != napi_ok) return vs;
   nodeapi::NodeEnv* te = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) || !te) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &te) || !te) {
     return napi_invalid_arg;
   }
   // Reading last_error does NOT clear it (AMB-STATUS-1 exception).

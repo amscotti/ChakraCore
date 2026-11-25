@@ -400,7 +400,7 @@ void BuffersCleanupHook(void* arg) {
 napi_status GetOrCreateState(napi_env env, BufferState** out) {
   *out = nullptr;
   nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &nenv)) {
     return napi_invalid_arg;
   }
   uint64_t gen = nenv->generation;
@@ -665,9 +665,8 @@ napi_status IsBufferMarker(napi_env env, BufferState* st, JsValueRef value,
 
 void nodeapi_buffers_teardown(napi_env env) {
   if (env == nullptr) return;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
-  uint64_t gen = nenv->generation;
+  uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) return;
   BufferState* st = nullptr;
   {
     std::lock_guard<std::mutex> lk(g_buf_mutex);

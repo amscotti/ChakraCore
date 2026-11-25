@@ -141,6 +141,7 @@
 #include <limits>
 #include <mutex>
 #include <new>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -349,9 +350,8 @@ void ExternalArrayBufferTrampoline(void* state) {
 // are deleted at enqueue time and never accumulate; see EnqueueRecord).
 void DrainExternalFinalizers(napi_env env) {
   if (!env) return;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
-  uint64_t gen = nenv->generation;
+  uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) return;
   std::vector<ExternalRecord*> to_run;
   {
     std::lock_guard<std::mutex> lk(g_ext_mutex);
@@ -586,14 +586,14 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
                             "create_external_arraybuffer: record OOM");
       return napi_generic_failure;
     }
-    nodeapi::NodeEnv* nenv = nullptr;
-    if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
+    uint64_t gen = 0;
+    if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) {
       delete rec;
       return napi_invalid_arg;
     }
     rec->id = g_next_ext_id.fetch_add(1, std::memory_order_relaxed);
     rec->env = env;
-    rec->generation = nenv->generation;
+    rec->generation = gen;
     rec->finalize_cb = finalize_cb;
     rec->finalize_data = external_data;
     rec->finalize_hint = finalize_hint;
@@ -775,9 +775,8 @@ napi_status NAPI_CDECL napi_detach_arraybuffer(napi_env env,
   // runs once immediately on detach (Node semantics) and subsequent GC
   // `JsrtExternalArrayBuffer::Finalize` finds the token absent (no-op: never
   // double-frees or double-finalizes).
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-    uint64_t gen = nenv->generation;
+  uint64_t gen = 0;
+  if (nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) {
     ExternalRecord* detached_rec = nullptr;
     bool enqueue_failed = false;
     {
@@ -879,8 +878,15 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
                             /*allowPending=*/false, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   DrainExternalFinalizers(env);
+  // Read caller enum storage as its underlying integer to avoid UBSan
+  // -fsanitize=enum UB when untrusted callers pass out-of-range values.
+  using RawType = std::underlying_type_t<napi_typedarray_type>;
+  RawType raw_type = 0;
+  std::memcpy(&raw_type, &type, sizeof(raw_type));
   JsTypedArrayType jsType = JsArrayTypeUint8;
-  if (!NapiTypeToJs(type, &jsType)) {
+  if (raw_type < static_cast<RawType>(napi_int8_array) ||
+      raw_type > static_cast<RawType>(napi_biguint64_array) ||
+      !NapiTypeToJs(static_cast<napi_typedarray_type>(raw_type), &jsType)) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "create_typedarray: bad type");
     return napi_invalid_arg;

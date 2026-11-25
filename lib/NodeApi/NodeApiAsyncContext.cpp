@@ -167,9 +167,9 @@ void FreeState(AsyncState* st) {
 // single-field read is safe). 0 if the lookup fails (dead/fabricated).
 std::uint64_t CurrentGeneration(napi_env env) {
   if (env == nullptr) return 0;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return 0;
-  return nenv->generation;
+  std::uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) return 0;
+  return gen;
 }
 
 AsyncState* FindStateLocked(void* key) {
@@ -294,25 +294,25 @@ size_t NodeApiAsyncContext_ContextCount(napi_env env) {
   if (env == nullptr) return 0;
   // Never dereference a dead/fabricated env value: consult the live
   // registry by value first (R-ENV-10).
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return 0;
+  std::uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) return 0;
   void* key = static_cast<void*>(env);
   std::lock_guard<std::mutex> lk(g_state_mutex);
   AsyncState* st = FindStateLocked(key);
   if (st == nullptr) return 0;
-  if (st->generation != nenv->generation) return 0; // stale
+  if (st->generation != gen) return 0; // stale
   return st->contexts.size();
 }
 
 size_t NodeApiAsyncContext_ScopeDepth(napi_env env) {
   if (env == nullptr) return 0;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return 0;
+  std::uint64_t gen = 0;
+  if (!nodeapi::LookupLiveEnvGeneration(static_cast<void*>(env), &gen)) return 0;
   void* key = static_cast<void*>(env);
   std::lock_guard<std::mutex> lk(g_state_mutex);
   AsyncState* st = FindStateLocked(key);
   if (st == nullptr) return 0;
-  if (st->generation != nenv->generation) return 0; // stale
+  if (st->generation != gen) return 0; // stale
   return st->scopes.size();
 }
 

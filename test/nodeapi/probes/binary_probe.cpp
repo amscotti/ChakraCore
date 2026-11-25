@@ -675,9 +675,9 @@ int main() {
     napi_create_arraybuffer(env, 16, &ad, &ab);
     napi_value ta = nullptr;
     // Invalid type enum value (out of range).
-    napi_typedarray_type bad = static_cast<napi_typedarray_type>(99);
-    expect_status(napi_create_typedarray(env, bad, 1, ab, 0, &ta), napi_invalid_arg,
-                  "bad type invalid_arg");
+    expect_status(napi_create_typedarray(
+                      env, static_cast<napi_typedarray_type>(99), 1, ab, 0, &ta),
+                  napi_invalid_arg, "bad type invalid_arg");
     // Not an ArrayBuffer.
     napi_value obj = nullptr;
     napi_create_object(env, &obj);

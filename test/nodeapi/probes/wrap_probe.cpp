@@ -519,6 +519,64 @@ PROBE_NOINLINE_OPTNONE void PhaseJ_PendingThenExternalAndDrop(
   ClearDeadRef(obj, JS_INVALID_REFERENCE);
 }
 
+struct TeardownCancelState {
+  napi_env env = nullptr;
+  napi_ref ref_a = nullptr;
+  napi_ref ref_b = nullptr;
+  napi_ref keep_a = nullptr;
+  napi_ref keep_b = nullptr;
+  int calls_a = 0;
+  int calls_b = 0;
+  bool use_remove_wrap = false;
+  bool cancelled_sibling = false;
+};
+
+void FinTeardownCancelA(napi_env env, void* data, void* /*hint*/) {
+  auto* st = static_cast<TeardownCancelState*>(data);
+  if (!st) return;
+  st->calls_a++;
+  if (st->cancelled_sibling) return;
+  st->cancelled_sibling = true;
+  if (st->use_remove_wrap) {
+    if (st->keep_b != nullptr) {
+      napi_value obj_b = nullptr;
+      if (napi_get_reference_value(env, st->keep_b, &obj_b) == napi_ok &&
+          obj_b != nullptr) {
+        void* removed = nullptr;
+        if (napi_remove_wrap(env, obj_b, &removed) == napi_ok) {
+          (void)removed;
+        }
+      }
+    }
+  } else if (st->ref_b != nullptr) {
+    (void)napi_delete_reference(env, st->ref_b);
+    st->ref_b = nullptr;
+  }
+}
+
+void FinTeardownCancelB(napi_env env, void* data, void* /*hint*/) {
+  auto* st = static_cast<TeardownCancelState*>(data);
+  if (!st) return;
+  st->calls_b++;
+  if (st->cancelled_sibling) return;
+  st->cancelled_sibling = true;
+  if (st->use_remove_wrap) {
+    if (st->keep_a != nullptr) {
+      napi_value obj_a = nullptr;
+      if (napi_get_reference_value(env, st->keep_a, &obj_a) == napi_ok &&
+          obj_a != nullptr) {
+        void* removed = nullptr;
+        if (napi_remove_wrap(env, obj_a, &removed) == napi_ok) {
+          (void)removed;
+        }
+      }
+    }
+  } else if (st->ref_a != nullptr) {
+    (void)napi_delete_reference(env, st->ref_a);
+    st->ref_a = nullptr;
+  }
+}
+
 } /* namespace */
 
 int main() {
@@ -836,6 +894,61 @@ int main() {
     expect(cnt.calls == 0, "L: zero finalizers at drain after cancel");
     chakra_nodeapi_destroy_env(env);
     expect(cnt.calls == 0, "L: zero finalizers at destroy after cancel");
+  }
+
+  /* ---- Phase M: sibling wrap cancel/remove during kClosing teardown ---- */
+  {
+    std::fprintf(stdout, "-- case sibling-cancel-during-teardown --\n");
+    bool del_ok = true;
+    bool rem_ok = true;
+    for (int round = 0; round < 20; round++) {
+      {
+        napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapM_del", nullptr, nullptr);
+        if (!env) { del_ok = false; break; }
+        TeardownCancelState st{};
+        st.env = env;
+        st.use_remove_wrap = false;
+        napi_handle_scope sc = nullptr;
+        if (napi_open_handle_scope(env, &sc) != napi_ok) del_ok = false;
+        JsValueRef obj_a = make_object_assert();
+        JsValueRef obj_b = make_object_assert();
+        if (napi_create_reference(env, reinterpret_cast<napi_value>(obj_a), 1, &st.keep_a) != napi_ok ||
+            napi_create_reference(env, reinterpret_cast<napi_value>(obj_b), 1, &st.keep_b) != napi_ok ||
+            napi_wrap(env, reinterpret_cast<napi_value>(obj_a), &st, FinTeardownCancelA, nullptr, &st.ref_a) != napi_ok ||
+            napi_wrap(env, reinterpret_cast<napi_value>(obj_b), &st, FinTeardownCancelB, nullptr, &st.ref_b) != napi_ok) {
+          del_ok = false;
+        }
+        (void)napi_close_handle_scope(env, sc);
+        ClearDeadRef(obj_a, JS_INVALID_REFERENCE);
+        ClearDeadRef(obj_b, JS_INVALID_REFERENCE);
+        chakra_nodeapi_destroy_env(env);
+        if ((st.calls_a + st.calls_b) != 1 || !st.cancelled_sibling) del_ok = false;
+      }
+      {
+        napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapM_rem", nullptr, nullptr);
+        if (!env) { rem_ok = false; break; }
+        TeardownCancelState st{};
+        st.env = env;
+        st.use_remove_wrap = true;
+        napi_handle_scope sc = nullptr;
+        if (napi_open_handle_scope(env, &sc) != napi_ok) rem_ok = false;
+        JsValueRef obj_a = make_object_assert();
+        JsValueRef obj_b = make_object_assert();
+        if (napi_create_reference(env, reinterpret_cast<napi_value>(obj_a), 1, &st.keep_a) != napi_ok ||
+            napi_create_reference(env, reinterpret_cast<napi_value>(obj_b), 1, &st.keep_b) != napi_ok ||
+            napi_wrap(env, reinterpret_cast<napi_value>(obj_a), &st, FinTeardownCancelA, nullptr, nullptr) != napi_ok ||
+            napi_wrap(env, reinterpret_cast<napi_value>(obj_b), &st, FinTeardownCancelB, nullptr, nullptr) != napi_ok) {
+          rem_ok = false;
+        }
+        (void)napi_close_handle_scope(env, sc);
+        ClearDeadRef(obj_a, JS_INVALID_REFERENCE);
+        ClearDeadRef(obj_b, JS_INVALID_REFERENCE);
+        chakra_nodeapi_destroy_env(env);
+        if ((st.calls_a + st.calls_b) != 1 || !st.cancelled_sibling) rem_ok = false;
+      }
+    }
+    expect(del_ok, "M: delete_reference(sibling_ref) in teardown finalizer safe (20x)");
+    expect(rem_ok, "M: remove_wrap(sibling_obj) in teardown finalizer safe (20x)");
   }
 
   std::fprintf(stdout, "WRAP_PROBE: %s (%d/%d)\n",

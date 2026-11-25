@@ -137,7 +137,8 @@ napi_status chakra_nodeapi_run_pending_registrations(napi_env env,
     return guard.status();
   }
   nodeapi::NodeEnv* e = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &e) || e == nullptr) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &e) ||
+      e == nullptr) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "run_pending: unknown env");
     return napi_invalid_arg;
@@ -242,20 +243,28 @@ napi_status NAPI_CDECL napi_fatal_exception(napi_env env, napi_value err) {
                             /*allowPending=*/false, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   nodeapi::NodeEnv* e = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &e) || e == nullptr) {
+  if (!nodeapi::LookupLiveEnvForOwner(static_cast<void*>(env), &e) ||
+      e == nullptr) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "napi_fatal_exception: unknown env");
     return napi_invalid_arg;
   }
-  if (e->services.fatal_exception != nullptr) {
+  chakra_nodeapi_host_services services{};
+  void* host_ctx = nullptr;
+  if (!nodeapi::FetchLiveEnvServices(env, &services, &host_ctx)) {
+    nodeapi::SetLastError(env, napi_invalid_arg,
+                          "napi_fatal_exception: unknown env");
+    return napi_invalid_arg;
+  }
+  if (services.fatal_exception != nullptr) {
     /* Root for the duration of the host callback (R1). The host may
      * run JS / GC before reading the value; the provider scope root
      * alone is not a guarantee because the callback itself is user
      * code. JsAddRef on a tagged value is a no-op (harmless). */
     JsValueRef errJs = reinterpret_cast<JsValueRef>(err);
-    (void)JsAddRef(errJs, nullptr);
-    e->services.fatal_exception(e->host_ctx, err);
-    (void)JsRelease(errJs, nullptr);
+    const bool err_rooted = (JsAddRef(errJs, nullptr) == JsNoError);
+    services.fatal_exception(host_ctx, err);
+    if (err_rooted) (void)JsRelease(errJs, nullptr);
     nodeapi::ClearLastError(env);
     return napi_ok;
   }

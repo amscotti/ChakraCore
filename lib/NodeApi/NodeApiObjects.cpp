@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -1455,14 +1456,28 @@ napi_status NAPI_CDECL napi_get_all_property_names(
                                     "get_all_property_names: result is NULL");
     return napi_invalid_arg;
   }
-  if (key_mode != napi_key_include_prototypes &&
-      key_mode != napi_key_own_only) {
+  // Copy caller-supplied enum arguments through their underlying integer types
+  // so out-of-range values validate cleanly under UBSan -fsanitize=enum
+  // without changing the public ABI.
+  using RawKeyMode = std::underlying_type_t<napi_key_collection_mode>;
+  using RawKeyFilter = std::underlying_type_t<napi_key_filter>;
+  using RawKeyConversion = std::underlying_type_t<napi_key_conversion>;
+  RawKeyMode raw_key_mode = 0;
+  RawKeyFilter raw_key_filter = 0;
+  RawKeyConversion raw_key_conversion = 0;
+  std::memcpy(&raw_key_mode, &key_mode, sizeof(raw_key_mode));
+  std::memcpy(&raw_key_filter, &key_filter, sizeof(raw_key_filter));
+  std::memcpy(&raw_key_conversion, &key_conversion, sizeof(raw_key_conversion));
+
+  if (raw_key_mode != static_cast<RawKeyMode>(napi_key_include_prototypes) &&
+      raw_key_mode != static_cast<RawKeyMode>(napi_key_own_only)) {
     if (env) nodeapi::SetLastError(env, napi_invalid_arg,
                                     "get_all_property_names: bad key_mode");
     return napi_invalid_arg;
   }
-  if (key_conversion != napi_key_keep_numbers &&
-      key_conversion != napi_key_numbers_to_strings) {
+  if (raw_key_conversion != static_cast<RawKeyConversion>(napi_key_keep_numbers) &&
+      raw_key_conversion !=
+          static_cast<RawKeyConversion>(napi_key_numbers_to_strings)) {
     if (env) nodeapi::SetLastError(env, napi_invalid_arg,
                                     "get_all_property_names: bad conversion");
     return napi_invalid_arg;
@@ -1475,7 +1490,8 @@ napi_status NAPI_CDECL napi_get_all_property_names(
                        static_cast<int>(napi_key_configurable) |
                        static_cast<int>(napi_key_skip_strings) |
                        static_cast<int>(napi_key_skip_symbols);
-    if (key_filter < 0 || (static_cast<int>(key_filter) & ~kKnown) != 0) {
+    if (static_cast<int>(raw_key_filter) < 0 ||
+        (static_cast<int>(raw_key_filter) & ~kKnown) != 0) {
       if (env) nodeapi::SetLastError(env, napi_invalid_arg,
                                       "get_all_property_names: bad filter");
       return napi_invalid_arg;
@@ -1489,7 +1505,11 @@ napi_status NAPI_CDECL napi_get_all_property_names(
   if (s != napi_ok) return s;
   ScratchRoot obj_root(ToJs(obj));
   JsValueRef arr = JS_INVALID_REFERENCE;
-  s = CollectPropertyNames(env, obj, key_mode, key_filter, key_conversion, &arr);
+  s = CollectPropertyNames(env, obj,
+                           static_cast<napi_key_collection_mode>(raw_key_mode),
+                           static_cast<napi_key_filter>(raw_key_filter),
+                           static_cast<napi_key_conversion>(raw_key_conversion),
+                           &arr);
   if (s != napi_ok) return s;
   s = RootAndPublish(env, arr, result);
   if (s != napi_ok) return s;
