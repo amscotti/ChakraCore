@@ -199,16 +199,19 @@ public:
     JsErrorCode Initialize(JsValueRef value)
     {
         errorCode = JsNoError;
-        JsValueRef strValue;
-        JsValueType type;
-        ChakraRTInterface::JsGetValueType(value, &type);
-        if (type != JsString)
+        JsValueRef strValue = JS_INVALID_REFERENCE;
+        JsValueType type = JsUndefined;
+        errorCode = ChakraRTInterface::JsGetValueType(value, &type);
+        if (errorCode == JsNoError)
         {
-            errorCode = ChakraRTInterface::JsConvertValueToString(value, &strValue);
-        }
-        else
-        {
-            strValue = value;
+            if (type != JsString)
+            {
+                errorCode = ChakraRTInterface::JsConvertValueToString(value, &strValue);
+            }
+            else
+            {
+                strValue = value;
+            }
         }
         size_t length = 0;
         if (errorCode == JsNoError)
@@ -217,11 +220,23 @@ public:
             if (errorCode == JsNoError)
             {
                 data = (char*)malloc((length + 1) * sizeof(char));
-                size_t writtenLength = 0;
-                errorCode = ChakraRTInterface::JsCopyString(strValue, data, length, &writtenLength);
-                if (errorCode == JsNoError)
+                if (data == nullptr)
                 {
-                    AssertMsg(length == writtenLength, "Inconsistent length in utf8 encoding");
+                    errorCode = JsErrorOutOfMemory;
+                }
+                else
+                {
+                    size_t writtenLength = 0;
+                    errorCode = ChakraRTInterface::JsCopyString(strValue, data, length, &writtenLength);
+                    if (errorCode == JsNoError)
+                    {
+                        AssertMsg(length == writtenLength, "Inconsistent length in utf8 encoding");
+                    }
+                    else
+                    {
+                        free(data);
+                        data = nullptr;
+                    }
                 }
             }
         }

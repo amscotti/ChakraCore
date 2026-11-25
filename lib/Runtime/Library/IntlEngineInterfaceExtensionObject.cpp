@@ -429,20 +429,112 @@ namespace Js
         return value;
     }
 
-    template <size_t N>
-    static void LangtagToLocaleID(_In_count_(langtagLength) const char16 *langtag, _In_ charcount_t langtagLength, _Out_ char(&localeID)[N])
+    // Stack-fast, RAII-owned scratch buffer for ICU C APIs that preflight required output
+    // capacity via U_BUFFER_OVERFLOW_ERROR / U_STRING_NOT_TERMINATED_WARNING.
+    // Ownership record:
+    //   Domain: stackBuf (call-frame) initially; HeapAllocator (`NoCheckHeapNewArray`) if grown.
+    //   Release authority: ~ScopedIcuBuffer() calls NoCheckHeapDeleteArray(cap, buf) iff buf != stackBuf
+    //     on normal scope exit, JS/OOM C++ unwind, or Reserve reallocation. Non-copyable; never escapes frame.
+    template <typename TChar, size_t StackCap>
+    class ScopedIcuBuffer
     {
-        static_assert(N >= ULOC_FULLNAME_CAPACITY, "LocaleID must be large enough to fit the largest possible ICU localeID");
+        PREVENT_COPY(ScopedIcuBuffer)
 
-        UErrorCode status = U_ZERO_ERROR;
-        utf8::WideToNarrow langtag8(langtag, langtagLength);
-        int32_t localeIDLength = 0;
-        uloc_forLanguageTag(langtag8, localeID, N, &localeIDLength, &status);
-        ICU_ASSERT(status, localeIDLength > 0 && static_cast<size_t>(localeIDLength) < N);
+    private:
+        TChar stackBuf[StackCap];
+        TChar *buf;
+        size_t cap;
+
+    public:
+        ScopedIcuBuffer() : buf(stackBuf), cap(StackCap)
+        {
+            stackBuf[0] = 0;
+        }
+
+        ~ScopedIcuBuffer()
+        {
+            if (buf != stackBuf)
+            {
+                NoCheckHeapDeleteArray(cap, buf);
+                buf = stackBuf;
+            }
+        }
+
+        TChar *Data() { return buf; }
+        const TChar *Data() const { return buf; }
+        int CapacityInt() const { return static_cast<int>(cap); }
+
+        void Reserve(size_t neededCount, bool preserveExisting)
+        {
+            if (neededCount <= cap)
+            {
+                return;
+            }
+            if (neededCount > static_cast<size_t>(INT32_MAX))
+            {
+                Throw::OutOfMemory();
+            }
+            TChar *newBuf = NoCheckHeapNewArray(TChar, neededCount);
+            if (newBuf == nullptr)
+            {
+                Throw::OutOfMemory();
+            }
+            if (preserveExisting)
+            {
+                js_memcpy_s(newBuf, neededCount * sizeof(TChar), buf, cap * sizeof(TChar));
+            }
+            else
+            {
+                newBuf[0] = 0;
+            }
+            if (buf != stackBuf)
+            {
+                NoCheckHeapDeleteArray(cap, buf);
+            }
+            buf = newBuf;
+            cap = neededCount;
+        }
+
+        operator TChar *() { return buf; }
+        operator const TChar *() const { return buf; }
+    };
+
+    template <size_t StackCap = ULOC_FULLNAME_CAPACITY, typename TChar = char, typename TExecutor>
+    static int PreflightIcuBuffer(
+        ScopedIcuBuffer<TChar, StackCap> &buffer,
+        _Out_ UErrorCode &status,
+        bool preserveOnGrow,
+        TExecutor executor)
+    {
+        status = U_ZERO_ERROR;
+        int actualLength = executor(buffer.Data(), buffer.CapacityInt(), &status);
+        if (ICU_BUFFER_FAILURE(status))
+        {
+            if (actualLength < 0 || actualLength >= INT32_MAX)
+            {
+                Throw::OutOfMemory();
+            }
+            buffer.Reserve(static_cast<size_t>(actualLength) + 1, preserveOnGrow);
+            status = U_ZERO_ERROR;
+            actualLength = executor(buffer.Data(), buffer.CapacityInt(), &status);
+        }
+        return actualLength;
     }
 
-    template <size_t N>
-    static void LangtagToLocaleID(_In_ JavascriptString *langtag, _Out_ char(&localeID)[N])
+    static void LangtagToLocaleID(_In_count_(langtagLength) const char16 *langtag, _In_ charcount_t langtagLength, _Out_ ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> &localeID)
+    {
+        UErrorCode status = U_ZERO_ERROR;
+        utf8::WideToNarrow langtag8(langtag, langtagLength);
+        int32_t parsedLength = 0;
+        int32_t requiredLength = PreflightIcuBuffer(localeID, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            parsedLength = 0;
+            return uloc_forLanguageTag(langtag8, buf, cap, &parsedLength, err);
+        });
+        ICU_ASSERT(status, requiredLength >= 0 && parsedLength > 0 && static_cast<size_t>(requiredLength) < static_cast<size_t>(localeID.CapacityInt()));
+    }
+
+    static void LangtagToLocaleID(_In_ JavascriptString *langtag, _Out_ ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> &localeID)
     {
         LangtagToLocaleID(langtag->GetString(), langtag->GetLength(), localeID);
     }
@@ -962,8 +1054,12 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
         // However, passing the locale through uloc_forLanguageTag -> uloc_toLanguageTag gets us most of the way there
         // by replacing some(?) values, correctly capitalizing the tag, and re-ordering extensions
         int parsedLength = 0;
-        char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
-        int forLangTagResultLength = uloc_forLanguageTag(langtag8, localeID, ULOC_FULLNAME_CAPACITY, &parsedLength, &status);
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
+        int forLangTagResultLength = PreflightIcuBuffer(localeID, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            parsedLength = 0;
+            return uloc_forLanguageTag(langtag8, buf, cap, &parsedLength, err);
+        });
         AssertOrFailFast(parsedLength >= 0);
         if (status == U_ILLEGAL_ARGUMENT_ERROR || ((charcount_t) parsedLength) < langtag->GetLength())
         {
@@ -983,8 +1079,15 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
         // uloc_toLanguageTag("") returns "und", so this works out (forLanguageTag can return >= 0 but toLanguageTag must return > 0)
         ICU_ASSERT(status, forLangTagResultLength >= 0 && ((charcount_t) parsedLength) == langtag->GetLength());
 
-        char canonicalized[ULOC_FULLNAME_CAPACITY] = { 0 };
-        int toLangTagResultLength = uloc_toLanguageTag(localeID, canonicalized, ULOC_FULLNAME_CAPACITY, true, &status);
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> canonicalized;
+        int toLangTagResultLength = PreflightIcuBuffer(canonicalized, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            return uloc_toLanguageTag(localeID, buf, cap, true, err);
+        });
+        if (status == U_ILLEGAL_ARGUMENT_ERROR)
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
         ICU_ASSERT(status, toLangTagResultLength > 0);
 
         // allocate toLangTagResultLength + 1 to leave room for null terminator
@@ -1072,7 +1175,7 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
     template <const char *(__cdecl *GetAvailableLocalesFunc)(int), int(__cdecl *CountAvailableLocalesFunc)(void)>
     static bool IsLocaleAvailable(JavascriptString *langtag)
     {
-        char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
         LangtagToLocaleID(langtag, localeID);
 
         if (!BinarySearchForLocale<GetAvailableLocalesFunc, CountAvailableLocalesFunc>(localeID))
@@ -1094,9 +1197,12 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
             // constructor_open(language_tag) behaves differently to constructor_open(language_tag_and_likely_subtags)
             // for all supported constructors.
             UErrorCode status = U_ZERO_ERROR;
-            char localeIDWithLikelySubtags[ULOC_FULLNAME_CAPACITY] = { 0 };
-            int likelySubtagLen = uloc_addLikelySubtags(localeID, localeIDWithLikelySubtags, ULOC_FULLNAME_CAPACITY, &status);
-            ICU_ASSERT(status, likelySubtagLen > 0 && likelySubtagLen < ULOC_FULLNAME_CAPACITY);
+            ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeIDWithLikelySubtags;
+            int likelySubtagLen = PreflightIcuBuffer(localeIDWithLikelySubtags, status, false, [&](char *buf, int cap, UErrorCode *err)
+            {
+                return uloc_addLikelySubtags(localeID, buf, cap, err);
+            });
+            ICU_ASSERT(status, likelySubtagLen > 0 && likelySubtagLen < localeIDWithLikelySubtags.CapacityInt());
 
             return BinarySearchForLocale<GetAvailableLocalesFunc, CountAvailableLocalesFunc>(localeIDWithLikelySubtags);
         }
@@ -1153,7 +1259,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         JavascriptArray *ret = nullptr;
 
         UErrorCode status = U_ZERO_ERROR;
-        char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
         JavascriptString *langtag = UnsafeVarTo<JavascriptString>(args.Values[2]);
         LangtagToLocaleID(langtag, localeID);
 
@@ -1452,14 +1558,19 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         return JavascriptString::NewCopySz(defaultLocale, scriptContext);
 #else
         UErrorCode status = U_ZERO_ERROR;
-        char defaultLangtag[ULOC_FULLNAME_CAPACITY] = { 0 };
-        char defaultLocaleID[ULOC_FULLNAME_CAPACITY] = { 0 };
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> defaultLocaleID;
+        int localeIDActual = PreflightIcuBuffer(defaultLocaleID, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            return uloc_getName(nullptr, buf, cap, err);
+        });
+        ICU_ASSERT(status, localeIDActual > 0 && localeIDActual < defaultLocaleID.CapacityInt());
 
-        int localeIDActual = uloc_getName(nullptr, defaultLocaleID, _countof(defaultLocaleID), &status);
-        ICU_ASSERT(status, localeIDActual > 0 && localeIDActual < _countof(defaultLocaleID));
-
-        int langtagActual = uloc_toLanguageTag(defaultLocaleID, defaultLangtag, _countof(defaultLangtag), true, &status);
-        ICU_ASSERT(status, langtagActual > 0 && langtagActual < _countof(defaultLangtag));
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> defaultLangtag;
+        int langtagActual = PreflightIcuBuffer(defaultLangtag, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            return uloc_toLanguageTag(defaultLocaleID, buf, cap, true, err);
+        });
+        ICU_ASSERT(status, langtagActual > 0 && langtagActual < defaultLangtag.CapacityInt());
 
         char16 *defaultLangtag16 = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, langtagActual + 1);
         charcount_t defaultLangtag16Actual = 0;
@@ -1565,7 +1676,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         JavascriptString *currency = nullptr;
 
         JavascriptString *langtag = AssertStringProperty(state, PropertyIds::locale);
-        char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
         LangtagToLocaleID(langtag, localeID);
 
         if (style == NumberFormatStyle::Decimal)
@@ -1916,13 +2027,16 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             CollatorCaseFirst caseFirst = AssertEnumProperty<CollatorCaseFirst>(state, PropertyIds::caseFirstEnum);
             JavascriptString *usage = AssertStringProperty(state, PropertyIds::usage);
 
-            char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+            ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
             LangtagToLocaleID(langtag, localeID);
 
             const char16 searchString[] = _u("search");
             if (usage->BufferEquals(searchString, _countof(searchString) - 1)) // minus the null terminator
             {
-                uloc_setKeywordValue("collation", "search", localeID, _countof(localeID), &status);
+                PreflightIcuBuffer(localeID, status, true, [&](char *buf, int cap, UErrorCode *err)
+                {
+                    return uloc_setKeywordValue("collation", "search", buf, cap, err);
+                });
                 ICU_ASSERT(status, true);
             }
 
@@ -2993,7 +3107,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             JavascriptString *timeZone = AssertStringProperty(state, PropertyIds::timeZone);
             JavascriptString *pattern = AssertStringProperty(state, PropertyIds::pattern);
 
-            char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+            ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
             LangtagToLocaleID(langtag, localeID);
 
             dtf = FinalizableUDateFormat::New(scriptContext->GetRecycler(), udat_open(
@@ -3153,7 +3267,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         JavascriptString *langtag = UnsafeVarTo<JavascriptString>(args.Values[1]);
         JavascriptString *skeleton = UnsafeVarTo<JavascriptString>(args.Values[2]);
         UErrorCode status = U_ZERO_ERROR;
-        char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
         LangtagToLocaleID(langtag, localeID);
 
         // See https://github.com/tc39/ecma402/issues/225
@@ -3166,11 +3280,14 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         // 16: Let dataLocale be r.[[dataLocale]].
         // 23: Let dataLocaleData be localeData.[[<dataLocale>]].
         // 24: Let formats be dataLocaleData.[[formats]].
-        char baseLocaleID[ULOC_FULLNAME_CAPACITY] = { 0 };
-        int baseLocaleIDLength = uloc_getBaseName(localeID, baseLocaleID, _countof(baseLocaleID), &status);
-        ICU_ASSERT(status, baseLocaleIDLength > 0 && baseLocaleIDLength < ULOC_FULLNAME_CAPACITY);
+        ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> baseLocaleID;
+        int baseLocaleIDLength = PreflightIcuBuffer(baseLocaleID, status, false, [&](char *buf, int cap, UErrorCode *err)
+        {
+            return uloc_getBaseName(localeID, buf, cap, err);
+        });
+        ICU_ASSERT(status, baseLocaleIDLength >= 0 && baseLocaleIDLength < baseLocaleID.CapacityInt());
 
-        INTL_TRACE("Converted input langtag '%s' to base locale ID '%S' for pattern generation", langtag->GetSz(), baseLocaleID);
+        INTL_TRACE("Converted input langtag '%s' to base locale ID '%S' for pattern generation", langtag->GetSz(), baseLocaleID.Data());
 
         ScopedUDateTimePatternGenerator dtpg(udatpg_open(baseLocaleID, &status));
         ICU_ASSERT(status, true);
@@ -3238,7 +3355,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         ICU_ASSERT(status, availableLength > 0);
 
         charcount_t matchLen = 0;
-        UChar match[100] = { 0 };
+        ScopedIcuBuffer<UChar, 100> match;
         for (int a = 0; a < availableLength; ++a)
         {
             int curLen = -1;
@@ -3255,11 +3372,13 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             AssertOrFailFast(curLen > 0);
             if (_wcsicmp(reinterpret_cast<const char16 *>(cur), tz->GetSz()) == 0)
             {
-                ucal_getCanonicalTimeZoneID(cur, curLen, match, _countof(match), nullptr, &status);
-                ICU_ASSERT(status, true);
-                size_t len = wcslen(reinterpret_cast<const char16 *>(match));
-                AssertMsg(len < MaxCharCount, "Returned canonicalized timezone is far too long");
-                matchLen = static_cast<charcount_t>(len);
+                int canonicalLen = PreflightIcuBuffer<100, UChar>(match, status, false, [&](UChar *buf, int cap, UErrorCode *err)
+                {
+                    return ucal_getCanonicalTimeZoneID(cur, curLen, buf, cap, nullptr, err);
+                });
+                ICU_ASSERT(status, canonicalLen >= 0 && canonicalLen < match.CapacityInt());
+                AssertMsg(canonicalLen < MaxCharCount, "Returned canonicalized timezone is far too long");
+                matchLen = static_cast<charcount_t>(canonicalLen);
                 break;
             }
         }
@@ -3269,7 +3388,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             return scriptContext->GetLibrary()->GetUndefined();
         }
 
-        return JavascriptString::NewCopyBuffer(reinterpret_cast<const char16 *>(match), matchLen, scriptContext);
+        return JavascriptString::NewCopyBuffer(reinterpret_cast<const char16 *>(match.Data()), matchLen, scriptContext);
 #endif
     }
 
@@ -3331,7 +3450,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
                 AssertOrFailFast(wcscmp(type->GetSz(), _u("cardinal")) == 0);
             }
 
-            char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+            ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
             LangtagToLocaleID(langtag, localeID);
 
             pr = FinalizableUPluralRules::New(scriptContext->GetRecycler(), uplrules_openForType(localeID, prType, &status));
@@ -3425,13 +3544,13 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         }
         else
         {
-            char localeID[ULOC_FULLNAME_CAPACITY] = { 0 };
+            ScopedIcuBuffer<char, ULOC_FULLNAME_CAPACITY> localeID;
             LangtagToLocaleID(AssertStringProperty(state, PropertyIds::locale), localeID);
             nf = FinalizableUNumberFormat::New(scriptContext->GetRecycler(), unum_open(UNUM_DECIMAL, nullptr, 0, localeID, nullptr, &status));
 
             SetUNumberFormatDigitOptions(*nf, state);
 
-            INTL_TRACE("Caching UNumberFormat object (0x%x) with localeID %S", nf, localeID);
+            INTL_TRACE("Caching UNumberFormat object (0x%x) with localeID %S", nf, localeID.Data());
 
             state->SetInternalProperty(InternalPropertyIds::CachedUNumberFormat, nf, PropertyOperationFlags::PropertyOperation_None, nullptr);
         }

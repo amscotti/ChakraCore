@@ -407,9 +407,14 @@ JsErrorCode WScriptJsrt::ReportModuleCompletionCallback(JsModuleRecord module, J
     if (exception != nullptr)
     {
         JsValueRef specifier = JS_INVALID_REFERENCE;
-        ChakraRTInterface::JsGetModuleHostInfo(module, JsModuleHostInfo_Url, &specifier);
+        AutoString specifierStr;
+        if (ChakraRTInterface::JsGetModuleHostInfo(module, JsModuleHostInfo_Url, &specifier) == JsNoError &&
+            specifier != JS_INVALID_REFERENCE)
+        {
+            specifierStr.Initialize(specifier);
+        }
         ReportNegativePhaseMarker(false);
-        PrintException(AutoString(specifier).GetString(), JsErrorCode::JsErrorScriptException, exception);
+        PrintException(specifierStr.GetString(), JsErrorCode::JsErrorScriptException, exception);
     }
     return JsNoError;
 }

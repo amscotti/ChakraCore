@@ -332,7 +332,6 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
         bool isFile = true;
 
         IfJsrtErrorSetGo(fileContent.Initialize(arguments[1]));
-        fileContent.MakePersistent();
 
         if (argumentCount > 2)
         {
@@ -358,6 +357,7 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
 
         if (*fileContent)
         {
+            fileContent.MakePersistent();
             returnValue = LoadScript(callee, fileNameNarrow, *fileContent, *scriptInjectType ? *scriptInjectType : "self", isSourceModule, WScriptJsrt::FinalizeFree, isFile);
         }
     }
@@ -377,6 +377,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     JsContextRef currentContext = JS_INVALID_REFERENCE;
     JsRuntimeHandle runtime = JS_INVALID_RUNTIME_HANDLE;
     void *callbackArg = (finalizeCallback != nullptr ? (void*)fileContent : nullptr);
+    bool fileContentOwnedByExternalBuffer = false;
 
     char fullPath[_MAX_PATH];
 
@@ -407,6 +408,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         JsValueRef scriptSource;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContent,
             (unsigned int)strlen(fileContent), finalizeCallback, callbackArg, &scriptSource));
+        fileContentOwnedByExternalBuffer = true;
         JsValueRef fname;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(fullPath,
             strlen(fullPath), &fname));
@@ -452,6 +454,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         JsValueRef scriptSource;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContent,
             (unsigned int)strlen(fileContent), finalizeCallback, callbackArg, &scriptSource));
+        fileContentOwnedByExternalBuffer = true;
         JsValueRef fname;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(fullPath,
             strlen(fullPath), &fname));
@@ -518,6 +521,11 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     }
 
 Error:
+    if (!fileContentOwnedByExternalBuffer && finalizeCallback != nullptr && fileContent != nullptr)
+    {
+        finalizeCallback((void*)fileContent);
+    }
+
     JsValueRef value = returnValue;
     if (errorCode != JsNoError)
     {
@@ -1086,14 +1094,14 @@ JsValueRef __stdcall WScriptJsrt::ReadLineStdinCallback(JsValueRef callee, bool 
     {
         buflength += gotlength;
 
-        if (buf[buflength - 2] == '\r' && buf[buflength - 1] == '\n')
+        if (buflength >= 2 && buf[buflength - 2] == '\r' && buf[buflength - 1] == '\n')
         {
             buf[buflength - 1] = '\0';
             buf[buflength - 2] = '\0';
             buflength -= 2;
             break;
         }
-        else if (buf[buflength - 1] == '\n')
+        else if (buflength >= 1 && buf[buflength - 1] == '\n')
         {
             buf[buflength - 1] = '\0';
             buflength -= 1;
@@ -1104,6 +1112,10 @@ JsValueRef __stdcall WScriptJsrt::ReadLineStdinCallback(JsValueRef callee, bool 
             break;
         }
 
+        if (bufsize > INT_MAX / 2)
+        {
+            goto Error;
+        }
         bufsize *= 2;
         if (bufsize > buflength)
         {
@@ -1289,6 +1301,28 @@ Error:
     return returnValue;
 }
 
+static void SplitFileNameAndExt(
+    LPCSTR fileName,
+    CHAR (&shortFileName)[_MAX_PATH],
+    CHAR (&ext)[_MAX_EXT],
+    LPCSTR fallbackName = "(unknown)")
+{
+    shortFileName[0] = '\0';
+    ext[0] = '\0';
+    if (fileName != nullptr && fileName[0] != '\0')
+    {
+        if (_splitpath_s(fileName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext)) == 0)
+        {
+            return;
+        }
+    }
+    if (fallbackName != nullptr && fallbackName[0] != '\0')
+    {
+        strcpy_s(shortFileName, _countof(shortFileName), fallbackName);
+    }
+    ext[0] = '\0';
+}
+
 bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsValueRef exception)
 {
     LPCWSTR errorTypeString = ConvertErrorCodeToMessage(jsErrorCode);
@@ -1341,9 +1375,14 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
 
                 if (jsErrorCode != JsErrorCode::JsErrorScriptCompile)
                 {
-                    CHAR shortFileName[_MAX_PATH];
-                    CHAR ext[_MAX_EXT];
-                    _splitpath_s(fileName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
+                    CHAR shortFileName[_MAX_PATH] = { 0 };
+                    CHAR ext[_MAX_EXT] = { 0 };
+                    SplitFileNameAndExt(fileName, shortFileName, ext, "(unknown)");
+                    const WCHAR *errMsgWide = errorMessage.GetWideString();
+                    if (errMsgWide == nullptr)
+                    {
+                        errMsgWide = _u("");
+                    }
 
                     if (metaData != JS_INVALID_REFERENCE)
                     {
@@ -1364,15 +1403,17 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                         IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(columnProperty, &column), false);
                         {
                             StderrLock lock;
-                            fwprintf(stderr, _u("%ls\n        at code (%S%S:%d:%d)\n"),
-                                errorMessage.GetWideString(), shortFileName, ext, line + 1, column + 1);
+                            fwprintf(stderr, _u("%ls\n"), errMsgWide);
+                            fprintf(stderr, "        at code (%s%s:%d:%d)\n",
+                                shortFileName, ext, line + 1, column + 1);
                             fflush(stderr);
                         }
                     }
                     else
                     {
                         StderrLock lock;
-                        fwprintf(stderr, _u("%ls\n\tat code (%S%S:\?\?:\?\?)\n"), errorMessage.GetWideString(), shortFileName, ext);
+                        fwprintf(stderr, _u("%ls\n"), errMsgWide);
+                        fprintf(stderr, "\tat code (%s%s:\?\?:\?\?)\n", shortFileName, ext);
                         fflush(stderr);
                     }
                     return true;
@@ -1397,22 +1438,29 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                     ChakraRTInterface::JsGetProperty(exception, columnPropertyId, &columnProperty) == JsNoError &&
                     ChakraRTInterface::JsNumberToInt(columnProperty, &column) == JsNoError;
 
-                CHAR shortFileName[_MAX_PATH];
-                CHAR ext[_MAX_EXT];
-                _splitpath_s(fileName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
+                CHAR shortFileName[_MAX_PATH] = { 0 };
+                CHAR ext[_MAX_EXT] = { 0 };
+                SplitFileNameAndExt(fileName, shortFileName, ext, "(unknown)");
+                const WCHAR *errMsgWide = errorMessage.GetWideString();
+                if (errMsgWide == nullptr)
+                {
+                    errMsgWide = _u("");
+                }
                 if (hasPosition)
                 {
                     StderrLock lock;
-                    fwprintf(stderr, _u("%ls\n\tat code (%S%S:%d:%d)\n"),
-                        errorMessage.GetWideString(), shortFileName, ext, (int)line + 1,
+                    fwprintf(stderr, _u("%ls\n"), errMsgWide);
+                    fprintf(stderr, "\tat code (%s%s:%d:%d)\n",
+                        shortFileName, ext, (int)line + 1,
                         (int)column + 1);
                     fflush(stderr);
                 }
                 else
                 {
                     StderrLock lock;
-                    fwprintf(stderr, _u("%ls\n\tat code (%S%S:?)\n"),
-                        errorMessage.GetWideString(), shortFileName, ext);
+                    fwprintf(stderr, _u("%ls\n"), errMsgWide);
+                    fprintf(stderr, "\tat code (%s%s:?)\n",
+                        shortFileName, ext);
                     fflush(stderr);
                 }
             }
@@ -1436,15 +1484,18 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
 
                 if (errorCode != JsErrorCode::JsNoError || propertyType == JsUndefined)
                 {
-                    const char *fName = fileName != nullptr ? fileName : "(unknown)";
-
-                    CHAR shortFileName[_MAX_PATH];
-                    CHAR ext[_MAX_EXT];
-                    _splitpath_s(fName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
+                    CHAR shortFileName[_MAX_PATH] = { 0 };
+                    CHAR ext[_MAX_EXT] = { 0 };
+                    SplitFileNameAndExt(fileName, shortFileName, ext, "(unknown)");
+                    const WCHAR *errMsgWide = errorMessage.GetWideString();
+                    if (errMsgWide == nullptr)
+                    {
+                        errMsgWide = _u("");
+                    }
 
                     StderrLock lock;
                     fprintf(stderr, "thrown at %s%s:\n^\n", shortFileName, ext);
-                    fwprintf(stderr, _u("%ls\n"), errorMessage.GetWideString());
+                    fwprintf(stderr, _u("%ls\n"), errMsgWide);
                     fflush(stderr);
                 }
                 else
