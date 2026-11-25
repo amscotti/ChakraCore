@@ -84,11 +84,9 @@ CanLossyIntTypeSpecForInstr(
     Func const * topFunc,
     IR::Instr const * const instr)
 {
-    return
-        AllowOptForInstr(doLossyIntTypeSpec, topFunc, instr, &GlobOpt::DoLossyIntTypeSpec) &&
-        (!CONFIG_FLAG(ESBigInt) ||
-         AllowOptForInstr(doAggressiveIntTypeSpec, topFunc, instr, &GlobOpt::DoAggressiveIntTypeSpec) ||
-         AllowOptForInstr(doFloatTypeSpec, topFunc, instr, &GlobOpt::DoFloatTypeSpec));
+    UNREFERENCED_PARAMETER(doAggressiveIntTypeSpec);
+    UNREFERENCED_PARAMETER(doFloatTypeSpec);
+    return AllowOptForInstr(doLossyIntTypeSpec, topFunc, instr, &GlobOpt::DoLossyIntTypeSpec);
 }
 
 GlobOpt::GlobOpt(Func * func)
@@ -5015,14 +5013,45 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
         }
         break;
 
+    case Js::OpCode::Conv_Numeric:
+        if (src1Val && src1ValueInfo->IsNumber())
+        {
+            dstVal = ValueNumberTransferDst(instr, src1Val);
+        }
+        else if (!CONFIG_FLAG(ESBigInt) || (src1Val && src1ValueInfo->IsPrimitive()))
+        {
+            return NewGenericValue((src1Val ? src1ValueInfo->Type() : ValueType::Uninitialized).ToDefiniteAnyNumber().SetCanBeTaggedValue(true), dst);
+        }
+        else if (src1Val && src1ValueInfo->IsLikelyInt())
+        {
+            return NewGenericValue(ValueType::GetInt(src1ValueInfo->Type().IsLikelyTaggedInt()).ToLikely(), dst);
+        }
+        else if (src1Val && src1ValueInfo->IsLikelyNumber())
+        {
+            return NewGenericValue(ValueType::Number.ToLikely().SetCanBeTaggedValue(true), dst);
+        }
+        else
+        {
+            return NewGenericValue(ValueType::Uninitialized, dst);
+        }
+        break;
+
     case Js::OpCode::Not_A:
     {
-        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsPrimitive()))
         {
             // ValueType has no BigInt bit: ~ on a BigInt produces a BigInt,
             // so the dst must not be claimed definite int unless the src
-            // is proven numeric. Otherwise a consumer (e.g. an outer ~)
-            // type-specializes against a BigInt var with no bailout.
+            // is proven non-BigInt primitive. Return LikelyInt when lossy int
+            // spec is active and src is likely numeric so warm ops retain hints
+            // without omitting bailout checks.
+            if (src1Val && src1ValueInfo->IsLikelyNumber() &&
+                CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), func, instr))
+            {
+                return CreateDstUntransferredValue(
+                    ValueType::GetInt(src1ValueInfo->Type().IsLikelyTaggedInt()).ToLikely(),
+                    instr, src1Val, src2Val);
+            }
             return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
         }
 
@@ -5044,10 +5073,34 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
     case Js::OpCode::ShrU_A:
     {
         if (CONFIG_FLAG(ESBigInt) &&
-            !(src1Val && src1ValueInfo->IsNumber() && src2Val && src2ValueInfo->IsNumber()))
+            !(src1Val && src1ValueInfo->IsPrimitive() && src2Val && src2ValueInfo->IsPrimitive()))
         {
             // Bitwise ops on BigInts produce BigInts (see Not_A above);
             // don't claim a definite int/number dst from unproven srcs.
+            if (src1Val && src1ValueInfo->IsLikelyNumber() &&
+                src2Val && src2ValueInfo->IsLikelyNumber() &&
+                CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), func, instr))
+            {
+                if (!src1ValueInfo->GetIntValMinMax(&min1, &max1, this->DoAggressiveIntTypeSpec()))
+                {
+                    min1 = INT32_MIN;
+                }
+                if (!src2ValueInfo->GetIntValMinMax(&min2, &max2, this->DoAggressiveIntTypeSpec()))
+                {
+                    min2 = INT32_MIN;
+                    max2 = INT32_MAX;
+                }
+                if (instr->m_opcode == Js::OpCode::ShrU_A &&
+                    min1 < 0 &&
+                    IntConstantBounds(min2, max2).And_0x1f().Contains(0))
+                {
+                    return CreateDstUntransferredValue(
+                        ValueType::Number.ToLikely().SetCanBeTaggedValue(true), instr, src1Val, src2Val);
+                }
+                return CreateDstUntransferredValue(
+                    ValueType::GetInt(src1ValueInfo->Type().IsLikelyTaggedInt()).ToLikely(),
+                    instr, src1Val, src2Val);
+            }
             return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
         }
 
@@ -5079,10 +5132,24 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
 
     case Js::OpCode::Incr_A:
     case Js::OpCode::Decr_A:
+    case Js::OpCode::Incr_Num_A:
+    case Js::OpCode::Decr_Num_A:
     {
-        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsPrimitive()))
         {
             // ++/-- on a BigInt produces a BigInt (see Not_A above).
+            if (src1Val && src1ValueInfo->IsLikelyInt())
+            {
+                return CreateDstUntransferredValue(
+                    ValueType::GetInt(src1ValueInfo->Type().IsLikelyTaggedInt()).ToLikely(),
+                    instr, src1Val, src2Val);
+            }
+            if (src1Val && src1ValueInfo->IsLikelyNumber())
+            {
+                return CreateDstUntransferredValue(
+                    ValueType::Number.ToLikely().SetCanBeTaggedValue(true),
+                    instr, src1Val, src2Val);
+            }
             return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
         }
 
@@ -5206,16 +5273,27 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
                 valueType = ValueType::GetInt(isLikelyTagged).ToLikely();
             }
         }
+        else if (!CONFIG_FLAG(ESBigInt) || (src1Val && src1ValueInfo->IsPrimitive() && src2Val && src2ValueInfo->IsPrimitive()))
+        {
+            if ((src1Val && src1ValueInfo->IsLikelyFloat()) || (src2Val && src2ValueInfo->IsLikelyFloat()))
+            {
+                // This should ideally be NewNumberAndLikelyFloatValue since we know the result is a number but not sure if it will
+                // be a float value. However, that Number/LikelyFloat value type doesn't exist currently and all the necessary
+                // checks are done for float values (tagged int checks, etc.) so it's sufficient to just create a float value here.
+                valueType = ValueType::Float.SetCanBeTaggedValue(true);
+            }
+            else
+            {
+                valueType = ValueType::Number.SetCanBeTaggedValue(true);
+            }
+        }
         else if ((src1Val && src1ValueInfo->IsLikelyFloat()) || (src2Val && src2ValueInfo->IsLikelyFloat()))
         {
-            // This should ideally be NewNumberAndLikelyFloatValue since we know the result is a number but not sure if it will
-            // be a float value. However, that Number/LikelyFloat value type doesn't exist currently and all the necessary
-            // checks are done for float values (tagged int checks, etc.) so it's sufficient to just create a float value here.
-            valueType = ValueType::Float.SetCanBeTaggedValue(true);
+            valueType = ValueType::Float.ToLikely();
         }
-        else
+        else if (src1Val && src1ValueInfo->IsLikelyNumber() && src2Val && src2ValueInfo->IsLikelyNumber())
         {
-            valueType = ValueType::Number.SetCanBeTaggedValue(true);
+            valueType = ValueType::Number.ToLikely();
         }
 
         return CreateDstUntransferredValue(valueType, instr, src1Val, src2Val);
@@ -7269,6 +7347,7 @@ GlobOpt::OptConstFoldUnary(
         break;
 
     case Js::OpCode::Conv_Num:
+    case Js::OpCode::Conv_Numeric:
     case Js::OpCode::LdC_A_I4:
         value = intConstantValue;
         if(isUsingOriginalSrc1Value)
@@ -7278,6 +7357,7 @@ GlobOpt::OptConstFoldUnary(
         break;
 
     case Js::OpCode::Incr_A:
+    case Js::OpCode::Incr_Num_A:
         if (Int32Math::Inc(intConstantValue, &value))
         {
             return false;
@@ -7285,6 +7365,7 @@ GlobOpt::OptConstFoldUnary(
         break;
 
     case Js::OpCode::Decr_A:
+    case Js::OpCode::Decr_Num_A:
         if (Int32Math::Dec(intConstantValue, &value))
         {
             return false;
@@ -7616,9 +7697,12 @@ done:
         case Js::OpCode::Shr_A:
         case Js::OpCode::Incr_A:
         case Js::OpCode::Decr_A:
+        case Js::OpCode::Incr_Num_A:
+        case Js::OpCode::Decr_Num_A:
         case Js::OpCode::Neg_A:
         case Js::OpCode::Not_A:
         case Js::OpCode::Conv_Num:
+        case Js::OpCode::Conv_Numeric:
         case Js::OpCode::BrEq_I4:
         case Js::OpCode::BrTrue_I4:
         case Js::OpCode::BrFalse_I4:
@@ -7647,7 +7731,8 @@ GlobOpt::TypeSpecializeNumberUnary(IR::Instr *instr, Value *src1Val, Value **pDs
     switch (instr->m_opcode)
     {
     case Js::OpCode::Conv_Num:
-        // Optimize Conv_Num away since we know this is a number
+    case Js::OpCode::Conv_Numeric:
+        // Optimize Conv_Num / Conv_Numeric away since we know this is a number
         instr->m_opcode = Js::OpCode::Ld_A;
         return false;
     }
@@ -8162,6 +8247,7 @@ GlobOpt::TypeSpecializeIntUnary(
         break;
 
     case Js::OpCode::Conv_Num:
+    case Js::OpCode::Conv_Numeric:
         newMin = min;
         newMax = max;
         opcode = Js::OpCode::Ld_I4;
@@ -8260,6 +8346,7 @@ GlobOpt::TypeSpecializeIntUnary(
         break;
 
     case Js::OpCode::Incr_A:
+    case Js::OpCode::Incr_Num_A:
         do // while(false)
         {
             const auto CannotOverflowBasedOnRelativeBounds = [&]()
@@ -8334,6 +8421,7 @@ GlobOpt::TypeSpecializeIntUnary(
         break;
 
     case Js::OpCode::Decr_A:
+    case Js::OpCode::Decr_Num_A:
         do // while(false)
         {
             const auto CannotOverflowBasedOnRelativeBounds = [&]()
@@ -10645,6 +10733,7 @@ GlobOpt::TypeSpecializeFloatUnary(IR::Instr **pInstr, Value *src1Val, Value **pD
             break;
 
         case Js::OpCode::Conv_Num:
+        case Js::OpCode::Conv_Numeric:
             Assert(src1Val);
             opcode = Js::OpCode::Ld_A;
             valueToTransfer = src1Val;
@@ -11737,64 +11826,6 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
 
             if (!isLive)
             {
-                IR::Instr * const contextInstr = instr ? instr : origInsertBeforeInstr;
-                if (lossy &&
-                    opnd->IsVar() &&
-                    !indir &&
-                    valueInfo &&
-                    !valueInfo->IsPrimitive() &&
-                    !block->globOptData.IsTypeSpecialized(varSym) &&
-                    !block->globOptData.liveFloat64Syms->Test(varSym->m_id) &&
-                    block->globOptData.liveVarSyms->Test(varSym->m_id) &&
-                    CONFIG_FLAG(ESBigInt) &&
-                    !AllowOptForInstr(this->DoAggressiveIntTypeSpec(), this->func, contextInstr, &GlobOpt::DoAggressiveIntTypeSpec) &&
-                    AllowOptForInstr(this->DoFloatTypeSpec(), this->func, contextInstr, &GlobOpt::DoFloatTypeSpec))
-                {
-                    const bool isSrc1 = (needReplaceSrc && instr->GetSrc1() == opnd);
-                    const bool isSrc2 = (needReplaceSrc && !isSrc1 && instr->GetSrc2() == opnd);
-
-                    this->ToTypeSpecUse(
-                        needReplaceSrc ? instr : nullptr,
-                        opnd,
-                        block,
-                        val,
-                        nullptr,
-                        TyFloat64,
-                        IR::BailOutNumberOnly,
-                        false,
-                        origInsertBeforeInstr);
-
-                    if (block->globOptData.liveFloat64Syms->Test(varSym->m_id))
-                    {
-                        IR::Opnd * floatOpnd = nullptr;
-                        IR::Instr * convInsertBeforeInstr = origInsertBeforeInstr;
-                        if (needReplaceSrc)
-                        {
-                            floatOpnd = isSrc1 ? instr->GetSrc1() : (isSrc2 ? instr->GetSrc2() : nullptr);
-                            Assert(floatOpnd && floatOpnd->IsFloat64());
-                        }
-                        else
-                        {
-                            floatOpnd = IR::RegOpnd::New(varSym->GetFloat64EquivSym(this->func), TyFloat64, this->func);
-                            if (block->next && !block->next->isDeleted && block->next->isLoopHeader &&
-                                block->next->loop->bailOutInfo && block->next->loop->bailOutInfo->bailOutInstr)
-                            {
-                                convInsertBeforeInstr = block->next->loop->bailOutInfo->bailOutInstr;
-                            }
-                        }
-                        return this->ToTypeSpecUse(
-                            needReplaceSrc ? instr : nullptr,
-                            floatOpnd,
-                            block,
-                            block->globOptData.FindValue(varSym),
-                            indir,
-                            toType,
-                            bailOutKind,
-                            lossy,
-                            convInsertBeforeInstr);
-                    }
-                }
-
                 if (!opnd->IsVar() ||
                     !block->globOptData.liveVarSyms->Test(varSym->m_id) ||
                     (block->globOptData.liveFloat64Syms->Test(varSym->m_id) && valueInfo && (valueInfo->IsLikelyFloat() || (lossy && !valueInfo->IsPrimitive()))))
@@ -12079,29 +12110,6 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
                 //      y = obj * 0.2;  -> if obj has valueof, we'll only call valueof once on the FromVar conversion...
                 Assert(bailOutKind != IR::BailOutInvalid);
                 isBailout = true;
-            }
-
-            if (isBailout && CONFIG_FLAG(ESBigInt))
-            {
-                // BigInt is a primitive (TypeIds_BigInt <=
-                // TypeIds_LastJavascriptPrimitiveType) but ToNumber on it
-                // throws, and the interpreter operator would have taken
-                // the BigInt path instead. BailOutOnNotPrimitive and
-                // BailOutPrimitiveButString both let BigInt through to
-                // the conversion helper. Strengthen to bailouts whose
-                // predicates reject BigInt, so execution falls back to
-                // the interpreter operator. ValueType has no BigInt bit,
-                // so this applies whenever the operand is not proven
-                // numeric above.
-                if (toType == TyInt32 && bailOutKind == IR::BailOutOnNotPrimitive)
-                {
-                    bailOutKind = IR::BailOutIntOnly;
-                }
-                else if (toType == TyFloat64 && bailOutKind == IR::BailOutPrimitiveButString)
-                {
-                    bailOutKind = IR::BailOutNumberOnly;
-                    typeSpecSym->m_requiresBailOnNotNumber = true;
-                }
             }
         }
 
@@ -15327,7 +15335,7 @@ GlobOpt::OptHoistInvariant(
                         if ((src1ValueInfo->IsPrimitive() || block->globOptData.IsTypeSpecialized(src1StackSym)) &&                // didn't need a lossy type spec bailout in the source block
                             (!landingPadSrc1ValueInfo->IsPrimitive() && !landingPad->globOptData.IsTypeSpecialized(src1StackSym))) // needs a lossy type spec bailout in the landing pad
                         {
-                            bailoutKind = CONFIG_FLAG(ESBigInt) ? IR::BailOutIntOnly : IR::BailOutOnNotPrimitive;
+                            bailoutKind = IR::BailOutOnNotPrimitive;
                             AddBailOutToFromVar();
                         }
                     }
@@ -15738,30 +15746,6 @@ GlobOpt::TryHoistInvariant(
             loop = loop->parent;
         }
 
-        if (instr->m_opcode == Js::OpCode::FromVar &&
-            !instr->HasBailOutInfo() &&
-            bailoutKind != IR::BailOutInvalid &&
-            lossy &&
-            CONFIG_FLAG(ESBigInt) &&
-            instr->GetDst() &&
-            instr->GetDst()->GetType() == TyInt32 &&
-            !AllowOptForInstr(DoAggressiveIntTypeSpec(), func, instr, &GlobOpt::DoAggressiveIntTypeSpec))
-        {
-            StackSym * const src1StackSym = IR::RegOpnd::TryGetStackSym(instr->GetSrc1());
-            if (src1StackSym)
-            {
-                Value * const landingPadSrc1Val = loop->landingPad->globOptData.FindValue(src1StackSym);
-                if (src1Val &&
-                    landingPadSrc1Val &&
-                    (src1Val->GetValueInfo()->IsPrimitive() || block->globOptData.IsTypeSpecialized(src1StackSym)) &&
-                    !landingPadSrc1Val->GetValueInfo()->IsPrimitive() &&
-                    !loop->landingPad->globOptData.IsTypeSpecialized(src1StackSym))
-                {
-                    return false;
-                }
-            }
-        }
-
         // Record the byte code use here since we are going to move this instruction up
         if (isNotTypeSpecConv)
         {
@@ -16021,8 +16005,7 @@ GlobOpt::DoLossyIntTypeSpec(Func const * func)
     return
         !PHASE_OFF(Js::LossyIntTypeSpecPhase, func) &&
         !IsTypeSpecPhaseOff(func) &&
-        (!func->HasProfileInfo() || !func->GetReadOnlyProfileInfo()->IsLossyIntTypeSpecDisabled()) &&
-        (!CONFIG_FLAG(ESBigInt) || DoAggressiveIntTypeSpec(func) || DoFloatTypeSpec(func));
+        (!func->HasProfileInfo() || !func->GetReadOnlyProfileInfo()->IsLossyIntTypeSpecDisabled());
 }
 
 bool

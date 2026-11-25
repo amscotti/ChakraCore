@@ -5275,140 +5275,111 @@ LowererMD::GenerateFastDivAndRem(IR::Instr *instrDiv, IR::LabelInstr* bailOutLab
 void
 LowererMD::GenerateFastDivByPow2(IR::Instr *instrDiv)
 {
-    //// Given:
-    //// dst = Div_A src1, src2
-    //// where src2 == power of 2
-    ////
-    //// Generate:
-    ////       (observation: positive q divides by p equally, where p = power of 2, if q's binary representation
-    ////       has all zeroes to the right of p's power 2 bit, try to see if that is the case)
-    //// s1 =  AND  src1, 0x80000001 | ((src2Value - 1) << 1)
-    ////       CMP  s1, 1
-    ////       BNE  $doesntDivideEqually
-    //// s1  = ASR  src1, log2(src2Value)  -- do the equal divide
-    //// dst = EOR   s1, 1                 -- restore tagged int bit
-    ////       B  $done
-    //// $doesntDivideEqually:
-    ////       (now check if it divides with the remainder of 1, for which we can do integer divide and accommodate with +0.5
-    ////       note that we need only the part that is to the left of p's power 2 bit)
-    //// s1 =  AND  s1, 0x80000001 | (src2Value - 1)
-    ////       CMP  s1, 1
-    ////       BNE  $helper
-    //// s1 =  ASR  src1, log2(src2Value) + 1 -- do the integer divide and also shift out the tagged int bit
-    ////       PUSH 0xXXXXXXXX (ScriptContext)
-    ////       PUSH s1
-    //// dst = CALL Op_FinishOddDivByPow2     -- input: actual value, scriptContext; output: JavascriptNumber with 0.5 added to the input
-    ////       JMP $done
-    //// $helper:
-    ////     ...
-    //// $done:
+    if (instrDiv->GetSrc1()->IsRegOpnd() && instrDiv->GetSrc1()->AsRegOpnd()->IsNotInt())
+    {
+        return;
+    }
+    if (!instrDiv->GetSrc2()->IsAddrOpnd())
+    {
+        return;
+    }
 
-    //if (instrDiv->GetSrc1()->IsRegOpnd() && instrDiv->GetSrc1()->AsRegOpnd()->m_sym->m_isNotInt)
-    //{
-    //    return;
-    //}
+    IR::Opnd     *dst  = instrDiv->GetDst();
+    IR::Opnd     *src1 = instrDiv->GetSrc1();
+    IR::AddrOpnd *src2 = instrDiv->GetSrc2()->AsAddrOpnd();
 
-    //IR::Opnd       *dst    = instrDiv->GetDst();
-    //IR::Opnd       *src1   = instrDiv->GetSrc1();
-    //IR::AddrOpnd   *src2   = instrDiv->GetSrc2()->IsAddrOpnd() ? instrDiv->GetSrc2()->AsAddrOpnd() : nullptr;
-    //IR::LabelInstr *doesntDivideEqually = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-    //IR::LabelInstr *helper = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
-    //IR::LabelInstr *done   = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-    //IR::RegOpnd    *s1     = IR::RegOpnd::New(TyVar, m_func);
-    //IR::Instr      *instr;
+    Assert(src2 && src2->IsVar() && Js::TaggedInt::Is(src2->m_address) && (Math::IsPow2(Js::TaggedInt::ToInt32(src2->m_address))));
+    int32 src2Value = Js::TaggedInt::ToInt32(src2->m_address);
+    if (src2Value <= 1)
+    {
+        return;
+    }
 
-    //Assert(src2 && src2->IsVar() && Js::TaggedInt::Is(src2->m_address) && (Math::IsPow2(Js::TaggedInt::ToInt32(src2->m_address))));
-    //int32          src2Value = Js::TaggedInt::ToInt32(src2->m_address);
+    IR::LabelInstr *doesntDivideEqually = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+    IR::LabelInstr *helper = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
+    IR::LabelInstr *done   = IR::LabelInstr::New(Js::OpCode::Label, m_func);
 
-    //// s1 =  AND  src1, 0x80000001 | ((src2Value - 1) << 1)
-    //instr = IR::Instr::New(Js::OpCode::AND, s1, src1, IR::IntConstOpnd::New((0x80000001 | ((src2Value - 1) << 1)), TyInt32, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr);
+    IR::RegOpnd *src1Var = src1->IsRegOpnd() ? src1->AsRegOpnd() : IR::RegOpnd::New(TyVar, m_func);
+    if (!src1->IsRegOpnd())
+    {
+        Lowerer::InsertMove(src1Var, src1->Copy(m_func), instrDiv);
+    }
 
-    ////       CMP s1, 1
-    //instr = IR::Instr::New(Js::OpCode::CMP, m_func);
-    //instr->SetSrc1(s1);
-    //instr->SetSrc2(IR::IntConstOpnd::New(1, TyInt32, m_func));
-    //instrDiv->InsertBefore(instr);
+    this->GenerateSmIntTest(src1Var, instrDiv, helper);
 
-    ////       BNE  $doesntDivideEqually
-    //instr = IR::BranchInstr::New(Js::OpCode::BNE, doesntDivideEqually, m_func);
-    //instrDiv->InsertBefore(instr);
+    // On ARM64 INT32VAR, bits [31:0] hold the raw two's-complement int32 value and
+    // bits [63:32] hold AtomTag_Int32 / AtomTag_IntPtr.
+    IR::Opnd *src1Int32 = src1Var->UseWithNewType(TyInt32, m_func);
+    IR::Instr *instr = IR::Instr::New(Js::OpCode::TST, m_func);
+    instr->SetSrc1(src1Int32);
+    instr->SetSrc2(IR::IntConstOpnd::New(src2Value - 1, TyInt32, m_func));
+    instrDiv->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
 
-    //// s1  = ASR  src1, log2(src2Value)  -- do the equal divide
-    //instr = IR::Instr::New(Js::OpCode::ASR, s1, src1, IR::IntConstOpnd::New(Math::Log2(src2Value), TyInt32, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr);
+    instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, doesntDivideEqually, m_func));
 
-    //// dst = ORR   s1, 1                 -- restore tagged int bit
-    //instr = IR::Instr::New(Js::OpCode::ORR, dst, s1, IR::IntConstOpnd::New(1, TyInt32, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr);
-    //
-    ////       B  $done
-    //instr = IR::BranchInstr::New(Js::OpCode::B, done, m_func);
-    //instrDiv->InsertBefore(instr);
+    // Exact multiple (including 0 and negative multiples like -4 / 2, INT32_MIN / 2).
+    // 32-bit ASR clears bits [63:32], then ORR AtomTag_IntPtr re-tags to Var.
+    int32 shiftCount = Math::Log2(src2Value);
+    IR::RegOpnd *s1 = IR::RegOpnd::New(TyInt32, m_func);
+    instr = IR::Instr::New(Js::OpCode::ASR, s1, src1Int32, IR::IntConstOpnd::New(shiftCount, TyInt32, m_func), m_func);
+    instrDiv->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
 
-    //// $doesntDivideEqually:
-    //instrDiv->InsertBefore(doesntDivideEqually);
+    IR::RegOpnd *s1Var = s1->UseWithNewType(TyMachPtr, m_func)->AsRegOpnd();
+    this->GenerateInt32ToVarConversion(s1Var, instrDiv);
+    Lowerer::InsertMove(dst, s1Var, instrDiv);
+    instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, done, m_func));
 
-    //// s1 =  AND  s1, 0x80000001 | (src2Value - 1)
-    //instr = IR::Instr::New(Js::OpCode::AND, s1, s1, IR::IntConstOpnd::New((0x80000001 | (src2Value - 1)), TyInt32, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
+    // $doesntDivideEqually:
+    instrDiv->InsertBefore(doesntDivideEqually);
 
-    ////       CMP  s1, 1
-    //instr = IR::Instr::New(Js::OpCode::CMP, m_func);
-    //instr->SetSrc1(s1);
-    //instr->SetSrc2(IR::IntConstOpnd::New(1, TyInt32, m_func));
-    //instrDiv->InsertBefore(instr);
+    // Exact .5 remainder iff bit (shiftCount - 1) is 1 and lower bits are 0.
+    // For src2Value == 2, (val & 1) != 0 already guarantees (val & 1) == 1.
+    if (src2Value > 2)
+    {
+        instr = IR::Instr::New(Js::OpCode::TST, m_func);
+        instr->SetSrc1(src1Int32);
+        instr->SetSrc2(IR::IntConstOpnd::New((src2Value >> 1) - 1, TyInt32, m_func));
+        instrDiv->InsertBefore(instr);
+        LegalizeMD::LegalizeInstr(instr);
 
-    ////       BNE  $helper
-    //instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, helper, m_func));
+        instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, helper, m_func));
+    }
 
-    //// s1 =  ASR  src1, log2(src2Value) + 1 -- do the integer divide and also shift out the tagged int bit
-    //instr = IR::Instr::New(Js::OpCode::ASR, s1, src1, IR::IntConstOpnd::New(Math::Log2(src2Value) + 1, TyInt32, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr);
+    // ASR(-3, 1) == -2; FinishOddDivByPow2(-2) == -2 + 0.5 == -1.5.
+    IR::RegOpnd *s1Odd = IR::RegOpnd::New(TyInt32, m_func);
+    instr = IR::Instr::New(Js::OpCode::ASR, s1Odd, src1Int32, IR::IntConstOpnd::New(shiftCount, TyInt32, m_func), m_func);
+    instrDiv->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
 
-    //// Arg2: scriptContext
-    //IR::JnHelperMethod helperMethod;
-    //if (instrDiv->dstIsTempNumber)
-    //{
-    //    // Var JavascriptMath::FinishOddDivByPow2_InPlace(uint32 value, ScriptContext *scriptContext, _Out_ JavascriptNumber* result)
-    //    helperMethod = IR::HelperOp_FinishOddDivByPow2InPlace;
-    //    Assert(dst->IsRegOpnd());
-    //    StackSym * tempNumberSym = this->m_lowerer->GetTempNumberSym(dst, instr->dstIsTempNumberTransferred);
+    IR::JnHelperMethod helperMethod;
+    if (instrDiv->dstIsTempNumber)
+    {
+        helperMethod = IR::HelperOp_FinishOddDivByPow2InPlace;
+        Assert(dst->IsRegOpnd());
+        StackSym *tempNumberSym = this->m_lowerer->GetTempNumberSym(dst, instrDiv->dstIsTempNumberTransferred);
+        instr = this->m_lowerer->InsertLoadStackAddress(tempNumberSym, instrDiv);
+        this->LoadHelperArgument(instrDiv, instr->GetDst());
+    }
+    else
+    {
+        helperMethod = IR::HelperOp_FinishOddDivByPow2;
+    }
+    this->m_lowerer->LoadScriptContext(instrDiv);
+    this->LoadHelperArgument(instrDiv, s1Odd);
 
-    //    instr = this->m_lowerer->InsertLoadStackAddress(tempNumberSym, instrDiv);
-    //    LegalizeMD::LegalizeInstr(instr);
+    instr = IR::Instr::New(Js::OpCode::Call, dst, IR::HelperCallOpnd::New(helperMethod, m_func), m_func);
+    instrDiv->InsertBefore(instr);
+    this->LowerCall(instr, 0);
 
-    //    this->LoadHelperArgument(instrDiv, instr->GetDst());
-    //}
-    //else
-    //{
-    //    // Var JavascriptMath::FinishOddDivByPow2(uint32 value, ScriptContext *scriptContext)
-    //    helperMethod = IR::HelperOp_FinishOddDivByPow2;
-    //}
-    //this->m_lowerer->LoadScriptContext(instrDiv);
+    instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, done, m_func));
 
-    //// Arg1: value
-    //this->LoadHelperArgument(instrDiv, s1);
+    // $helper:
+    instrDiv->InsertBefore(helper);
 
-    //// dst = CALL Op_FinishOddDivByPow2     -- input: actual value, output: JavascriptNumber with 0.5 added to the input
-    //instr = IR::Instr::New(Js::OpCode::Call, dst, IR::HelperCallOpnd::New(helperMethod, m_func), m_func);
-    //instrDiv->InsertBefore(instr);
-    //this->LowerCall(instr, 0);
-
-    ////       JMP $done
-    //instrDiv->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, done, m_func));
-
-    //// $helper:
-    //instrDiv->InsertBefore(helper);
-
-    //// $done:
-    //instrDiv->InsertAfter(done);
-
-    return;
+    // $done:
+    instrDiv->InsertAfter(done);
 }
 
 ///----------------------------------------------------------------------------

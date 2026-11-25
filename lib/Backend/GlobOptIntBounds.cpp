@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
@@ -724,6 +725,8 @@ void GlobOpt::TrackIntSpecializedAddSubConstant(
             Assert(
                 instr->m_opcode == Js::OpCode::Incr_A ||
                 instr->m_opcode == Js::OpCode::Decr_A ||
+                instr->m_opcode == Js::OpCode::Incr_Num_A ||
+                instr->m_opcode == Js::OpCode::Decr_Num_A ||
                 instr->m_opcode == Js::OpCode::Add_A ||
                 instr->m_opcode == Js::OpCode::Sub_A);
 
@@ -734,15 +737,15 @@ void GlobOpt::TrackIntSpecializedAddSubConstant(
                 // Check for the following patterns.
                 //
                 // This pattern is used for postfix inc/dec operators:
-                //     s2 = Conv_Num s1
-                //     s1 = Inc s2
+                //     s2 = Conv_Num s1 (or Conv_Numeric s1)
+                //     s1 = Inc s2      (or Incr_Num_A / Decr_Num_A s2)
                 //
                 // This pattern is used for prefix inc/dec operators:
                 //     s2 = Inc s1
                 //     s1 = Ld s2
                 IR::Instr *const prevInstr = instr->m_prev;
                 Assert(prevInstr);
-                if(prevInstr->m_opcode == Js::OpCode::Conv_Num &&
+                if((prevInstr->m_opcode == Js::OpCode::Conv_Num || prevInstr->m_opcode == Js::OpCode::Conv_Numeric) &&
                     prevInstr->GetSrc1()->IsRegOpnd() &&
                     prevInstr->GetSrc1()->AsRegOpnd()->m_sym == sym &&
                     prevInstr->GetDst()->AsRegOpnd()->m_sym == addSubConstantInfo->SrcSym())
@@ -887,6 +890,8 @@ void GlobOpt::TrackIntSpecializedAddSubConstant(
     Assert(
         instr->m_prev->m_opcode == Js::OpCode::Incr_A ||
         instr->m_prev->m_opcode == Js::OpCode::Decr_A ||
+        instr->m_prev->m_opcode == Js::OpCode::Incr_Num_A ||
+        instr->m_prev->m_opcode == Js::OpCode::Decr_Num_A ||
         instr->m_prev->m_opcode == Js::OpCode::Add_A ||
         instr->m_prev->m_opcode == Js::OpCode::Sub_A);
     Assert(instr->m_prev->GetDst()->AsRegOpnd()->m_sym == instr->GetSrc1()->AsRegOpnd()->m_sym);

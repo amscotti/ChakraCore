@@ -4171,11 +4171,13 @@ bool Instr::UnaryCalculator(IntConstType src1Const, IntConstType *pResult, IRTyp
         break;
 
     case Js::OpCode::Conv_Num:
+    case Js::OpCode::Conv_Numeric:
     case Js::OpCode::Ld_I4:
         value = src1Const;
         break;
 
     case Js::OpCode::Incr_A:
+    case Js::OpCode::Incr_Num_A:
         if (IntConstMath::Inc(src1Const, type, &value))
         {
             return false;
@@ -4183,6 +4185,7 @@ bool Instr::UnaryCalculator(IntConstType src1Const, IntConstType *pResult, IRTyp
         break;
 
     case Js::OpCode::Decr_A:
+    case Js::OpCode::Decr_Num_A:
         if (IntConstMath::Dec(src1Const, type, &value))
         {
             return false;

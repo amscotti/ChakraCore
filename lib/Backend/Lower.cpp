@@ -8936,11 +8936,74 @@ Lowerer::LowerUnaryHelperMemWithBoolReference(IR::Instr *instr, IR::JnHelperMeth
     }
     IR::SymOpnd * boolOpnd = IR::SymOpnd::New(this->m_func->tempSymBool, TyUint8, this->m_func);
     IR::RegOpnd * boolRefOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
+
+    const bool checkBigInt =
+        useBoolForBailout &&
+        helperMethod == IR::HelperConv_ToInt32_NoObjects &&
+        CONFIG_FLAG(ESBigInt) &&
+        instr->HasBailOutInfo() &&
+        !instr->OnlyHasLazyBailOut();
+    IR::Opnd *origSrc1 = checkBigInt ? instr->GetSrc1()->Copy(this->m_func) : nullptr;
+    BailOutInfo *bailOutInfo = checkBigInt ? instr->GetBailOutInfo() : nullptr;
+    IR::BailOutKind bailOutKind = checkBigInt ? BailOutInfo::WithoutLazyBailOut(instr->GetBailOutKind()) : IR::BailOutInvalid;
+    const uint32 bailOutByteCodeOffset = checkBigInt ? instr->GetByteCodeOffset() : Js::Constants::NoByteCodeOffset;
+    IR::LabelInstr *callHelperLabel = nullptr;
+    if (checkBigInt)
+    {
+        bool inHelperBlock = false;
+        for (IR::Instr *prev = instr->m_prev; prev; prev = prev->m_prev)
+        {
+            if (prev->IsLabelInstr())
+            {
+                inHelperBlock = prev->AsLabelInstr()->isOpHelper;
+                break;
+            }
+        }
+        callHelperLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, inHelperBlock);
+        instr->InsertBefore(callHelperLabel);
+    }
+
     InsertLea(boolRefOpnd, boolOpnd, instr);
 
     m_lowererMD.LoadHelperArgument(instr, boolRefOpnd);
 
-    return this->LowerUnaryHelperMem(instr, helperMethod, useBoolForBailout ? boolOpnd : nullptr);
+    IR::Instr *helperResult = this->LowerUnaryHelperMem(instr, helperMethod, useBoolForBailout ? boolOpnd : nullptr);
+
+    if (checkBigInt)
+    {
+        // EmitLoadInt32 already branched away TaggedInt (and Float64 on 64-bit) before
+        // reaching this slow path, so origSrc1 is a RecyclableObject* or an out-of-range
+        // Float64. Bail out on TypeIds_BigInt before HelperConv_ToInt32_NoObjects so non-BigInt
+        // primitives (undefined, null, boolean, string) convert inline without bailing out while
+        // BigInt falls back cleanly to the interpreter.
+        IR::RegOpnd *srcReg = (origSrc1->IsRegOpnd() && origSrc1->GetType() == TyVar)
+            ? origSrc1->AsRegOpnd()
+            : IR::RegOpnd::New(TyVar, this->m_func);
+        if (srcReg != origSrc1)
+        {
+            InsertMove(srcReg, origSrc1, callHelperLabel);
+        }
+        m_lowererMD.GenerateObjectTest(srcReg, callHelperLabel, callHelperLabel);
+        IR::RegOpnd *typeRegOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
+        InsertMove(
+            typeRegOpnd,
+            IR::IndirOpnd::New(srcReg, Js::RecyclableObject::GetOffsetOfType(), TyMachReg, this->m_func),
+            callHelperLabel);
+        InsertCompareBranch(
+            IR::IndirOpnd::New(typeRegOpnd, Js::Type::GetOffsetOfTypeId(), TyInt32, this->m_func),
+            IR::IntConstOpnd::New(Js::TypeIds_BigInt, TyInt32, this->m_func),
+            Js::OpCode::BrNeq_A,
+            callHelperLabel,
+            callHelperLabel);
+        Js::OpCode origBailOutOpcode = bailOutInfo->bailOutOpcode;
+        IR::Instr *bigIntBailInstr = IR::BailOutInstr::New(Js::OpCode::BailOut, bailOutKind, bailOutInfo, bailOutInfo->bailOutFunc);
+        bailOutInfo->bailOutOpcode = origBailOutOpcode;
+        bigIntBailInstr->SetByteCodeOffset(bailOutByteCodeOffset);
+        callHelperLabel->InsertBefore(bigIntBailInstr);
+        this->GenerateBailOut(bigIntBailInstr);
+    }
+
+    return helperResult;
 }
 
 IR::Instr *
