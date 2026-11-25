@@ -98,6 +98,16 @@
 #undef Yield /* winbase.h defines this but we want to use it for Js::OpCode::Yield; it is Win16 legacy, no harm undef'ing it */
 #pragma warning(pop)
 
+#if !ENABLE_OOP_NATIVE_CODEGEN
+// When OOP-JIT (lib/JITClient/JITManager.cpp) is disabled on Windows, provide
+// process-heap shims matching the PAL branch below; rpcdce.h maps
+// midl_user_{allocate,free} to MIDL_user_{allocate,free}.
+#define MIDL_user_allocate(size) \
+    HeapAlloc(GetProcessHeap(), 0, (size))
+#define MIDL_user_free(ptr) \
+    do { void* _midl_ptr = (ptr); if (_midl_ptr != NULL) { HeapFree(GetProcessHeap(), 0, _midl_ptr); } } while (0)
+#endif
+
 // xplat-todo: get a better name for this macro
 #define _u(s) L##s
 #define INIT_PRIORITY(x)
@@ -509,6 +519,10 @@ DWORD __cdecl CharUpperBuffW(const char16* lpsz, DWORD  cchLength);
 #define _TYPENAME typename
 #endif
 
+// zig c++ uses libc++ headers, which define _NOEXCEPT_ as a function-like
+// macro (_NOEXCEPT_(...)); this codebase uses it as an object-like token,
+// so normalize it before defining.
+#undef _NOEXCEPT_
 #if (defined(_MSC_VER) && _MSC_VER < 1900) || defined(NTBUILD)
 // "noexcept" not supported before VS 2015
 #define _NOEXCEPT_ throw()

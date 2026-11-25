@@ -232,7 +232,7 @@ namespace Js
 
         bool StringEquals(JavascriptString* str, const char16* literal)
         {
-            return PAL_wcscmp(str->GetSz(), literal) == 0;
+            return wcscmp(str->GetSz(), literal) == 0;
         }
 
         DurationStyle ParseDurationStyle(JavascriptString* str)
@@ -834,7 +834,7 @@ namespace Js
             {
                 DurationUnitIndex unit = gAlphabeticalUnits[i];
                 const char16* propName = gUnits[unit].name;
-                PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(PAL_wcslen(propName)));
+                PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(wcslen(propName)));
                 Var val = JavascriptOperators::GetProperty(obj, propId, scriptContext);
                 if (!JavascriptOperators::IsUndefined(val))
                 {

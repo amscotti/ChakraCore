@@ -201,9 +201,10 @@ test "compile define and Clang-MSVC flag builders" {
     const defs_test = windows.buildCompileDefines(arena, .@"test", true, .icu4c, true, null);
     try expectContains(defs_test, "-DENABLE_OOP_NATIVE_CODEGEN=0");
     try expectContains(defs_test, "-DDISABLE_JS_ETW");
+    try expectContains(defs_test, "-D_CRT_RAND_S");
     try expectContains(defs_test, "-DHAS_ICU=1");
     try expectContains(defs_test, "-DINTL_ICU=1");
-    try expectContains(defs_test, "-DU_DISABLE_RENAMING=1");
+    try expectNotContains(defs_test, "-DU_DISABLE_RENAMING=1");
     try expectContains(defs_test, "-DCAN_BUILD_WABT=1");
     try expectContains(defs_test, "-DENABLE_DEBUG_CONFIG_OPTIONS=1");
     try expectNotContains(defs_test, "-DDISABLE_JIT=1");
@@ -215,6 +216,7 @@ test "compile define and Clang-MSVC flag builders" {
     try expectContains(defs_win_nojit, "-D_DEBUG");
     try expectContains(defs_win_nojit, "-DDBG=1");
     try expectContains(defs_win_nojit, "-DWINDOWS10_ICU=1");
+    try expectContains(defs_win_nojit, "-DU_DISABLE_RENAMING=1");
     try expectContains(defs_win_nojit, "-DINC_OLE2");
 
     const defs_no_icu = windows.buildCompileDefines(arena, .release_shared, true, .none, false, null);
@@ -228,22 +230,31 @@ test "compile define and Clang-MSVC flag builders" {
     const cxx_flags = windows.buildCompilerFlags(arena, .@"test", .cxx, false, true);
     try expectContains(cxx_flags, "-fms-runtime-lib=static");
     try expectContains(cxx_flags, "-O2");
+    try expectNotContains(cxx_flags, "-fno-sanitize=undefined");
     try expectContains(cxx_flags, "-Werror");
     try expectContains(cxx_flags, "-Wno-date-time");
     try expectContains(cxx_flags, "-Wno-unused-command-line-argument");
     try expectContains(cxx_flags, "-msse4.2");
     try expectContains(cxx_flags, "-fdelayed-template-parsing");
     try expectContains(tables.clang_msvc_warnings, "-Wno-unused-command-line-argument");
+    try expectContains(tables.clang_msvc_warnings, "-Wno-nonportable-include-path");
+    try expectContains(tables.clang_msvc_warnings, "-Wno-ignored-pragmas");
+    try expectContains(tables.ch_group.extra_includes, "lib/Parser");
 
     const dbg_flags = windows.buildCompilerFlags(arena, .debug_static, .cxx, true, false);
     try expectContains(dbg_flags, "-fms-runtime-lib=static_dbg");
     try expectContains(dbg_flags, "-O0");
+    try expectContains(dbg_flags, "-fno-sanitize=undefined");
     try expectContains(dbg_flags, "-w");
     try expectNotContains(dbg_flags, "-Werror");
+
+    const dbg_c_flags = windows.buildCompilerFlags(arena, .debug_static, .c, false, false);
+    try expectContains(dbg_c_flags, "-fno-sanitize=undefined");
 
     const c_flags = windows.buildCompilerFlags(arena, .@"test", .c, true, false);
     try expectContains(c_flags, "-std=c11");
     try expectNotContains(c_flags, "-std=c++17");
+    try expectNotContains(c_flags, "-fno-sanitize=undefined");
 }
 
 test "MASM ml64 flag construction and env auto-discovery candidates" {
@@ -413,4 +424,44 @@ test "strict extensions, no jserr.gen in groups, and exact non-overlapping TU co
     try std.testing.expect(std.mem.indexOf(u8, win_src, "tools/build/check_regression_windows.py") != null);
     try std.testing.expect(std.mem.indexOf(u8, win_src, "allow-unpinned-regression") != null);
     try std.testing.expect(std.mem.indexOf(u8, win_src, "\"check_regression_windows.py\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "if (lang == .cxx) run.addArg(\"-nostdlib++\");") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "dll_link = b.addSystemCommand(&.{ b.graph.zig_exe, \"c++\", \"-nostdlib++\" });") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "ch_link = b.addSystemCommand(&.{ b.graph.zig_exe, \"c++\", \"-nostdlib++\" });") != null);
+    try std.testing.expect(std.mem.indexOf(u8, win_src, "gs_link = b.addSystemCommand(&.{ b.graph.zig_exe, \"c++\", \"-nostdlib++\" });") != null);
+}
+
+test "Windows B6 root-cause helpers: renderVersionRc and debugStaticLinkFlags" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const dll_rc = windows.renderVersionRc(arena, .@"test", "chakracore.dll", "ChakraCore.dll", "ChakraCore", true, true);
+    try std.testing.expect(std.mem.indexOf(u8, dll_rc, "1 VERSIONINFO") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dll_rc, "FILETYPE 0x2L") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dll_rc, "FILEFLAGS (0x0L | _CC_REL_FLAGS)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dll_rc, "#include \"jserr.gen\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dll_rc, "VALUE \"InternalName\", \"chakracore.dll\\0\"") != null);
+
+    const exe_dbg_rc = windows.renderVersionRc(arena, .debug_static, "ch.exe", "ch.exe", "ChakraCore Host", false, false);
+    try std.testing.expect(std.mem.indexOf(u8, exe_dbg_rc, "FILETYPE 0x1L") != null);
+    try std.testing.expect(std.mem.indexOf(u8, exe_dbg_rc, "FILEFLAGS (0x1L | _CC_REL_FLAGS)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, exe_dbg_rc, "#include \"jserr.gen\"") == null);
+
+    const dbg_flags = windows.debugStaticLinkFlags(arena, .{
+        .msvc_lib_dir = "C:/VS/VC/lib/x64",
+        .ucrt_lib_dir = "C:/WinSDK/Lib/10/ucrt/x64",
+        .um_lib_dir = "C:/WinSDK/Lib/10/um/x64",
+    });
+    try expectContains(dbg_flags, "-nostdlib");
+    try expectContains(dbg_flags, "-Wl,/SUBSYSTEM:CONSOLE");
+    try expectContains(dbg_flags, "-Wl,/NODEFAULTLIB:libcmt.lib");
+    try expectContains(dbg_flags, "-Wl,/NODEFAULTLIB:libvcruntime.lib");
+    try expectContains(dbg_flags, "-Wl,/NODEFAULTLIB:libucrt.lib");
+    try expectContains(dbg_flags, "-LC:/WinSDK/Lib/10/um/x64");
+    try expectContains(dbg_flags, "-LC:/WinSDK/Lib/10/ucrt/x64");
+    try expectContains(dbg_flags, "-LC:/VS/VC/lib/x64");
+    try expectContains(dbg_flags, "C:/VS/VC/lib/x64/libcmtd.lib");
+    try expectContains(dbg_flags, "C:/VS/VC/lib/x64/libvcruntimed.lib");
+    try expectContains(dbg_flags, "C:/WinSDK/Lib/10/ucrt/x64/libucrtd.lib");
+    try expectContains(dbg_flags, "C:/VS/VC/lib/x64/oldnames.lib");
 }

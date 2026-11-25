@@ -258,7 +258,9 @@ pub fn buildCompileDefines(
     if (!jit) out.append(arena, "-DDISABLE_JIT=1") catch @panic("OOM");
     switch (icu) {
         .icu4c => {
-            for ([_][]const u8{ "-DHAS_ICU=1", "-DINTL_ICU=1", "-DU_DISABLE_RENAMING=1" }) |d|
+            // vcpkg's shared ICU exports version-suffixed symbols (e.g. u_strToUpper_79),
+            // so leave ICU symbol renaming enabled instead of passing -DU_DISABLE_RENAMING=1.
+            for ([_][]const u8{ "-DHAS_ICU=1", "-DINTL_ICU=1" }) |d|
                 out.append(arena, d) catch @panic("OOM");
         },
         .windows => {
@@ -297,7 +299,7 @@ pub fn buildCompilerFlags(
     out.append(arena, msRuntimeLibFlag(profile)) catch @panic("OOM");
     switch (profile) {
         .@"test" => out.appendSlice(arena, &.{ "-O2", "-g" }) catch @panic("OOM"),
-        .debug_static => out.appendSlice(arena, &.{ "-O0", "-g" }) catch @panic("OOM"),
+        .debug_static => out.appendSlice(arena, &.{ "-O0", "-g", "-fno-sanitize=undefined" }) catch @panic("OOM"),
         .release_shared => out.append(arena, "-O2") catch @panic("OOM"),
     }
     switch (lang) {
@@ -499,6 +501,11 @@ fn resolveWinSdkUm(b: *std.Build) []const u8 {
     );
     for (env_cands) |cand| {
         if (fileExists(io, joinNativeOrSlash(arena, cand, "ksamd64.inc"))) return cand;
+        // SDK 26100+ moved ksamd64.inc from um/ to shared/.
+        if (std.fs.path.dirname(cand)) |parent| {
+            const shared = joinNativeOrSlash(arena, parent, "shared");
+            if (fileExists(io, joinNativeOrSlash(arena, shared, "ksamd64.inc"))) return shared;
+        }
     }
 
     if (comptime builtin.os.tag == .windows) {
@@ -508,11 +515,193 @@ fn resolveWinSdkUm(b: *std.Build) []const u8 {
                 const ver_dir = joinNativeOrSlash(arena, inc, trimPathTrailingSep(w10.version));
                 const um = joinNativeOrSlash(arena, ver_dir, "um");
                 if (fileExists(io, joinNativeOrSlash(arena, um, "ksamd64.inc"))) return um;
+                const shared = joinNativeOrSlash(arena, ver_dir, "shared");
+                if (fileExists(io, joinNativeOrSlash(arena, shared, "ksamd64.inc"))) return shared;
             }
         } else |_| {}
     }
 
     fail("cannot find Windows SDK um include directory containing ksamd64.inc: pass -Dwin-sdk-um=<dir> or set WindowsSdkDir/WindowsSDKVersion", .{});
+}
+
+pub const DebugCrtPaths = struct {
+    msvc_lib_dir: []const u8,
+    ucrt_lib_dir: []const u8,
+    um_lib_dir: []const u8,
+};
+
+fn appendLibCandidate(arena: std.mem.Allocator, list: *std.ArrayList([]const u8), cand: []const u8) void {
+    const clean = trimPathTrailingSep(cand);
+    if (clean.len == 0) return;
+    for (list.items) |existing| {
+        if (std.mem.eql(u8, existing, clean)) return;
+    }
+    list.append(arena, clean) catch @panic("OOM");
+}
+
+pub fn resolveDebugCrtPaths(b: *std.Build, win_sdk_um: []const u8) DebugCrtPaths {
+    const arena = b.graph.arena;
+    const io = b.graph.io;
+    var cands: std.ArrayList([]const u8) = .empty;
+
+    if (b.graph.environ_map.get("LIB")) |lib_env| {
+        var it = std.mem.splitScalar(u8, lib_env, ';');
+        while (it.next()) |seg| {
+            appendLibCandidate(arena, &cands, seg);
+        }
+    }
+    if (b.graph.environ_map.get("VCToolsInstallDir")) |vc_dir| {
+        appendLibCandidate(arena, &cands, joinNativeOrSlash(arena, vc_dir, "lib/x64"));
+    }
+    if (comptime builtin.os.tag == .windows) {
+        if (std.zig.WindowsSdk.find(arena, io, .x86_64, &b.graph.environ_map)) |sdk| {
+            if (sdk.msvc_lib_dir) |msvc_dir| {
+                appendLibCandidate(arena, &cands, msvc_dir);
+            }
+            if (sdk.windows10sdk) |w10| {
+                const ver_dir = std.fmt.allocPrint(arena, "{s}/Lib/{s}", .{
+                    trimPathTrailingSep(w10.path),
+                    trimPathTrailingSep(w10.version),
+                }) catch @panic("OOM");
+                appendLibCandidate(arena, &cands, joinNativeOrSlash(arena, ver_dir, "ucrt/x64"));
+                appendLibCandidate(arena, &cands, joinNativeOrSlash(arena, ver_dir, "um/x64"));
+            }
+        } else |_| {}
+    }
+    if (std.fs.path.dirname(win_sdk_um)) |um_parent| {
+        const ver_name = std.fs.path.basename(um_parent);
+        if (std.fs.path.dirname(um_parent)) |inc_dir| {
+            if (std.fs.path.dirname(inc_dir)) |sdk_root| {
+                const lib_ver = std.fmt.allocPrint(arena, "{s}/Lib/{s}", .{
+                    trimPathTrailingSep(sdk_root),
+                    ver_name,
+                }) catch @panic("OOM");
+                appendLibCandidate(arena, &cands, joinNativeOrSlash(arena, lib_ver, "ucrt/x64"));
+                appendLibCandidate(arena, &cands, joinNativeOrSlash(arena, lib_ver, "um/x64"));
+            }
+        }
+    }
+
+    var msvc_lib_dir: ?[]const u8 = null;
+    var ucrt_lib_dir: ?[]const u8 = null;
+    var um_lib_dir: ?[]const u8 = null;
+    for (cands.items) |dir| {
+        if (msvc_lib_dir == null and
+            fileExists(io, joinNativeOrSlash(arena, dir, "libcmtd.lib")) and
+            fileExists(io, joinNativeOrSlash(arena, dir, "libvcruntimed.lib")) and
+            fileExists(io, joinNativeOrSlash(arena, dir, "oldnames.lib")))
+        {
+            msvc_lib_dir = dir;
+        }
+        if (ucrt_lib_dir == null and fileExists(io, joinNativeOrSlash(arena, dir, "libucrtd.lib"))) {
+            ucrt_lib_dir = dir;
+        }
+        if (um_lib_dir == null and fileExists(io, joinNativeOrSlash(arena, dir, "kernel32.lib"))) {
+            um_lib_dir = dir;
+        }
+    }
+
+    return .{
+        .msvc_lib_dir = msvc_lib_dir orelse fail("cannot locate MSVC debug CRT libs (libcmtd.lib, libvcruntimed.lib, oldnames.lib) in LIB, VCToolsInstallDir, or WindowsSdk", .{}),
+        .ucrt_lib_dir = ucrt_lib_dir orelse fail("cannot locate UCRT debug CRT lib (libucrtd.lib) in LIB or WindowsSdk", .{}),
+        .um_lib_dir = um_lib_dir orelse fail("cannot locate Windows SDK um x64 libs (kernel32.lib) in LIB or WindowsSdk", .{}),
+    };
+}
+
+pub fn debugStaticLinkFlags(arena: std.mem.Allocator, paths: DebugCrtPaths) []const []const u8 {
+    return arena.dupe([]const u8, &.{
+        "-nostdlib",
+        "-Wl,/SUBSYSTEM:CONSOLE",
+        "-Wl,/NODEFAULTLIB:libcmt.lib",
+        "-Wl,/NODEFAULTLIB:libvcruntime.lib",
+        "-Wl,/NODEFAULTLIB:libucrt.lib",
+        std.fmt.allocPrint(arena, "-L{s}", .{paths.um_lib_dir}) catch @panic("OOM"),
+        std.fmt.allocPrint(arena, "-L{s}", .{paths.ucrt_lib_dir}) catch @panic("OOM"),
+        std.fmt.allocPrint(arena, "-L{s}", .{paths.msvc_lib_dir}) catch @panic("OOM"),
+        joinNativeOrSlash(arena, paths.msvc_lib_dir, "libcmtd.lib"),
+        joinNativeOrSlash(arena, paths.msvc_lib_dir, "libvcruntimed.lib"),
+        joinNativeOrSlash(arena, paths.ucrt_lib_dir, "libucrtd.lib"),
+        joinNativeOrSlash(arena, paths.msvc_lib_dir, "oldnames.lib"),
+    }) catch @panic("OOM");
+}
+
+pub fn renderVersionRc(
+    arena: std.mem.Allocator,
+    profile: Profile,
+    internal_name: []const u8,
+    original_filename: []const u8,
+    product_name: []const u8,
+    is_dll: bool,
+    include_jserr: bool,
+) []const u8 {
+    const dbg_flag: []const u8 = if (profile == .debug_static) "0x1L" else "0x0L";
+    const file_type: []const u8 = if (is_dll) "0x2L" else "0x1L";
+    const jserr_inc: []const u8 = if (include_jserr) "\n#include \"jserr.gen\"\n" else "";
+    return std.fmt.allocPrint(arena,
+        \\#include "ChakraCoreVersion.h"
+        \\#define _CC_STR2(x) #x
+        \\#define _CC_STR(x) _CC_STR2(x)
+        \\#define _CC_VER_STR _CC_STR(CHAKRA_CORE_MAJOR_VERSION) "." _CC_STR(CHAKRA_CORE_MINOR_VERSION) "." _CC_STR(CHAKRA_CORE_PATCH_VERSION) "." _CC_STR(CHAKRA_CORE_VERSION_RELEASE_QFE)
+        \\#if CHAKRA_CORE_VERSION_RELEASE
+        \\#if CHAKRA_CORE_VERSION_PRERELEASE
+        \\#define _CC_REL_FLAGS 0x2L
+        \\#else
+        \\#define _CC_REL_FLAGS 0x0L
+        \\#endif
+        \\#else
+        \\#define _CC_REL_FLAGS 0x8L
+        \\#endif
+        \\
+        \\1 VERSIONINFO
+        \\FILEVERSION CHAKRA_CORE_MAJOR_VERSION, CHAKRA_CORE_MINOR_VERSION, CHAKRA_CORE_PATCH_VERSION, CHAKRA_CORE_VERSION_RELEASE_QFE
+        \\PRODUCTVERSION CHAKRA_CORE_MAJOR_VERSION, CHAKRA_CORE_MINOR_VERSION, CHAKRA_CORE_PATCH_VERSION, CHAKRA_CORE_VERSION_RELEASE_QFE
+        \\FILEFLAGSMASK 0x3fL
+        \\FILEFLAGS ({s} | _CC_REL_FLAGS)
+        \\FILEOS 0x40004L
+        \\FILETYPE {s}
+        \\FILESUBTYPE 0x0L
+        \\BEGIN
+        \\    BLOCK "StringFileInfo"
+        \\    BEGIN
+        \\        BLOCK "040904B0"
+        \\        BEGIN
+        \\            VALUE "CompanyName", "ChakraCore Project Contributors\0"
+        \\            VALUE "FileDescription", "{s}\0"
+        \\            VALUE "FileVersion", _CC_VER_STR "\0"
+        \\            VALUE "InternalName", "{s}\0"
+        \\            VALUE "OriginalFilename", "{s}\0"
+        \\            VALUE "ProductName", "{s}\0"
+        \\            VALUE "ProductVersion", _CC_VER_STR "\0"
+        \\        END
+        \\    END
+        \\    BLOCK "VarFileInfo"
+        \\    BEGIN
+        \\        VALUE "Translation", 0x409, 1200
+        \\    END
+        \\END
+        \\{s}
+    , .{ dbg_flag, file_type, product_name, internal_name, original_filename, product_name, jserr_inc }) catch @panic("OOM");
+}
+
+fn compileWindowsResource(
+    b: *std.Build,
+    base_name: []const u8,
+    rc_source: []const u8,
+) std.Build.LazyPath {
+    const wf = b.addWriteFiles();
+    const rc_in = wf.add(b.fmt("{s}.rc.in", .{base_name}), rc_source);
+    const pp = b.addSystemCommand(&.{ b.graph.zig_exe, "cc" });
+    pp.addArgs(&.{ "-E", "-P", "-Ilib/Common", "-Ilib/Parser", "-x", "c" });
+    pp.addFileArg(rc_in);
+    pp.addArg("-o");
+    const rc_pp = pp.addOutputFileArg(b.fmt("{s}.rc", .{base_name}));
+
+    const res_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "rc" });
+    res_cmd.addArgs(&.{ "/:auto-includes", "none", "/:output-format", "coff", "/:target", "x86_64" });
+    const obj = res_cmd.addPrefixedOutputFileArg("/fo", b.fmt("{s}.obj", .{base_name}));
+    res_cmd.addArg("--");
+    res_cmd.addFileArg(rc_pp);
+    return obj;
 }
 
 fn windowsSdkLibUmHasIcuLib(arena: std.mem.Allocator, io: std.Io, win_sdk_um: []const u8) bool {
@@ -608,12 +797,22 @@ fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lan
     const run = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
     run.addArg("-target");
     run.addArg(profile_target);
+    // Zig's bundled clang emits /DEFAULTLIB:libc++.lib into C++ objects unless
+    // told not to link its bundled libc++ at driver level.
+    if (lang == .cxx) run.addArg("-nostdlib++");
 
     for (buildCompileDefines(arena, ctx.profile, ctx.jit, ctx.icu, !isReleaseProfile(ctx.profile), g.target_define)) |d| {
         run.addArg(d);
     }
 
     for (tables.global_includes) |dir| run.addArg(b.fmt("-I{s}", .{dir}));
+    // SDK 26100+ ships Windows.Globalization.h (WinRT) under winrt/; add it when present.
+    if (std.fs.path.dirname(ctx.win_sdk_um)) |ver_dir| {
+        const winrt = joinNativeOrSlash(arena, ver_dir, "winrt");
+        if (fileExists(b.graph.io, winrt)) {
+            run.addArg(b.fmt("-I{s}", .{winrt}));
+        }
+    }
     if (g == &tables.wabt_group or g == &tables.rt_library_group) {
         if (ctx.wabt_dir) |wd| run.addPrefixedDirectoryArg("-I", wd);
     }
@@ -772,6 +971,7 @@ pub fn build(b: *std.Build) void {
     const arena = b.graph.arena;
     const is_static = isStaticProfile(profile);
     const is_release = isReleaseProfile(profile);
+    const debug_crt_paths: ?DebugCrtPaths = if (profile == .debug_static) resolveDebugCrtPaths(b, win_sdk_um) else null;
     const side_name = sideNameForConfig(profile);
     const prefix_dir = installPrefixForConfig(arena, profile);
     const has_win10_icu_lib = windowsSdkLibUmHasIcuLib(arena, b.graph.io, win_sdk_um);
@@ -815,18 +1015,36 @@ pub fn build(b: *std.Build) void {
     const dbg_header = dbg_gen.addOutputFileArg("DbgController.js.encoded");
     const gen_dir = dbg_header.dirname();
 
-    // Generate jserr.obj COFF RT_STRING resource natively via zig cc + zig rc.
-    const jserr_pp = b.addSystemCommand(&.{ b.graph.zig_exe, "cc" });
-    jserr_pp.addArgs(&.{ "-E", "-P", "-Ilib/Parser", "-x", "c" });
-    jserr_pp.addFileArg(b.path("lib/Parser/jserr.gen"));
-    jserr_pp.addArg("-o");
-    const jserr_rc = jserr_pp.addOutputFileArg("jserr.rc");
-
-    const jserr_res_cmd = b.addSystemCommand(&.{ b.graph.zig_exe, "rc" });
-    jserr_res_cmd.addArgs(&.{ "/:auto-includes", "none", "/:output-format", "coff", "/:target", "x86_64" });
-    const jserr_obj = jserr_res_cmd.addPrefixedOutputFileArg("/fo", "jserr.obj");
-    jserr_res_cmd.addArg("--");
-    jserr_res_cmd.addFileArg(jserr_rc);
+    // Generate COFF resources with VS_VERSION_INFO (needed by
+    // AutoSystemInfo::GetJscriptFileVersion / ByteCodeSerializer) plus jserr.gen
+    // RT_STRING table in ChakraCore.dll (shared) or ch.exe (debug-static).
+    const chakracore_res_obj = compileWindowsResource(b, "chakracore-res", renderVersionRc(
+        arena,
+        profile,
+        "chakracore.dll",
+        "ChakraCore.dll",
+        "ChakraCore",
+        true,
+        true,
+    ));
+    const ch_res_obj = compileWindowsResource(b, "ch-res", renderVersionRc(
+        arena,
+        profile,
+        "ch.exe",
+        "ch.exe",
+        "ChakraCore Host",
+        false,
+        is_static,
+    ));
+    const gcstress_res_obj = compileWindowsResource(b, "gcstress-res", renderVersionRc(
+        arena,
+        profile,
+        "GCStress.exe",
+        "GCStress.exe",
+        "ChakraCore GCStress",
+        false,
+        false,
+    ));
 
     // Preprocess bin/ChakraCore/ChakraCore.def with ENABLE_OOP_NATIVE_CODEGEN=0.
     const def_pp = b.addSystemCommand(&.{ b.graph.zig_exe, "cc" });
@@ -958,12 +1176,12 @@ pub fn build(b: *std.Build) void {
             num += 1;
         }
 
-        const dll_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const dll_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         dll_link.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile) });
         if (profile == .@"test") dll_link.addArg("-g");
         // ChakraCore.vcxproj: HeapAllocatorOperators.obj must appear first on link line.
         dll_link.addFileArg(heap_op_obj);
-        dll_link.addFileArg(jserr_obj);
+        dll_link.addFileArg(chakracore_res_obj);
         for (dll_objs.items) |o| dll_link.addFileArg(o);
         dll_link.addFileArg(u8a_codec_obj.getEmittedBin());
         dll_link.addFileArg(chakracore_def);
@@ -978,15 +1196,18 @@ pub fn build(b: *std.Build) void {
     }
 
     // Link ch.exe.
-    const ch_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+    const ch_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
     ch_link.addArgs(&.{ "-target", profile_target, msRuntimeLibFlag(profile) });
     if (profile != .release_shared) ch_link.addArg("-g");
     for (ch_objs.items) |o| ch_link.addFileArg(o);
+    ch_link.addFileArg(ch_res_obj);
     if (is_static) {
-        ch_link.addFileArg(jserr_obj);
         ch_link.addFileArg(static_chakracore_lib.?);
         addWinLibs(ch_link, tables.ch_win_libs);
         addIcuLinkFlags(&ctx, ch_link);
+        if (debug_crt_paths) |dcp| {
+            for (debugStaticLinkFlags(arena, dcp)) |f| ch_link.addArg(f);
+        }
     } else {
         ch_link.addFileArg(b.path("bin/ch/ch.def"));
         ch_link.addFileArg(dll_res.?.implib);
@@ -998,13 +1219,17 @@ pub fn build(b: *std.Build) void {
     if (dll_res) |dr| ch_link.step.dependOn(&dr.link.step);
 
     // Link GCStress.exe (mirrors bin/GCStress/GCStress.vcxproj).
-    const gs_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+    const gs_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
     gs_link.addArgs(&.{ "-target", profile_target, msRuntimeLibFlag(profile) });
     if (profile != .release_shared) gs_link.addArg("-g");
     for (gcstress_objs.items) |o| gs_link.addFileArg(o);
     for (gcstress_dep_libs.items) |dl| gs_link.addFileArg(dl);
+    gs_link.addFileArg(gcstress_res_obj);
     addWinLibs(gs_link, tables.gcstress_win_libs);
     addIcuLinkFlags(&ctx, gs_link);
+    if (debug_crt_paths) |dcp| {
+        for (debugStaticLinkFlags(arena, dcp)) |f| gs_link.addArg(f);
+    }
     const gs_bin = gs_link.addPrefixedOutputFileArg("-o", "GCStress.exe");
 
     // Stage artifacts into zig-out/ (test) or out/<profile>/ (debug-static, release-shared).
@@ -1078,7 +1303,7 @@ pub fn build(b: *std.Build) void {
 
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (tables.nodeapi_provider_tus) |src| {
-            const tu = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+            const tu = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
             tu.addArgs(&.{
                 "-target",
                 profile_target,
@@ -1112,7 +1337,7 @@ pub fn build(b: *std.Build) void {
             prov_objs.append(arena, out) catch @panic("OOM");
         }
 
-        const prov_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const prov_link = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         prov_link.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile) });
         if (profile == .@"test") prov_link.addArg("-g");
         for (prov_objs.items) |o| prov_link.addFileArg(o);
@@ -1170,7 +1395,7 @@ pub fn build(b: *std.Build) void {
         check_nodeapi_top.dependOn(&exports_check.step);
         check_nodeapi_step_opt = &exports_check.step;
 
-        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         nodeapi_host.addArgs(&.{
             "-target",
             profile_target,
@@ -1192,7 +1417,7 @@ pub fn build(b: *std.Build) void {
         nodeapi_host.step.dependOn(&dr.link.step);
         nodeapi_host_bin_opt = nodeapi_host_bin;
 
-        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
         nodeapi_stub.addArgs(&.{
             "-target",
             profile_target,
@@ -1229,7 +1454,7 @@ pub fn build(b: *std.Build) void {
         }
 
         for ([_][]const u8{ "hello_world", "missing_register", "promise_probe", "return_replaces", "version_reject" }) |name| {
-            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++" });
+            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
             addon.addArgs(&.{
                 "-target",
                 profile_target,

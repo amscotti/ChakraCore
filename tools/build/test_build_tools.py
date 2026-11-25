@@ -191,6 +191,7 @@ class IncrementalFailureTests(unittest.TestCase):
             self.assertEqual(source.read_bytes(), b"original\n")
             self.assertEqual(source.stat().st_mtime_ns, before)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX exec-bit repair semantics")
     def test_installer_repairs_execute_permission_without_changing_bytes(self):
         with tempfile.TemporaryDirectory(prefix="install-mode-test-") as tmp:
             src, dest = Path(tmp) / "source-ch", Path(tmp) / "installed-ch"
@@ -244,6 +245,7 @@ class ProfileInstallerTests(unittest.TestCase):
         self.assertIn("install_profile: FAIL:", stderr)
         self.assertIn(needle, stderr)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX modes, inodes, and symlinks")
     def test_normal_install_and_noop_preserve_inode_and_mtime(self):
         result = self.install(["ch=" + str(self.src)],
                               ["libch.dylib=ch"])
@@ -1175,6 +1177,7 @@ class RegenSingleVariantGuardTests(unittest.TestCase):
                                  name + " untouched")
 
 
+@unittest.skipUnless(os.name == "posix", "the regen stub binaries are POSIX shell scripts")
 class RegenGuidPathTests(unittest.TestCase):
     """The GUID mint path (swarm-trie mint-path fix, must-before-Linux): the
     release-file-version header must be written through the TRACKED casing

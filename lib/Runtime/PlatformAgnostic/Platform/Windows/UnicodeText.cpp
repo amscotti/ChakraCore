@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -421,6 +422,13 @@ namespace PlatformAgnostic
                 return false;
             }, false);
         }
+
+        // Explicit instantiation definitions (only when this TU provides the
+        // definition; the extern template decls live in UnicodeTextInternal.h).
+        template charcount_t ChangeStringLinguisticCase<true, true>(const char16* sourceString, charcount_t sourceLength, char16* destString, charcount_t destLength, ApiError* pErrorOut);
+        template charcount_t ChangeStringLinguisticCase<true, false>(const char16* sourceString, charcount_t sourceLength, char16* destString, charcount_t destLength, ApiError* pErrorOut);
+        template charcount_t ChangeStringLinguisticCase<false, true>(const char16* sourceString, charcount_t sourceLength, char16* destString, charcount_t destLength, ApiError* pErrorOut);
+        template charcount_t ChangeStringLinguisticCase<false, false>(const char16* sourceString, charcount_t sourceLength, char16* destString, charcount_t destLength, ApiError* pErrorOut);
 #endif // HAS_ICU
     };
 };

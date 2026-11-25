@@ -1925,7 +1925,7 @@ namespace Js
         void SetDataProperty(DynamicObject* obj, const char16* propName, Var value, ScriptContext* scriptContext)
         {
             Assert(obj != nullptr && propName != nullptr && scriptContext != nullptr);
-            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(PAL_wcslen(propName)));
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(wcslen(propName)));
             SetDataProperty(obj, propId, value);
         }
 
@@ -2031,7 +2031,7 @@ namespace Js
         {
             Assert(scriptContext != nullptr);
             const char16* safeMsg = (message != nullptr) ? message : _u("");
-            size_t msgLen = PAL_wcslen(safeMsg);
+            size_t msgLen = wcslen(safeMsg);
             char16* gcCopy = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, msgLen + 1);
             js_memcpy_s(gcCopy, (msgLen + 1) * sizeof(char16), safeMsg, (msgLen + 1) * sizeof(char16));
 
@@ -2081,7 +2081,7 @@ namespace Js
             }
             cs->Append(_u("' for '"));
             const char16* optSz = (optionName != nullptr) ? optionName : _u("");
-            cs->Append(optSz, static_cast<charcount_t>(PAL_wcslen(optSz)));
+            cs->Append(optSz, static_cast<charcount_t>(wcslen(optSz)));
             cs->Append(_u("' is outside of valid range. Expected: ["));
             for (size_t i = 0; i < expectedCount; ++i)
             {
@@ -2090,7 +2090,7 @@ namespace Js
                     cs->Append(_u(", "));
                 }
                 cs->Append(_u("'"));
-                cs->Append(expectedValues[i], static_cast<charcount_t>(PAL_wcslen(expectedValues[i])));
+                cs->Append(expectedValues[i], static_cast<charcount_t>(wcslen(expectedValues[i])));
                 cs->Append(_u("'"));
             }
             cs->Append(_u("]"));
@@ -2419,7 +2419,7 @@ namespace Js
                 for (size_t i = 0; i < valueCount; ++i)
                 {
                     const char16* allowed = values[i];
-                    size_t allowedLen = PAL_wcslen(allowed);
+                    size_t allowedLen = wcslen(allowed);
                     if (actualLen == allowedLen && wmemcmp(actualSz, allowed, allowedLen) == 0)
                     {
                         return strValue;
@@ -2444,7 +2444,7 @@ namespace Js
             {
                 return (fallback != nullptr) ? JavascriptString::NewCopySz(fallback, scriptContext) : nullptr;
             }
-            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(optionName, static_cast<charcount_t>(PAL_wcslen(optionName)));
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(optionName, static_cast<charcount_t>(wcslen(optionName)));
             return GetStringOption(options, propId, optionName, values, valueCount, fallback, scriptContext);
         }
 
@@ -2470,7 +2470,7 @@ namespace Js
             {
                 return fallback;
             }
-            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(PAL_wcslen(propName)));
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(wcslen(propName)));
             return GetBoolOption(options, propId, fallback, scriptContext);
         }
 
@@ -2556,7 +2556,7 @@ namespace Js
             {
                 if (relevantExtensionKeys != nullptr &&
                     relevantExtensionKeys[i] != nullptr &&
-                    PAL_wcscmp(relevantExtensionKeys[i], _u("nu")) == 0)
+                    wcscmp(relevantExtensionKeys[i], _u("nu")) == 0)
                 {
                     wantNu = true;
                     break;
@@ -2653,7 +2653,7 @@ namespace Js
 
             if (overrideNumberingSystem != nullptr && overrideNumberingSystem[0] != _u('\0'))
             {
-                size_t ovLen = PAL_wcslen(overrideNumberingSystem);
+                size_t ovLen = wcslen(overrideNumberingSystem);
                 if (ovLen < sizeof(chosenNu))
                 {
                     bool asciiOk = true;
@@ -2789,7 +2789,7 @@ namespace Js
             library->AddMember(proto, PropertyIds::_symbolToStringTag, tagStr, PropertyConfigurable);
         }
 
-        PropertyId classPid = scriptContext->GetOrAddPropertyIdTracked(className, static_cast<charcount_t>(PAL_wcslen(className)));
+        PropertyId classPid = scriptContext->GetOrAddPropertyIdTracked(className, static_cast<charcount_t>(wcslen(className)));
         RuntimeFunction* ctor = library->DefaultCreateFunction(ctorInfo, length, proto, nullptr, classPid);
         library->AddMember(proto, PropertyIds::constructor, ctor, PropertyWritable | PropertyConfigurable);
         library->AddMember(intlObject, classPid, ctor, PropertyBuiltInMethodDefaults);
@@ -2810,7 +2810,7 @@ namespace Js
     {
         Assert(library != nullptr && obj != nullptr && methodName != nullptr && functionInfo != nullptr);
         ScriptContext* scriptContext = library->GetScriptContext();
-        PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(methodName, static_cast<charcount_t>(PAL_wcslen(methodName)));
+        PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(methodName, static_cast<charcount_t>(wcslen(methodName)));
         return library->AddFunctionToLibraryObject(obj, pid, functionInfo, length);
     }
 
@@ -2822,7 +2822,7 @@ namespace Js
     {
         Assert(library != nullptr && obj != nullptr && propName != nullptr && functionInfo != nullptr);
         ScriptContext* scriptContext = library->GetScriptContext();
-        PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(PAL_wcslen(propName)));
+        PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(propName, static_cast<charcount_t>(wcslen(propName)));
         return library->AddGetterToLibraryObject(obj, pid, functionInfo);
     }
 

@@ -34,6 +34,7 @@ pub const engine_base_defines: []const []const u8 = &.{
     "-DNTDDI_VERSION=0x0A000000",
     "-DWIN32_LEAN_AND_MEAN=1",
     "-DNOMINMAX",
+    "-D_CRT_RAND_S",
     "-DUSE_EDGEMODE_JSRT",
     "-DCOM_STDMETHOD_CAN_THROW",
     "-DUNICODE",
@@ -104,6 +105,10 @@ pub const clang_msvc_warnings: []const []const u8 = &.{
     "-Wno-pragma-pack",
     // Zig 0.17.0 injects -nostdinc++ for x86_64-windows-msvc; suppress unused-arg under -Werror.
     "-Wno-unused-command-line-argument",
+    // SDK winrt headers include each other with mixed case on Windows.
+    "-Wno-nonportable-include-path",
+    // `#pragma optimize("g", on)` in InterpreterLoop.inl triggers clang ignored-pragmas under -Werror.
+    "-Wno-ignored-pragmas",
 };
 
 /// Win32 system import libraries (Chakra.Build.props + per-target .vcxproj).
@@ -1072,6 +1077,7 @@ pub const ch_group = Group{
         "lib/Jsrt",
         "bin/ch",
         "lib/Runtime",
+        "lib/Parser",
         "bin/ChakraCore",
     },
 };
