@@ -37,6 +37,7 @@ import check_fulljit
 import check_gcstress
 import check_jit
 import check_metadata
+import check_metadata_linux
 import check_metadata_windows
 import check_native
 import check_nodeapi
@@ -1491,6 +1492,338 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
                 seen.add(src)
                 total += 1
         self.assertEqual(total, 695)
+
+    def _render_wabt_config_bytes(self):
+        tmpl = (ROOT / "lib/wabt/src/config.h.in").read_text(encoding="utf-8")
+        replacements = {
+            "HAVE_ALLOCA_H": "1",
+            "HAVE_UNISTD_H": "1",
+            "HAVE_SNPRINTF": "1",
+            "HAVE_SYSCONF": "1",
+            "HAVE_SSIZE_T": "1",
+            "HAVE_STRCASECMP": "1",
+            "HAVE_WIN32_VT100": "0",
+            "COMPILER_IS_CLANG": "1",
+            "COMPILER_IS_GNU": "0",
+            "COMPILER_IS_MSVC": "0",
+            "WITH_EXCEPTIONS": "0",
+        }
+        out_lines = []
+        for line in tmpl.split("\n"):
+            if line.startswith("#cmakedefine01 "):
+                name = line[len("#cmakedefine01 "):]
+                out_lines.append(f"#define {name} {replacements[name]}")
+            elif "@SIZEOF_SIZE_T@" in line:
+                out_lines.append(line.replace("@SIZEOF_SIZE_T@", "8"))
+            else:
+                out_lines.append(line)
+        return "\n".join(out_lines).encode("utf-8")
+
+    def _build_synthetic_linux_prefix(self, root, *, base_profile="test",
+                                      marker_profile="test", jit=True,
+                                      with_nodeapi=False):
+        import struct
+        elf64_dyn = (
+            b"\x7fELF" + bytes([2, 1, 1, 0]) + b"\x00" * 8 +
+            struct.pack("<HHIQQQIHHHHHH",
+                        check_metadata_linux.ET_DYN,
+                        check_metadata_linux.EM_X86_64,
+                        1, 0, 0, 0, 0, 64, 56, 1, 64, 0, 0)
+        )
+        (root / "bin").mkdir(parents=True, exist_ok=True)
+        (root / "lib").mkdir(parents=True, exist_ok=True)
+        (root / "pal/src").mkdir(parents=True, exist_ok=True)
+        (root / "include").mkdir(parents=True, exist_ok=True)
+
+        (root / "bin/ch").write_bytes(elf64_dyn)
+        (root / "bin/GCStress").write_bytes(elf64_dyn)
+        if base_profile != "debug-static":
+            (root / "bin/libChakraCore.so").write_bytes(elf64_dyn)
+            (root / "lib/libChakraCore.so").write_bytes(elf64_dyn)
+        if with_nodeapi:
+            (root / "lib/libChakraNodeApi.so").write_bytes(elf64_dyn)
+
+        for rel in check_metadata_linux.expected_archive_members(base_profile, jit=jit):
+            (root / rel).write_bytes(b"!<arch>\n")
+
+        (root / "pal/src/config.h").write_text(
+            "".join(check_metadata_linux.PAL_MARKERS), encoding="utf-8")
+        if base_profile != "release-shared":
+            (root / "lib/wabt").mkdir(parents=True, exist_ok=True)
+            (root / "lib/wabt/config.h").write_bytes(self._render_wabt_config_bytes())
+
+        for staged_rel, src_rel in check_metadata_linux.HEADERS:
+            (root / staged_rel).write_bytes((ROOT / src_rel).read_bytes())
+
+        (root / ".profile").write_text(marker_profile + "\n", encoding="utf-8")
+
+    def _run_linux_metadata_mocked(self, args, *, base_profile="test",
+                                   so_needed=None, ch_needed=None,
+                                   gs_needed=None, nodeapi_needed=None,
+                                   so_defined_extra=(), ch_defined_extra=(),
+                                   so_dyn_syms=None, ch_dyn_syms=None,
+                                   gs_dyn_syms=None, nodeapi_dyn_syms=None,
+                                   archive_undef_syms=None,
+                                   jit=True, so_omit=()):
+        so_refs = [
+            s for s in check_metadata_linux.read_export_ref(
+                check_metadata_linux.EXPORTS_SO)
+            if s not in so_omit
+        ]
+        ch_refs = check_metadata_linux.read_export_ref(
+            check_metadata_linux.EXPORTS_CH)
+        nodeapi_refs = check_metadata_linux.read_export_ref(
+            check_metadata_linux.NODEAPI_EXPORTS)
+        archive_counts = check_metadata_linux.expected_archive_members(
+            base_profile, jit=jit)
+
+        def fmt_dyn_section(soname, needed):
+            lines = []
+            if soname is not None:
+                lines.append(f" 0x000000000000000e (SONAME) Library soname: [{soname}]")
+            for lib in needed:
+                lines.append(f" 0x0000000000000001 (NEEDED) Shared library: [{lib}]")
+            return "\n".join(lines) + "\n"
+
+        def fmt_nm_defined(syms):
+            return "\n".join(f"0000000000001000 T {s}" for s in syms) + "\n"
+
+        def fmt_nm_all(defined_syms, extra_lines):
+            out = [f"0000000000001000 T {s}" for s in defined_syms]
+            out.extend(extra_lines)
+            return "\n".join(out) + "\n"
+
+        def fake_run(cmd):
+            if cmd[:2] == ["readelf", "-d"]:
+                target = Path(cmd[2]).name
+                if target == "libChakraCore.so":
+                    return 0, fmt_dyn_section("libChakraCore.so", so_needed or []), ""
+                if target == "libChakraNodeApi.so":
+                    return 0, fmt_dyn_section("libChakraNodeApi.so", nodeapi_needed or []), ""
+                if target == "ch":
+                    return 0, fmt_dyn_section(None, ch_needed or []), ""
+                if target == "GCStress":
+                    return 0, fmt_dyn_section(None, gs_needed or []), ""
+            if cmd[:3] == ["nm", "-D", "--defined-only"]:
+                target = Path(cmd[3]).name
+                if target == "libChakraCore.so":
+                    return 0, fmt_nm_defined(so_refs + list(so_defined_extra)), ""
+                if target == "ch":
+                    return 0, fmt_nm_defined(ch_refs + list(ch_defined_extra)), ""
+                if target == "GCStress":
+                    return 0, fmt_nm_defined(["main"]), ""
+                if target == "libChakraNodeApi.so":
+                    return 0, fmt_nm_defined(nodeapi_refs), ""
+            if cmd[:2] == ["nm", "-D"]:
+                target = Path(cmd[2]).name
+                if target == "libChakraCore.so":
+                    return 0, fmt_nm_all(so_refs + list(so_defined_extra), so_dyn_syms or []), ""
+                if target == "ch":
+                    return 0, fmt_nm_all(ch_refs + list(ch_defined_extra), ch_dyn_syms or []), ""
+                if target == "GCStress":
+                    return 0, fmt_nm_all(["main"], gs_dyn_syms or []), ""
+                if target == "libChakraNodeApi.so":
+                    return 0, fmt_nm_all(nodeapi_refs, nodeapi_dyn_syms or []), ""
+            if cmd[:3] == ["nm", "-g", "--defined-only"]:
+                return 0, fmt_nm_defined(check_metadata_linux.REQUIRED_STATIC_JSRT_SYMBOLS), ""
+            if cmd[:2] == ["nm", "-u"]:
+                lines = ["0000-Pal.cpp.o:"]
+                for sym in (archive_undef_syms or []):
+                    lines.append(f"                 U {sym}")
+                return 0, "\n".join(lines) + "\n", ""
+            if cmd[:2] == ["ar", "t"]:
+                rel = "lib/" + Path(cmd[2]).name
+                cnt = archive_counts[rel]
+                if rel == "lib/libChakraCoreStatic.a":
+                    members = [f"{i:04d}-obj.o" for i in range(cnt - 1)] + ["u8a_codec.o"]
+                else:
+                    members = [f"{i:04d}-obj.o" for i in range(cnt)]
+                return 0, "\n".join(members) + "\n", ""
+            raise AssertionError(f"unexpected command: {cmd!r}")
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(common, "run_capture", side_effect=fake_run), \
+                contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            rc = check_metadata_linux.main(["check_metadata_linux.py"] + list(args))
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def test_sanitizer_metadata_end_to_end_and_negative_controls(self):
+        icu_deps = ["libicuuc.so.74", "libicui18n.so.74", "libc.so.6"]
+        with tempfile.TemporaryDirectory(prefix="linux-san-meta-") as tmp:
+            root = Path(tmp)
+
+            # 1. Non-sanitizer test build passes strictly and rejects libstdc++ / __asan_.
+            p_test = root / "test"
+            self._build_synthetic_linux_prefix(
+                p_test, base_profile="test", marker_profile="test",
+                jit=True, with_nodeapi=True)
+            rc, out, err = self._run_linux_metadata_mocked(
+                [str(p_test), "--profile", "test"],
+                base_profile="test",
+                so_needed=icu_deps,
+                ch_needed=icu_deps + ["libChakraCore.so"],
+                nodeapi_needed=["libChakraCore.so", "libc.so.6"],
+                jit=True,
+            )
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("check_metadata_linux: PASS:", out)
+
+            rc_std, _, err_std = self._run_linux_metadata_mocked(
+                [str(p_test), "--profile", "test"],
+                base_profile="test",
+                so_needed=icu_deps + ["libstdc++.so.6"],
+                ch_needed=icu_deps + ["libChakraCore.so"],
+                nodeapi_needed=["libChakraCore.so"],
+                jit=True,
+            )
+            self.assertEqual(rc_std, 1)
+            self.assertIn("carries C++ runtime", err_std)
+
+            rc_leak_asan, _, err_leak_asan = self._run_linux_metadata_mocked(
+                [str(p_test), "--profile", "test"],
+                base_profile="test",
+                so_needed=icu_deps,
+                ch_needed=icu_deps + ["libChakraCore.so"],
+                nodeapi_needed=["libChakraCore.so"],
+                ch_dyn_syms=["0000000000003000 T __asan_init"],
+                jit=True,
+            )
+            self.assertEqual(rc_leak_asan, 1)
+            self.assertIn("unexpected sanitizer symbols", err_leak_asan)
+
+            # 2. ASan test build (sanitize-address, libstdc++, static runtime + dynamic __asan_*).
+            p_asan = root / "sanitize-address"
+            self._build_synthetic_linux_prefix(
+                p_asan, base_profile="test", marker_profile="sanitize-address",
+                jit=False, with_nodeapi=True)
+            rc_a, out_a, err_a = self._run_linux_metadata_mocked(
+                [str(p_asan), "--profile", "sanitize-address",
+                 "--sanitize", "address", "--no-jit"],
+                base_profile="test",
+                so_needed=icu_deps + ["libstdc++.so.6"],
+                ch_needed=icu_deps + ["libChakraCore.so", "libstdc++.so.6"],
+                gs_needed=["libstdc++.so.6", "libc.so.6"],
+                nodeapi_needed=["libChakraCore.so", "libstdc++.so.6"],
+                so_defined_extra=["__odr_asan_gen_x"],
+                so_dyn_syms=["                 U __asan_report_load8"],
+                ch_dyn_syms=[
+                    "0000000000003000 T __asan_init",
+                    "0000000000003010 T __ubsan_handle_add_overflow",
+                ],
+                gs_dyn_syms=["0000000000003000 T __asan_init"],
+                nodeapi_dyn_syms=["                 U __asan_report_load8"],
+                jit=False,
+            )
+            self.assertEqual(rc_a, 0, out_a + err_a)
+            self.assertIn("profile=sanitize-address sanitize=address", out_a)
+
+            # 3. UBSan test build with libc++ + dynamic libclang_rt.ubsan runtime.
+            p_ubsan = root / "sanitize-undefined"
+            self._build_synthetic_linux_prefix(
+                p_ubsan, base_profile="test", marker_profile="sanitize-undefined",
+                jit=True)
+            rc_u, out_u, err_u = self._run_linux_metadata_mocked(
+                [str(p_ubsan), "--profile", "sanitize-undefined"],
+                base_profile="test",
+                so_needed=icu_deps + ["libc++.so.1", "libclang_rt.ubsan_standalone-x86_64.so"],
+                ch_needed=icu_deps + ["libChakraCore.so", "libc++.so.1", "libclang_rt.ubsan_standalone-x86_64.so"],
+                gs_needed=["libc++.so.1", "libclang_rt.ubsan_standalone-x86_64.so"],
+                so_dyn_syms=["                 U __ubsan_handle_type_mismatch_v1"],
+                ch_dyn_syms=["                 U __ubsan_handle_type_mismatch_v1"],
+                gs_dyn_syms=["                 U __ubsan_handle_type_mismatch_v1"],
+                jit=True,
+            )
+            self.assertEqual(rc_u, 0, out_u + err_u)
+            self.assertIn("profile=sanitize-undefined sanitize=undefined", out_u)
+
+            # 4. Static debug-static + TSan (--profile debug-static --sanitize thread --no-jit).
+            p_tsan = root / "sanitize-thread"
+            self._build_synthetic_linux_prefix(
+                p_tsan, base_profile="debug-static", marker_profile="sanitize-thread",
+                jit=False)
+            rc_t, out_t, err_t = self._run_linux_metadata_mocked(
+                [str(p_tsan), "--profile", "debug-static",
+                 "--sanitize", "thread", "--no-jit"],
+                base_profile="debug-static",
+                ch_needed=icu_deps + ["libstdc++.so.6"],
+                gs_needed=["libstdc++.so.6", "libc.so.6"],
+                ch_dyn_syms=["0000000000003000 T __tsan_init"],
+                gs_dyn_syms=["0000000000003000 T __tsan_init"],
+                archive_undef_syms=["__tsan_read8", "__tsan_func_entry"],
+                jit=False,
+            )
+            self.assertEqual(rc_t, 0, out_t + err_t)
+            self.assertIn("profile=sanitize-thread sanitize=thread", out_t)
+
+            # 5. Negative: unsanitized binaries masquerading with sanitize-address .profile fail.
+            rc_masq, _, err_masq = self._run_linux_metadata_mocked(
+                [str(p_asan), "--profile", "sanitize-address", "--no-jit"],
+                base_profile="test",
+                so_needed=icu_deps,
+                ch_needed=icu_deps + ["libChakraCore.so"],
+                gs_needed=["libc.so.6"],
+                nodeapi_needed=["libChakraCore.so"],
+                jit=False,
+            )
+            self.assertEqual(rc_masq, 1)
+            self.assertIn("lacks address sanitizer instrumentation", err_masq)
+
+            # 6. Negative: non-sanitizer surplus export in libChakraCore.so fails under ASan.
+            rc_bad_exp, _, err_bad_exp = self._run_linux_metadata_mocked(
+                [str(p_asan), "--profile", "sanitize-address", "--no-jit"],
+                base_profile="test",
+                so_needed=icu_deps + ["libstdc++.so.6"],
+                ch_needed=icu_deps + ["libChakraCore.so", "libstdc++.so.6"],
+                gs_needed=["libstdc++.so.6"],
+                nodeapi_needed=["libChakraCore.so", "libstdc++.so.6"],
+                so_defined_extra=["zig_u8a_encode_hex"],
+                so_dyn_syms=["                 U __asan_report_load8"],
+                ch_dyn_syms=["0000000000003000 T __asan_init"],
+                gs_dyn_syms=["0000000000003000 T __asan_init"],
+                nodeapi_dyn_syms=["                 U __asan_report_load8"],
+                jit=False,
+            )
+            self.assertEqual(rc_bad_exp, 1)
+            self.assertIn("unexpected non-sanitizer exports", err_bad_exp)
+
+            # 7. Negative: foreign sanitizer runtime or missing ICU still fails under ASan.
+            rc_foreign, _, err_foreign = self._run_linux_metadata_mocked(
+                [str(p_asan), "--profile", "sanitize-address", "--no-jit"],
+                base_profile="test",
+                so_needed=["libicuuc.so.74", "libstdc++.so.6", "libtsan.so.2"],
+                ch_needed=icu_deps + ["libChakraCore.so", "libstdc++.so.6"],
+                gs_needed=["libstdc++.so.6"],
+                nodeapi_needed=["libChakraCore.so", "libstdc++.so.6"],
+                so_dyn_syms=["                 U __asan_report_load8"],
+                ch_dyn_syms=["0000000000003000 T __asan_init"],
+                gs_dyn_syms=["0000000000003000 T __asan_init"],
+                nodeapi_dyn_syms=["                 U __asan_report_load8"],
+                jit=False,
+            )
+            self.assertEqual(rc_foreign, 1)
+            self.assertIn("NEEDED lacks libicui18n.so.74", err_foreign)
+
+            # 8. Negative: mismatched .profile fails loudly (simulates the old linux.zig:1587 bug).
+            rc_prof, _, err_prof = self._run_linux_metadata_mocked(
+                [str(p_asan), "--profile", "test", "--no-jit"],
+                base_profile="test",
+                so_needed=icu_deps,
+                ch_needed=icu_deps + ["libChakraCore.so"],
+                nodeapi_needed=["libChakraCore.so"],
+                jit=False,
+            )
+            self.assertEqual(rc_prof, 1)
+            self.assertIn(".profile reads 'sanitize-address\\n', want 'test\\n'", err_prof)
+
+    def test_linux_zig_wires_metadata_args_for_sanitizer(self):
+        lz = (HERE / "linux.zig").read_text()
+        self.assertIn("metadataArgsForConfig(arena, profile, sanitize, icu.major, jit)", lz)
+        self.assertIn('args.append(arena, "--sanitize")', lz)
+        self.assertNotIn(
+            'metadata.addArg("--profile");\n    metadata.addArg(profile.name());',
+            lz,
+        )
 
 
 class StyleChecksPortableTests(unittest.TestCase):

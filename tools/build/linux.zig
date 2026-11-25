@@ -142,6 +142,35 @@ pub fn installPrefixForConfig(arena: std.mem.Allocator, profile: Profile, saniti
     return std.fmt.allocPrint(arena, "out/{s}", .{profile.name()}) catch @panic("OOM");
 }
 
+pub fn metadataProfileForConfig(arena: std.mem.Allocator, profile: Profile, sanitize: Sanitize) []const u8 {
+    if (sanitize != .none and profile == .@"test") {
+        return sideNameForConfig(arena, profile, sanitize).?;
+    }
+    return profile.name();
+}
+
+pub fn metadataArgsForConfig(
+    arena: std.mem.Allocator,
+    profile: Profile,
+    sanitize: Sanitize,
+    icu_major: []const u8,
+    jit: bool,
+) []const []const u8 {
+    var args: std.ArrayList([]const u8) = .empty;
+    args.append(arena, "--profile") catch @panic("OOM");
+    args.append(arena, metadataProfileForConfig(arena, profile, sanitize)) catch @panic("OOM");
+    if (sanitize != .none) {
+        args.append(arena, "--sanitize") catch @panic("OOM");
+        args.append(arena, sanitize.name()) catch @panic("OOM");
+    }
+    args.append(arena, "--icu-major") catch @panic("OOM");
+    args.append(arena, icu_major) catch @panic("OOM");
+    if (!jit) {
+        args.append(arena, "--no-jit") catch @panic("OOM");
+    }
+    return args.toOwnedSlice(arena) catch @panic("OOM");
+}
+
 pub fn supportsWasmGate(profile: Profile, jit: bool) bool {
     return !isReleaseProfile(profile) and jit;
 }
@@ -1583,11 +1612,9 @@ pub fn build(b: *std.Build) void {
     } else {
         metadata.addArg(prefix_dir);
     }
-    metadata.addArg("--profile");
-    metadata.addArg(profile.name());
-    metadata.addArg("--icu-major");
-    metadata.addArg(icu.major);
-    if (!jit) metadata.addArg("--no-jit");
+    for (metadataArgsForConfig(arena, profile, sanitize, icu.major, jit)) |arg| {
+        metadata.addArg(arg);
+    }
     metadata.step.dependOn(artifacts_ready);
     metadata.stdio = .inherit;
     const metadata_top = b.step("check-metadata", "Assert artifact metadata: ELF, SONAME, exports, configs, headers, archives, .profile (not part of the default build)");
@@ -1721,4 +1748,10 @@ test "linux sanitizer and gate helper contracts" {
     const san_pref = installPrefixForConfig(arena, .@"test", .undefined);
     defer arena.free(san_pref);
     try std.testing.expectEqualStrings("out/sanitize-undefined", san_pref);
+
+    const meta_prof_asan = metadataProfileForConfig(arena, .@"test", .address);
+    defer arena.free(meta_prof_asan);
+    try std.testing.expectEqualStrings("sanitize-address", meta_prof_asan);
+    try std.testing.expectEqualStrings("debug-static", metadataProfileForConfig(arena, .debug_static, .address));
+    try std.testing.expectEqualStrings("test", metadataProfileForConfig(arena, .@"test", .none));
 }

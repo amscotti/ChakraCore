@@ -6,7 +6,8 @@
 """B4.3 / Linux multi-profile check gate: artifact metadata assertions.
 
 Sub-checks against the install prefix (zig-out for test,
-out/<profile> for debug-static / release-shared):
+out/<profile> for debug-static / release-shared, out/sanitize-<mode>
+for sanitizer lanes):
 
   1. ELF identity of ch, GCStress and (shared profiles) libChakraCore.so
      (pure-python ELF header parse): 64-bit LSB x86-64; ch and GCStress
@@ -15,11 +16,15 @@ out/<profile> for debug-static / release-shared):
      the .so is DYN.
   2. Dynamic section (`readelf -d`): on shared profiles, SONAME ==
      libChakraCore.so on the .so; NEEDED carries the ICU pair
-     (libicuuc.so.<N>, libicui18n.so.<N>) and NO C++ runtime (libc++
-     links statically; the reference .so has no libstdc++ NEEDED either,
-     via -static-libstdc++ -- same property, different runtime). On
-     debug-static, ch and GCStress carry NO libChakraCore in NEEDED and
-     still carry no C++ runtime.
+     (libicuuc.so.<N>, libicui18n.so.<N>). On non-sanitizer builds, NO
+     C++ runtime (libc++ links statically; the reference .so has no
+     libstdc++ NEEDED either) and NO sanitizer runtime may appear in
+     NEEDED. On sanitizer builds (`address`|`undefined`|`thread`), host
+     clang++ may dynamically link libstdc++ or libc++ (not both) and
+     may dynamically link a sanitizer runtime matching the active mode
+     (never a foreign sanitizer runtime); ICU requirements remain
+     unchanged. On debug-static, ch and GCStress carry NO libChakraCore
+     in NEEDED.
   3. Version-script exports (`nm -D --defined-only`) on shared profiles:
      the EXACT committed set for the .so (tools/build/linux_exports_so.txt:
      237 symbols incl. DllMain + Js* at B4 record time; release-shared is
@@ -57,6 +62,14 @@ out/<profile> for debug-static / release-shared):
      linker args (all probed B4.3). The gate asserts the reference
      set is covered; the surplus count is recorded, never gated
      (gating it would couple the gate to compiler internals).
+     On sanitizer builds, .so exports still require all committed
+     symbols and forbid any non-sanitizer extra exports, while allowing
+     only recognized sanitizer runtime/instrumentation symbols for the
+     active mode if emitted dynamically. Sanitizer builds also assert
+     mode-specific sanitizer ELF symbols (`__asan_*`, `__ubsan_*`,
+     `__tsan_*` via `nm -D` / archive `nm -u`) and reject foreign
+     sanitizer symbols; non-sanitizer builds assert zero sanitizer
+     instrumentation symbols.
   4. Configs: pal/src/config.h present with Linux markers (the
      online gate already verified values at configure time);
      lib/wabt/config.h sha256 == the reference hash (byte-exact) for
@@ -76,13 +89,16 @@ out/<profile> for debug-static / release-shared):
      libChakraNodeApi.so; tools/build/nodeapi_exports.txt carries the
      161 Node-API v10 + host exports (checked against libChakraNodeApi.so
      when present in the prefix).
-  7. The `.profile` marker reads `<profile>`.
+  7. The `.profile` marker reads `<profile>` (exact `sanitize-<mode>`
+     or `<base>-sanitize-<mode>` on sanitizer builds).
 
 Every sub-check fails loudly with diagnostics on mismatch.
 
-Usage: check_metadata_linux.py <prefix> [--profile test|debug-static|release-shared]
+Usage: check_metadata_linux.py <prefix>
+       [--profile test|debug-static|release-shared|sanitize-<mode>|<base>-sanitize-<mode>]
+       [--sanitize none|address|undefined|thread]
        [--icu-major N] [--no-jit] [--self-test]
-Defaults: --profile test --icu-major 74 (JIT enabled).
+Defaults: --profile test --icu-major 74 (JIT enabled, no sanitizer).
 Exit code: 0 iff every sub-check passes.
 """
 
@@ -116,15 +132,78 @@ RELEASE_SHARED_ABSENT_EXPORTS = frozenset((
 ))
 
 PROFILES = ("test", "debug-static", "release-shared")
+SANITIZE_MODES = ("address", "undefined", "thread")
+SANITIZE_BASE_PROFILES = ("test", "debug-static")
 DEFAULT_ICU_MAJOR = "74"
 BACKEND_TU_COUNT = 91
 WABT_TU_COUNT = 37
 STATIC_ARCHIVE_BASE = 681
 
 WANT_SONAME = "libChakraCore.so"
+WANT_NODEAPI_SONAME = "libChakraNodeApi.so"
 WANT_ICU_NEEDED = ("libicuuc.so.74", "libicui18n.so.74")
-# No C++ runtime may appear in NEEDED (static linkage both sides).
+# No C++ runtime may appear in NEEDED on non-sanitizer builds (static linkage).
 FORBID_NEEDED_SUBSTRS = ("libstdc++", "libc++")
+SANITIZER_NEEDED_PREFIXES = {
+    "address": ("libasan.so", "libclang_rt.asan"),
+    "undefined": ("libubsan.so", "libclang_rt.ubsan"),
+    "thread": ("libtsan.so", "libclang_rt.tsan"),
+}
+EXTRA_SANITIZER_NEEDED_PREFIXES = (
+    "liblsan.so",
+    "libclang_rt.lsan",
+    "libmsan.so",
+    "libclang_rt.msan",
+    "libhwasan.so",
+    "libclang_rt.hwasan",
+)
+SANITIZER_ALLOWED_EXPORT_PREFIXES = {
+    "address": (
+        "__asan_",
+        "__lsan_",
+        "__ubsan_",
+        "__sanitizer_",
+        "__sancov_",
+        "__interceptor_",
+        "___interceptor_",
+        "__odr_asan_",
+        "asan.",
+    ),
+    "undefined": (
+        "__ubsan_",
+        "__sanitizer_",
+        "__sancov_",
+        "__interceptor_",
+        "___interceptor_",
+        "ubsan.",
+    ),
+    "thread": (
+        "__tsan_",
+        "__ubsan_",
+        "__sanitizer_",
+        "__sancov_",
+        "__interceptor_",
+        "___interceptor_",
+        "tsan.",
+    ),
+}
+SANITIZER_REQUIRED_SYM_PREFIXES = {
+    "address": ("__asan_",),
+    "undefined": ("__ubsan_",),
+    "thread": ("__tsan_",),
+}
+SANITIZER_FORBIDDEN_SYM_PREFIXES = {
+    "address": ("__tsan_", "__msan_", "__hwasan_"),
+    "undefined": ("__asan_", "__tsan_", "__msan_", "__hwasan_"),
+    "thread": ("__asan_", "__msan_", "__hwasan_"),
+}
+ALL_SANITIZER_SYM_PREFIXES = (
+    "__asan_",
+    "__ubsan_",
+    "__tsan_",
+    "__msan_",
+    "__hwasan_",
+)
 WANT_WABT_SHA256 = "4d365a89ec93f99a52137a5db99446514892cf928b2ff4a824ca997a271749d9"
 WANT_MEMBERS = {
     # 680 static_order C/C++/ASM TUs + 1 u8a_codec.o = 681 members
@@ -231,46 +310,138 @@ def validate_icu_major(icu_major):
     return bool(icu_major) and icu_major.isdigit() and int(icu_major) > 0
 
 
+def resolve_profile(profile, sanitize=None):
+    """Return (base_profile, sanitize_mode_or_None, marker_profile) or raise ValueError."""
+    saw_explicit_none = False
+    opt_san = None
+    if sanitize is not None:
+        if sanitize == "none":
+            saw_explicit_none = True
+        elif sanitize in SANITIZE_MODES:
+            opt_san = sanitize
+        else:
+            raise ValueError(
+                "invalid --sanitize %r (expected one of: none, %s)"
+                % (sanitize, ", ".join(SANITIZE_MODES)))
+
+    if profile in PROFILES:
+        if opt_san is not None:
+            if profile not in SANITIZE_BASE_PROFILES:
+                raise ValueError(
+                    "--profile %r is not supported with --sanitize %s on Linux "
+                    "(expected one of: %s)"
+                    % (profile, opt_san, ", ".join(SANITIZE_BASE_PROFILES)))
+            return profile, opt_san, "sanitize-%s" % opt_san
+        return profile, None, profile
+
+    for mode in SANITIZE_MODES:
+        if profile == "sanitize-%s" % mode:
+            if saw_explicit_none:
+                raise ValueError(
+                    "conflicting --profile %r and --sanitize none" % profile)
+            if opt_san is not None and opt_san != mode:
+                raise ValueError(
+                    "conflicting --profile %r and --sanitize %s"
+                    % (profile, opt_san))
+            return "test", mode, profile
+
+    for mode in SANITIZE_MODES:
+        suffix = "-sanitize-%s" % mode
+        if profile.endswith(suffix):
+            base = profile[:-len(suffix)]
+            if base in PROFILES:
+                if base not in SANITIZE_BASE_PROFILES:
+                    raise ValueError(
+                        "--profile %r is not supported on Linux "
+                        "(sanitizer builds support: %s)"
+                        % (profile, ", ".join(SANITIZE_BASE_PROFILES)))
+                if saw_explicit_none:
+                    raise ValueError(
+                        "conflicting --profile %r and --sanitize none" % profile)
+                if opt_san is not None and opt_san != mode:
+                    raise ValueError(
+                        "conflicting --profile %r and --sanitize %s"
+                        % (profile, opt_san))
+                return base, mode, profile
+
+    raise ValueError(
+        "invalid --profile %r (expected one of: %s, sanitize-<%s>, "
+        "or <%s>-sanitize-<%s>)"
+        % (profile, ", ".join(PROFILES), "|".join(SANITIZE_MODES),
+           "|".join(SANITIZE_BASE_PROFILES), "|".join(SANITIZE_MODES)))
+
+
 def expected_archive_members(profile="test", jit=True):
     """Return {rel_archive_path: member_count} for the given profile/JIT mode."""
-    if profile not in PROFILES:
-        raise ValueError("unknown profile %r" % profile)
+    base_profile, _, _ = resolve_profile(profile)
     static_count = STATIC_ARCHIVE_BASE
-    if profile == "release-shared":
+    if base_profile == "release-shared":
         static_count -= WABT_TU_COUNT
     if not jit:
         static_count -= BACKEND_TU_COUNT
     members = {"lib/libChakraCoreStatic.a": static_count}
-    if profile != "debug-static":
+    if base_profile != "debug-static":
         members["lib/libChakra.Pal.Singular.a"] = 90
         members["lib/libChakra.Common.Codex.Singular.a"] = 1
         members["lib/libChakra.Runtime.PlatformAgnostic.Singular.a"] = 11
     return members
 
 
-def check_dynamic_so(path, icu_major=DEFAULT_ICU_MAJOR):
+def classify_sanitizer_runtime_needed(lib):
+    """Return sanitizer mode ('address'|'undefined'|'thread'|'other') or None."""
+    base = os.path.basename(lib)
+    for mode, prefixes in SANITIZER_NEEDED_PREFIXES.items():
+        if base.startswith(prefixes):
+            return mode
+    if base.startswith(EXTRA_SANITIZER_NEEDED_PREFIXES):
+        return "other"
+    return None
+
+
+def check_dynamic_so(path, icu_major=DEFAULT_ICU_MAJOR, sanitize=None,
+                     want_soname=WANT_SONAME, require_icu=True):
     try:
         soname, needed = readelf_dynamic(path)
     except (OSError, ValueError) as e:
         return str(e)
     print("check_metadata_linux: dynamic %s -> soname=%r needed=%r"
           % (path, soname, needed))
-    if soname != WANT_SONAME:
-        return "%s: want SONAME %r, have %r" % (path, WANT_SONAME, soname)
-    return check_needed(path, needed, icu_major=icu_major)
+    if soname != want_soname:
+        return "%s: want SONAME %r, have %r" % (path, want_soname, soname)
+    return check_needed(path, needed, icu_major=icu_major,
+                        require_icu=require_icu, sanitize=sanitize)
 
 
-def check_needed(path, needed, icu_major=DEFAULT_ICU_MAJOR, require_icu=True):
+def check_needed(path, needed, icu_major=DEFAULT_ICU_MAJOR, require_icu=True,
+                 sanitize=None):
+    if sanitize is not None and sanitize not in SANITIZE_MODES:
+        raise ValueError("invalid sanitize mode %r" % sanitize)
     if require_icu:
         for lib in want_icu_needed(icu_major):
             if lib not in needed:
                 return ("%s: NEEDED lacks %s (have %r)"
                         % (path, lib, needed))
+    if sanitize is None:
+        for lib in needed:
+            for bad in FORBID_NEEDED_SUBSTRS:
+                if bad in lib:
+                    return ("%s: NEEDED carries C++ runtime %s (want static)"
+                            % (path, lib))
+            if classify_sanitizer_runtime_needed(lib) is not None:
+                return ("%s: NEEDED carries sanitizer runtime %s in "
+                        "non-sanitizer profile" % (path, lib))
+        return None
+
+    has_libstdcxx = any("libstdc++" in lib for lib in needed)
+    has_libcxx = any("libc++" in lib for lib in needed)
+    if has_libstdcxx and has_libcxx:
+        return ("%s: NEEDED mixes both libstdc++ and libc++ (%r)"
+                % (path, needed))
     for lib in needed:
-        for bad in FORBID_NEEDED_SUBSTRS:
-            if bad in lib:
-                return ("%s: NEEDED carries C++ runtime %s (want static)"
-                        % (path, lib))
+        rt_mode = classify_sanitizer_runtime_needed(lib)
+        if rt_mode is not None and rt_mode != sanitize:
+            return ("%s: NEEDED carries foreign sanitizer runtime %s "
+                    "(want %s)" % (path, lib, sanitize))
     return None
 
 
@@ -314,6 +485,18 @@ def check_profile_marker(prefix, profile="test"):
     return None
 
 
+def parse_nm_symbol_names(nm_out):
+    """Extract symbol names from `nm -D` or `nm -u` output."""
+    names = []
+    for line in nm_out.splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            names.append(parts[2].split("@", 1)[0])
+        elif len(parts) == 2 and parts[0] in ("U", "w", "v"):
+            names.append(parts[1].split("@", 1)[0])
+    return names
+
+
 def nm_defined(path):
     """Defined dynamic symbol names via nm -D --defined-only."""
     rc, out, err = common.run_capture(
@@ -329,6 +512,24 @@ def nm_defined(path):
     return names
 
 
+def nm_dynamic_symbols(path):
+    """All dynamic symbol names (defined and undefined) via `nm -D`."""
+    rc, out, err = common.run_capture(["nm", "-D", path])
+    if rc != 0:
+        raise ValueError("nm -D %s failed (rc=%d err=%r)"
+                         % (path, rc, err))
+    return parse_nm_symbol_names(out)
+
+
+def nm_archive_undefined(path):
+    """Undefined symbol names in an archive via `nm -u`."""
+    rc, out, err = common.run_capture(["nm", "-u", path])
+    if rc != 0:
+        raise ValueError("nm -u %s failed (rc=%d err=%r)"
+                         % (path, rc, err))
+    return parse_nm_symbol_names(out)
+
+
 def read_export_ref(ref_file):
     """Sorted nonblank, non-comment symbol names from a committed export list."""
     with open(ref_file) as f:
@@ -337,7 +538,35 @@ def read_export_ref(ref_file):
             if line.strip() and not line.lstrip().startswith("#"))
 
 
-def check_exports(path, ref_file, omit=()):
+def check_export_sets(path, have, want, sanitize=None):
+    """Validate defined dynamic symbols against reference list (sanitizer-aware)."""
+    if sanitize is not None and sanitize not in SANITIZE_MODES:
+        raise ValueError("invalid sanitize mode %r" % sanitize)
+    have_sorted = sorted(have)
+    want_sorted = sorted(want)
+    print("check_metadata_linux: exports %s -> %d defined dynamic "
+          "symbols (want %d)" % (path, len(have_sorted), len(want_sorted)))
+    if sanitize is None:
+        if have_sorted != want_sorted:
+            only_have = sorted(set(have_sorted) - set(want_sorted))[:8]
+            only_want = sorted(set(want_sorted) - set(have_sorted))[:8]
+            return ("%s: export set differs: only-have=%r only-want=%r"
+                    % (path, only_have, only_want))
+        return None
+    only_want = sorted(set(want_sorted) - set(have_sorted))
+    if only_want:
+        return ("%s: missing required exports (sanitize=%s): %r"
+                % (path, sanitize, only_want[:8]))
+    allowed = SANITIZER_ALLOWED_EXPORT_PREFIXES[sanitize]
+    only_have = sorted(set(have_sorted) - set(want_sorted))
+    unexpected = [s for s in only_have if not s.startswith(allowed)]
+    if unexpected:
+        return ("%s: unexpected non-sanitizer exports (sanitize=%s): %r"
+                % (path, sanitize, unexpected[:8]))
+    return None
+
+
+def check_exports(path, ref_file, omit=(), sanitize=None):
     try:
         want = [s for s in read_export_ref(ref_file) if s not in omit]
     except OSError as e:
@@ -349,14 +578,53 @@ def check_exports(path, ref_file, omit=()):
         have = sorted(nm_defined(path))
     except (OSError, ValueError) as e:
         return str(e)
-    print("check_metadata_linux: exports %s -> %d defined dynamic "
-          "symbols (want %d)" % (path, len(have), len(want)))
-    if have != want:
-        only_have = sorted(set(have) - set(want))[:8]
-        only_want = sorted(set(want) - set(have))[:8]
-        return ("%s: export set differs: only-have=%r only-want=%r"
-                % (path, only_have, only_want))
+    return check_export_sets(path, have, want, sanitize=sanitize)
+
+
+def check_sanitizer_symbols_list(path, names, sanitize):
+    """Assert ELF/archive symbols match the active sanitizer mode."""
+    if sanitize not in SANITIZE_MODES:
+        raise ValueError("invalid sanitize mode %r" % sanitize)
+    req = SANITIZER_REQUIRED_SYM_PREFIXES[sanitize]
+    forbid = SANITIZER_FORBIDDEN_SYM_PREFIXES[sanitize]
+    foreign = sorted({n for n in names if n.startswith(forbid)})
+    if foreign:
+        return ("%s: carries foreign sanitizer symbols for %s: %r"
+                % (path, sanitize, foreign[:8]))
+    matched = sorted({n for n in names if n.startswith(req)})
+    if not matched:
+        return ("%s: lacks %s sanitizer instrumentation symbols (%s)"
+                % (path, sanitize, ", ".join(req)))
     return None
+
+
+def check_no_sanitizer_symbols_list(path, names):
+    """Assert ELF/archive symbols carry zero sanitizer instrumentation markers."""
+    hits = sorted({n for n in names if n.startswith(ALL_SANITIZER_SYM_PREFIXES)})
+    if hits:
+        return ("%s: carries unexpected sanitizer symbols in non-sanitizer "
+                "profile: %r" % (path, hits[:8]))
+    return None
+
+
+def check_elf_sanitizer_symbols(path, sanitize=None):
+    try:
+        names = nm_dynamic_symbols(path)
+    except (OSError, ValueError) as e:
+        return str(e)
+    if sanitize is None:
+        return check_no_sanitizer_symbols_list(path, names)
+    return check_sanitizer_symbols_list(path, names, sanitize)
+
+
+def check_archive_sanitizer_symbols(path, sanitize=None):
+    try:
+        names = nm_archive_undefined(path)
+    except (OSError, ValueError) as e:
+        return str(e)
+    if sanitize is None:
+        return check_no_sanitizer_symbols_list(path, names)
+    return check_sanitizer_symbols_list(path, names, sanitize)
 
 
 def check_exports_subset(path, ref_file):
@@ -511,6 +779,7 @@ def check_static_archive_exports(path, required=REQUIRED_STATIC_JSRT_SYMBOLS):
 def parse_args(args):
     """Parse CLI args. Return (opts_dict, err_msg)."""
     profile = "test"
+    sanitize = None
     icu_major = DEFAULT_ICU_MAJOR
     jit = True
     positional = []
@@ -524,6 +793,14 @@ def parse_args(args):
             i += 2
         elif a.startswith("--profile="):
             profile = a.split("=", 1)[1]
+            i += 1
+        elif a == "--sanitize":
+            if i + 1 >= len(args):
+                return None, "--sanitize requires a value"
+            sanitize = args[i + 1]
+            i += 2
+        elif a.startswith("--sanitize="):
+            sanitize = a.split("=", 1)[1]
             i += 1
         elif a == "--icu-major":
             if i + 1 >= len(args):
@@ -541,18 +818,25 @@ def parse_args(args):
         else:
             positional.append(a)
             i += 1
-    if profile not in PROFILES:
-        return None, ("invalid --profile %r (expected one of: %s)"
-                      % (profile, ", ".join(PROFILES)))
+    try:
+        base_profile, sanitize_mode, marker_profile = resolve_profile(
+            profile, sanitize=sanitize)
+    except ValueError as e:
+        return None, str(e)
     if not validate_icu_major(icu_major):
         return None, "invalid --icu-major %r (expected positive integer)" % icu_major
     if len(positional) != 1:
         return None, ("usage: check_metadata_linux.py <prefix> "
-                      "[--profile test|debug-static|release-shared] "
+                      "[--profile test|debug-static|release-shared|"
+                      "sanitize-<mode>|<base>-sanitize-<mode>] "
+                      "[--sanitize none|address|undefined|thread] "
                       "[--icu-major N] [--no-jit]")
     return {
         "prefix": positional[0],
         "profile": profile,
+        "base_profile": base_profile,
+        "sanitize": sanitize_mode,
+        "marker_profile": marker_profile,
         "icu_major": icu_major,
         "jit": jit,
     }, None
@@ -781,6 +1065,9 @@ def self_test():
                       err is None and opts == {
                           "prefix": "out/jit",
                           "profile": "release-shared",
+                          "base_profile": "release-shared",
+                          "sanitize": None,
+                          "marker_profile": "release-shared",
                           "icu_major": "76",
                           "jit": False,
                       })
@@ -788,6 +1075,9 @@ def self_test():
                       parse_args(["zig-out"])[0] == {
                           "prefix": "zig-out",
                           "profile": "test",
+                          "base_profile": "test",
+                          "sanitize": None,
+                          "marker_profile": "test",
                           "icu_major": "74",
                           "jit": True,
                       })
@@ -797,6 +1087,235 @@ def self_test():
                       parse_args(["p", "--icu-major", "nope"])[1] is not None)
         bad += report("parse_args rejects unknown flag",
                       parse_args(["p", "--bogus"])[1] is not None)
+
+        # Sanitizer profile resolution, DT_NEEDED, and ELF symbol controls.
+        for mode in SANITIZE_MODES:
+            sname = "sanitize-%s" % mode
+            bad += report("resolve_profile(%s) -> (test, %s, %s)" % (sname, mode, sname),
+                          resolve_profile(sname) == ("test", mode, sname))
+            bad += report("resolve_profile(test, %s) -> (test, %s, %s)" % (mode, mode, sname),
+                          resolve_profile("test", mode) == ("test", mode, sname))
+            bad += report("resolve_profile(debug-static, %s) -> (debug-static, %s, %s)"
+                          % (mode, mode, sname),
+                          resolve_profile("debug-static", mode)
+                          == ("debug-static", mode, sname))
+            base_san = "debug-static-sanitize-%s" % mode
+            bad += report("resolve_profile(%s) -> (debug-static, %s, %s)"
+                          % (base_san, mode, base_san),
+                          resolve_profile(base_san)
+                          == ("debug-static", mode, base_san))
+            bad += report("expected_archive_members(%s, jit=False) uses test counts" % sname,
+                          expected_archive_members(sname, jit=False)["lib/libChakraCoreStatic.a"] == 590
+                          and len(expected_archive_members(sname, jit=False)) == 4)
+            bad += report("expected_archive_members(%s, jit=False) uses static counts" % base_san,
+                          expected_archive_members(base_san, jit=False)
+                          == {"lib/libChakraCoreStatic.a": 590})
+
+        bad += report("resolve_profile(test, none) -> (test, None, test)",
+                      resolve_profile("test", "none") == ("test", None, "test"))
+        for bad_args in (
+            ("release-shared", "address"),
+            ("release-shared-sanitize-address", None),
+            ("sanitize-address", "thread"),
+            ("sanitize-address", "none"),
+            ("test-sanitize-address", "undefined"),
+            ("test-sanitize-address", "none"),
+            ("sanitize-leak", None),
+            ("bogus-sanitize-address", None),
+            ("test-sanitize-bogus", None),
+            ("test", "leak"),
+        ):
+            rejected = False
+            try:
+                resolve_profile(*bad_args)
+            except ValueError:
+                rejected = True
+            bad += report("resolve_profile rejects %r" % (bad_args,), rejected)
+
+        opts_san, err_san = parse_args([
+            "out/sanitize-address", "--profile", "sanitize-address",
+            "--sanitize", "address", "--no-jit",
+        ])
+        bad += report("parse_args accepts sanitize-address + --sanitize address",
+                      err_san is None and opts_san == {
+                          "prefix": "out/sanitize-address",
+                          "profile": "sanitize-address",
+                          "base_profile": "test",
+                          "sanitize": "address",
+                          "marker_profile": "sanitize-address",
+                          "icu_major": "74",
+                          "jit": False,
+                      })
+        opts_dbg_san, err_dbg_san = parse_args([
+            "out/sanitize-thread", "--profile=debug-static",
+            "--sanitize=thread", "--no-jit",
+        ])
+        bad += report("parse_args accepts debug-static + --sanitize=thread",
+                      err_dbg_san is None and opts_dbg_san == {
+                          "prefix": "out/sanitize-thread",
+                          "profile": "debug-static",
+                          "base_profile": "debug-static",
+                          "sanitize": "thread",
+                          "marker_profile": "sanitize-thread",
+                          "icu_major": "74",
+                          "jit": False,
+                      })
+        bad += report("parse_args rejects missing --sanitize value",
+                      parse_args(["p", "--sanitize"])[1] is not None)
+        bad += report("parse_args rejects release-shared + --sanitize address",
+                      parse_args(["p", "--profile", "release-shared",
+                                  "--sanitize", "address"])[1] is not None)
+        bad += report("parse_args rejects conflicting profile and --sanitize",
+                      parse_args(["p", "--profile", "sanitize-address",
+                                  "--sanitize", "thread"])[1] is not None)
+        bad += report("CLI returns rc=2 on conflicting sanitize flags",
+                      main(["check_metadata_linux.py", tmp, "--profile",
+                            "sanitize-address", "--sanitize", "undefined"]) == 2)
+        bad += report("CLI returns rc=2 on release-shared + sanitize",
+                      main(["check_metadata_linux.py", tmp, "--profile",
+                            "release-shared-sanitize-address"]) == 2)
+
+        # Sanitizer DT_NEEDED positive and negative controls.
+        bad += report("non-sanitizer rejects libc++ in NEEDED",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libc++.so.1"]) is not None)
+        bad += report("non-sanitizer rejects libasan in NEEDED",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libasan.so.8"]) is not None)
+        bad += report("non-sanitizer rejects libclang_rt.ubsan in NEEDED",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libclang_rt.ubsan_standalone-x86_64.so"])
+                      is not None)
+        bad += report("asan accepts ICU + libstdc++.so.6",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libc.so.6"],
+                                   sanitize="address") is None)
+        bad += report("asan accepts ICU + libc++.so.1 + libc++abi.so.1",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libc++.so.1", "libc++abi.so.1"],
+                                   sanitize="address") is None)
+        bad += report("asan accepts ICU + libstdc++.so.6 + libasan.so.8",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libasan.so.8"],
+                                   sanitize="address") is None)
+        bad += report("ubsan accepts libclang_rt.ubsan runtime",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6",
+                                         "libclang_rt.ubsan_standalone-x86_64.so"],
+                                   sanitize="undefined") is None)
+        bad += report("tsan accepts libtsan.so.2 runtime",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libtsan.so.2"],
+                                   sanitize="thread") is None)
+        bad += report("asan still requires ICU in NEEDED",
+                      check_needed("x", ["libicuuc.so.74", "libstdc++.so.6"],
+                                   sanitize="address") is not None)
+        bad += report("asan rejects mixed libstdc++ and libc++",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libc++.so.1"],
+                                   sanitize="address") is not None)
+        bad += report("asan rejects foreign libtsan.so.2",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libtsan.so.2"],
+                                   sanitize="address") is not None)
+        bad += report("asan rejects foreign libubsan.so.1",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libubsan.so.1"],
+                                   sanitize="address") is not None)
+        bad += report("ubsan rejects foreign libasan.so.8",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libasan.so.8"],
+                                   sanitize="undefined") is not None)
+        bad += report("tsan rejects foreign libasan.so.8",
+                      check_needed("x", ["libicuuc.so.74", "libicui18n.so.74",
+                                         "libstdc++.so.6", "libasan.so.8"],
+                                   sanitize="thread") is not None)
+
+        # Sanitizer ELF symbol parsing, exports, and instrumentation controls.
+        nm_sample = (
+            "0000-Pal.cpp.o:\n"
+            "\n"
+            "0000000000001000 T JsCreateRuntime\n"
+            "0000000000002000 T __asan_init@@ASAN_1\n"
+            "                 U __asan_report_load8\n"
+            "                 w __gmon_start__\n"
+        )
+        bad += report("parse_nm_symbol_names parses defined and U/w symbols",
+                      parse_nm_symbol_names(nm_sample) == [
+                          "JsCreateRuntime", "__asan_init",
+                          "__asan_report_load8", "__gmon_start__",
+                      ])
+        bad += report("asan symbols pass address check (incl. bundled ubsan)",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__asan_init", "__ubsan_handle_add_overflow"],
+                          "address") is None)
+        bad += report("unsanitized symbols fail address check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["JsCreateRuntime", "OnChakraCoreLoadedEntry"],
+                          "address") is not None)
+        bad += report("ubsan-only symbols fail address check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__ubsan_handle_add_overflow"],
+                          "address") is not None)
+        bad += report("asan+tsan symbols fail address check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__asan_init", "__tsan_init"],
+                          "address") is not None)
+        bad += report("ubsan symbols pass undefined check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__ubsan_handle_type_mismatch_v1"],
+                          "undefined") is None)
+        bad += report("asan symbols fail undefined check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__asan_init", "__ubsan_handle_type_mismatch_v1"],
+                          "undefined") is not None)
+        bad += report("tsan symbols pass thread check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__tsan_init", "__tsan_read8"],
+                          "thread") is None)
+        bad += report("asan symbols fail thread check",
+                      check_sanitizer_symbols_list(
+                          "ch", ["__asan_init", "__tsan_init"],
+                          "thread") is not None)
+        bad += report("clean symbols pass check_no_sanitizer_symbols_list",
+                      check_no_sanitizer_symbols_list(
+                          "ch", ["JsCreateRuntime", "OnChakraCoreLoadedEntry"]) is None)
+        for bad_sym in ("__asan_init", "__ubsan_handle_add_overflow",
+                        "__tsan_init", "__msan_init", "__hwasan_init"):
+            bad += report("non-sanitizer check rejects %s" % bad_sym,
+                          check_no_sanitizer_symbols_list(
+                              "ch", ["JsCreateRuntime", bad_sym]) is not None)
+
+        want_exp = ["DllMain", "JsCreateRuntime"]
+        bad += report("non-sanitizer check_export_sets rejects extra __asan_init",
+                      check_export_sets("so", want_exp + ["__asan_init"], want_exp,
+                                        sanitize=None) is not None)
+        bad += report("asan check_export_sets accepts exact set",
+                      check_export_sets("so", want_exp, want_exp,
+                                        sanitize="address") is None)
+        bad += report("asan check_export_sets accepts allowed sanitizer symbols",
+                      check_export_sets(
+                          "so", want_exp + ["__asan_init", "__sanitizer_cov_trace_pc"],
+                          want_exp, sanitize="address") is None)
+        bad += report("asan check_export_sets rejects missing JsCreateRuntime",
+                      check_export_sets("so", ["DllMain", "__asan_init"], want_exp,
+                                        sanitize="address") is not None)
+        bad += report("asan check_export_sets rejects non-sanitizer extra export",
+                      check_export_sets("so", want_exp + ["InternalCppLeak"],
+                                        want_exp, sanitize="address") is not None)
+        bad += report("asan check_export_sets rejects foreign __tsan_init",
+                      check_export_sets("so", want_exp + ["__tsan_init"],
+                                        want_exp, sanitize="address") is not None)
+        bad += report("ubsan check_export_sets rejects __asan_init",
+                      check_export_sets("so", want_exp + ["__asan_init"],
+                                        want_exp, sanitize="undefined") is not None)
+
+        with open(os.path.join(static_dir, ".profile"), "w") as f:
+            f.write("sanitize-address\n")
+        bad += report("sanitize-address .profile passes marker gate",
+                      check_profile_marker(static_dir, "sanitize-address") is None)
+        bad += report("sanitize-address .profile fails plain test gate",
+                      check_profile_marker(static_dir, "test") is not None)
 
         # Phase-4 u8a_codec.o archive membership, zero zig_u8a_* leak, and 161 Node-API exports ref.
         if have_ar:
@@ -843,11 +1362,13 @@ def main(argv):
         print("check_metadata_linux: %s" % err, file=sys.stderr)
         return 2
     prefix = opts["prefix"]
-    profile = opts["profile"]
+    base_profile = opts["base_profile"]
+    sanitize = opts["sanitize"]
+    marker_profile = opts["marker_profile"]
     icu_major = opts["icu_major"]
     jit = opts["jit"]
-    is_static = (profile == "debug-static")
-    is_release = (profile == "release-shared")
+    is_static = (base_profile == "debug-static")
+    is_release = (base_profile == "release-shared")
 
     failures = []
     # 1. ELF identity.
@@ -868,7 +1389,8 @@ def main(argv):
                 failures.append((exe + "-needed",
                                  check_needed(exe, exe_needed,
                                               icu_major=icu_major,
-                                              require_icu=(exe == "bin/ch"))))
+                                              require_icu=(exe == "bin/ch"),
+                                              sanitize=sanitize)))
                 failures.append((exe + "-self-contained",
                                  check_no_chakracore_needed(exe, exe_needed)))
             except (OSError, ValueError) as e:
@@ -876,42 +1398,79 @@ def main(argv):
     else:
         failures.append(("soname+needed",
                          check_dynamic_so(os.path.join(prefix, SOLIBS[1]),
-                                          icu_major=icu_major)))
+                                          icu_major=icu_major,
+                                          sanitize=sanitize)))
         try:
             _, ch_needed = readelf_dynamic(os.path.join(prefix, "bin/ch"))
             print("check_metadata_linux: dynamic bin/ch -> needed=%r"
                   % (ch_needed,))
             failures.append(("ch-needed",
                              check_needed("bin/ch", ch_needed,
-                                          icu_major=icu_major)))
+                                          icu_major=icu_major,
+                                          sanitize=sanitize)))
         except (OSError, ValueError) as e:
             failures.append(("ch-needed", str(e)))
+        if sanitize is not None:
+            try:
+                _, gs_needed = readelf_dynamic(os.path.join(prefix, "bin/GCStress"))
+                print("check_metadata_linux: dynamic bin/GCStress -> needed=%r"
+                      % (gs_needed,))
+                failures.append(("GCStress-needed",
+                                 check_needed("bin/GCStress", gs_needed,
+                                              icu_major=icu_major,
+                                              require_icu=False,
+                                              sanitize=sanitize)))
+                failures.append(("GCStress-self-contained",
+                                 check_no_chakracore_needed("bin/GCStress", gs_needed)))
+            except (OSError, ValueError) as e:
+                failures.append(("GCStress-needed", str(e)))
 
-    # 3. Exports & leak checks.
+    # 3. Exports, leak checks & sanitizer ELF symbols.
     failures.append(("nodeapi-exports-ref", check_nodeapi_exports_ref()))
     if is_static:
+        static_archive = os.path.join(prefix, "lib/libChakraCoreStatic.a")
         failures.append(("static-archive-exports",
-                         check_static_archive_exports(
-                             os.path.join(prefix, "lib/libChakraCoreStatic.a"))))
+                         check_static_archive_exports(static_archive)))
+        failures.append(("static-archive-sanitizer-symbols",
+                         check_archive_sanitizer_symbols(
+                             static_archive, sanitize=sanitize)))
     else:
         failures.append(("so-exports", check_exports(
             os.path.join(prefix, SOLIBS[1]), EXPORTS_SO,
-            omit=(RELEASE_SHARED_ABSENT_EXPORTS if is_release else ()))))
+            omit=(RELEASE_SHARED_ABSENT_EXPORTS if is_release else ()),
+            sanitize=sanitize)))
         failures.append(("ch-exports", check_exports_subset(
             os.path.join(prefix, "bin/ch"), EXPORTS_CH)))
         failures.append(("so-no-zig-u8a-leak",
                          check_no_leaked_symbol_prefixes(
                              os.path.join(prefix, SOLIBS[1]))))
+        failures.append(("so-sanitizer-symbols",
+                         check_elf_sanitizer_symbols(
+                             os.path.join(prefix, SOLIBS[1]),
+                             sanitize=sanitize)))
     for exe in EXECUTABLES:
+        exe_path = os.path.join(prefix, exe)
         failures.append((exe + "-no-zig-u8a-leak",
-                         check_no_leaked_symbol_prefixes(
-                             os.path.join(prefix, exe))))
+                         check_no_leaked_symbol_prefixes(exe_path)))
+        failures.append((exe + "-sanitizer-symbols",
+                         check_elf_sanitizer_symbols(
+                             exe_path, sanitize=sanitize)))
     nodeapi_so = os.path.join(prefix, "lib/libChakraNodeApi.so")
     if os.path.lexists(nodeapi_so):
+        failures.append(("nodeapi-so-elf", check_elf(nodeapi_so, ET_DYN)))
+        failures.append(("nodeapi-so-soname+needed",
+                         check_dynamic_so(nodeapi_so,
+                                          icu_major=icu_major,
+                                          sanitize=sanitize,
+                                          want_soname=WANT_NODEAPI_SONAME,
+                                          require_icu=False)))
         failures.append(("nodeapi-so-exports",
                          check_exports_subset(nodeapi_so, NODEAPI_EXPORTS)))
         failures.append(("nodeapi-so-no-zig-u8a-leak",
                          check_no_leaked_symbol_prefixes(nodeapi_so)))
+        failures.append(("nodeapi-so-sanitizer-symbols",
+                         check_elf_sanitizer_symbols(
+                             nodeapi_so, sanitize=sanitize)))
 
     # 4. Configs.
     failures.append(("pal-config", check_file_bytes(
@@ -938,7 +1497,7 @@ def main(argv):
                              "bin/ and lib/ .so copies differ or empty"))
         except OSError as e:
             failures.append(("so-copies-identical", str(e)))
-    for rel, want in expected_archive_members(profile, jit=jit).items():
+    for rel, want in expected_archive_members(base_profile, jit=jit).items():
         archive_path = os.path.join(prefix, rel)
         failures.append((rel, check_archive(archive_path, want)))
         if rel == "lib/libChakraCoreStatic.a":
@@ -946,7 +1505,7 @@ def main(argv):
                              check_archive_contains(archive_path)))
 
     # 6. Profile marker.
-    failures.append((".profile", check_profile_marker(prefix, profile)))
+    failures.append((".profile", check_profile_marker(prefix, marker_profile)))
 
     bad = [(name, err) for name, err in failures if err is not None]
     if bad:
@@ -956,13 +1515,13 @@ def main(argv):
                   file=sys.stderr)
         return 1
     if is_static:
-        print("check_metadata_linux: PASS: profile=%s icu=%s jit=%s static ELF + "
+        print("check_metadata_linux: PASS: profile=%s sanitize=%s icu=%s jit=%s static ELF + "
               "NEEDED + archive exports + configs + headers + archives + marker match"
-              % (profile, icu_major, jit))
+              % (marker_profile, sanitize or "none", icu_major, jit))
     else:
-        print("check_metadata_linux: PASS: profile=%s icu=%s jit=%s ELF + SONAME/NEEDED + "
+        print("check_metadata_linux: PASS: profile=%s sanitize=%s icu=%s jit=%s ELF + SONAME/NEEDED + "
               "exports (%d/%d) + configs + headers + archives + marker all match"
-              % (profile, icu_major, jit,
+              % (marker_profile, sanitize or "none", icu_major, jit,
                  len(read_export_ref(EXPORTS_SO)) -
                  (len(RELEASE_SHARED_ABSENT_EXPORTS) if is_release else 0),
                  len(read_export_ref(EXPORTS_CH))))

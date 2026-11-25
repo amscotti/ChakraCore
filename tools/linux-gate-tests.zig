@@ -26,6 +26,13 @@ test {
     _ = linux;
 }
 
+fn expectStringSlicesEqual(expected: []const []const u8, actual: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, actual.len);
+    for (expected, actual) |exp, act| {
+        try std.testing.expectEqualStrings(exp, act);
+    }
+}
+
 fn containsStr(haystack: []const []const u8, needle: []const u8) bool {
     for (haystack) |item| {
         if (std.mem.eql(u8, item, needle)) return true;
@@ -93,6 +100,39 @@ test "linux sanitizer options, install prefixes, and gate applicability" {
     const p_tsan = linux.installPrefixForConfig(arena, .debug_static, .thread);
     defer arena.free(p_tsan);
     try std.testing.expectEqualStrings("out/sanitize-thread", p_tsan);
+
+    var args_arena_impl: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer args_arena_impl.deinit();
+    const args_arena = args_arena_impl.allocator();
+
+    // Metadata invocation must match side_name (.profile) and forward --sanitize.
+    try std.testing.expectEqualStrings("test", linux.metadataProfileForConfig(args_arena, .@"test", .none));
+    try std.testing.expectEqualStrings("debug-static", linux.metadataProfileForConfig(args_arena, .debug_static, .none));
+    try std.testing.expectEqualStrings("release-shared", linux.metadataProfileForConfig(args_arena, .release_shared, .none));
+    for ([_]linux.Sanitize{ .address, .undefined, .thread }) |san| {
+        const sname = linux.sideNameForConfig(args_arena, .@"test", san).?;
+        const mprof = linux.metadataProfileForConfig(args_arena, .@"test", san);
+        try std.testing.expectEqualStrings(sname, mprof);
+        try std.testing.expectEqualStrings("debug-static", linux.metadataProfileForConfig(args_arena, .debug_static, san));
+    }
+
+    const args_test = linux.metadataArgsForConfig(args_arena, .@"test", .none, "74", true);
+    try expectStringSlicesEqual(&.{ "--profile", "test", "--icu-major", "74" }, args_test);
+
+    const args_rel = linux.metadataArgsForConfig(args_arena, .release_shared, .none, "76", false);
+    try expectStringSlicesEqual(&.{ "--profile", "release-shared", "--icu-major", "76", "--no-jit" }, args_rel);
+
+    const args_asan = linux.metadataArgsForConfig(args_arena, .@"test", .address, "74", false);
+    try expectStringSlicesEqual(&.{ "--profile", "sanitize-address", "--sanitize", "address", "--icu-major", "74", "--no-jit" }, args_asan);
+
+    const args_ubsan = linux.metadataArgsForConfig(args_arena, .@"test", .undefined, "74", true);
+    try expectStringSlicesEqual(&.{ "--profile", "sanitize-undefined", "--sanitize", "undefined", "--icu-major", "74" }, args_ubsan);
+
+    const args_tsan_dbg = linux.metadataArgsForConfig(args_arena, .debug_static, .thread, "74", false);
+    try expectStringSlicesEqual(&.{ "--profile", "debug-static", "--sanitize", "thread", "--icu-major", "74", "--no-jit" }, args_tsan_dbg);
+
+    const linux_src = @embedFile("build/linux.zig");
+    try std.testing.expect(std.mem.indexOf(u8, linux_src, "metadataArgsForConfig(arena, profile, sanitize, icu.major, jit)") != null);
 }
 
 test "Phase-4 TUs present in tables_linux.zig / linux.zig with zero duplicates and on disk" {
