@@ -253,3 +253,15 @@ via `verify-bytecode` + smoke).
   re-verified with `verify-bytecode` at Step 3.
 - No MSBuild/CMake introduced; everything remains `zig build`.
 - No pushes; local-only branch pending PR.
+
+## Fix 17 (B6 STEP5b, debug-static profile)
+
+**Symptom:** `zig build check-smoke check-metadata verify-bytecode check-gcstress` failed twice:
+1. `error: unexpected argument 'g' to '#pragma optimize'` in `lib/Runtime/Language/InterpreterLoop.inl:158` — clang rejects the MSVC-style optimize arg under `-Werror`.
+2. `'ParserCommon.h' file not found` compiling `bin/ChakraCore/TestHooks.cpp` (via `lib/Runtime/Runtime.h:14`) — only compiled in static profiles (`CHAKRA_STATIC_LIBRARY=1`); the TU include set `ch_group.extra_includes` lacked `lib/Parser`.
+
+**Fix:**
+- Add `"-Wno-ignored-pragmas"` in `tools/build/tables_windows.zig` (`clang_msvc_warnings`), narrow per fix #13.
+- Add `"lib/Parser"` to `ch_group.extra_includes` in `tools/build/tables_windows.zig`.
+
+**Rejected alternative:** removing `#pragma optimize("g", on)` — the legacy MSBuild `.vcxproj` default must stay (the macro is gated for DBG anyway), so suppression is the narrow correct change.

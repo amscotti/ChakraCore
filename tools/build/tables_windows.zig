@@ -53,6 +53,11 @@ pub const clang_msvc_warnings: []const []const u8 = &.{
     // (Windows.Globalization.h vs windows.globalization.h); Windows is
     // case-insensitive for includes, so this is benign.
     "-Wno-nonportable-include-path",
+    // `#pragma optimize("g", on)` in InterpreterLoop.inl is ignored by
+    // clang (flag was the MSVC optimization character; clang takes no
+    // per-function optimization args here); suppress narrowly per the
+    // same pattern used for -Wno-unused-command-line-argument.
+    "-Wno-ignored-pragmas",
     "-Wno-int-to-void-pointer-cast",
     "-Wno-unused-parameter",
     "-Wno-switch",
@@ -1077,6 +1082,7 @@ pub const ch_group = Group{
         "lib/Jsrt",
         "bin/ch",
         "lib/Runtime",
+        "lib/Parser",
         "bin/ChakraCore",
     },
 };
