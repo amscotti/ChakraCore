@@ -1015,6 +1015,15 @@ pub fn build(b: *std.Build) void {
         ch_link.addFileArg(static_chakracore_lib.?);
         addWinLibs(ch_link, tables.ch_win_libs);
         addIcuLinkFlags(&ctx, ch_link);
+        // Zig's clang driver emits /DEFAULTLIB:libcmt.lib into objects even
+        // under -fms-runtime-lib=static_dbg, but the -D_DEBUG objects call
+        // debug-CRT entry points (_CrtDbgReport) that release libcmt.lib
+        // lacks. Inject the debug CRT statically-linked libs by name so
+        // lld resolves them from the MSVC/SDK lib paths. Names verified
+        // present in the VS2022 MSVC Tools lib\x64 and SDK ucrt\x64 dirs.
+        if (profile == .debug_static) {
+            for ([_][]const u8{ "-llibcmtd", "-llibucrtd", "-llibvcruntimed", "-loldnames" }) |l| ch_link.addArg(l);
+        }
     } else {
         ch_link.addFileArg(b.path("bin/ch/ch.def"));
         ch_link.addFileArg(dll_res.?.implib);
@@ -1033,6 +1042,10 @@ pub fn build(b: *std.Build) void {
     for (gcstress_dep_libs.items) |dl| gs_link.addFileArg(dl);
     addWinLibs(gs_link, tables.gcstress_win_libs);
     addIcuLinkFlags(&ctx, gs_link);
+    // Debug CRT symbols (see ch.exe static link above).
+    if (profile == .debug_static) {
+        for ([_][]const u8{ "-llibcmtd", "-llibucrtd", "-llibvcruntimed", "-loldnames" }) |l| gs_link.addArg(l);
+    }
     const gs_bin = gs_link.addPrefixedOutputFileArg("-o", "GCStress.exe");
 
     // Stage artifacts into zig-out/ (test) or out/<profile>/ (debug-static, release-shared).
