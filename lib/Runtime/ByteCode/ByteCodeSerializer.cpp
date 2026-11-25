@@ -2659,7 +2659,7 @@ public:
             }
 
             PrependUInt32(builder, _u("Nested Count"), currentStub->nestedCount);
-            if (recursive)
+            if (recursive && currentStub->nestedCount > 0 && currentStub->deferredStubs != nullptr)
             {
                 AddDeferredStubs(builder, currentStub->deferredStubs, currentStub->nestedCount, cache, recursive);
             }

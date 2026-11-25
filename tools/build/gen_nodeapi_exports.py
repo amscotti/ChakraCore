@@ -325,7 +325,7 @@ def self_test() -> int:
     # Stale exports file fails the compare (on-disk drift gate fires).
     exports_path = root / "tools" / "build" / "nodeapi_exports.txt"
     bad += report("exports file matches generation",
-                  exports_path.read_text() == expected)
+                  exports_path.read_bytes().decode("utf-8").replace("\r\n", "\n") == expected)
     # .def rendering preserves header and exact order of all 161 exports.
     ordered = parse_exports_file(exports_path)
     def_text = render_def(ordered)
@@ -397,7 +397,7 @@ def main() -> int:
         print("check ok: nodeapi_exports.txt matches generation")
         return 0
     exports_path.parent.mkdir(parents=True, exist_ok=True)
-    exports_path.write_text(expected)
+    exports_path.write_text(expected, encoding="utf-8", newline="\n")
     print(f"wrote {exports_path}")
     return 0
 

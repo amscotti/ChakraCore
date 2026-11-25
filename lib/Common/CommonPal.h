@@ -101,9 +101,23 @@
 // UCRT stdlib.h declares rand_s only when _CRT_RAND_S is defined before
 // stdlib.h is first included (Backend.h includes <wchar.h> before
 // CommonBasic.h's #define _CRT_RAND_S, so the gate can be missed).
-// Declare it explicitly here; a same-signature redeclaration from the CRT
-// is legal, and on x64 __cdecl is the default calling convention.
-errno_t rand_s(unsigned int* randomValue);
+// Declare it extern "C" explicitly; objects then reference the C symbol
+// `rand_s` (not the mangled C++ name `?rand_s@@YAHPEAI@Z`) provided by
+// MSVC CRT.
+extern "C" errno_t rand_s(unsigned int* randomValue);
+
+// The MIDL rename chain: SDK headers (rpcdce.h) declare the UPPERCASE
+// MIDL_user_allocate/MIDL_user_free as extern runtime functions, and code
+// in this tree calls the lowercase midl_user_* forms. On the Windows
+// (MSBuild) path these resolve to the real MIDL runtime stubs, which we do
+// not produce with ENABLE_OOP_NATIVE_CODEGEN=0. rpcdce.h maps
+// midl_user_allocate -> MIDL_user_allocate, so define the UPPERCASE forms
+// here as shims (matching the PAL branch below); chained macro expansion
+// then rewrites both lowercase and uppercase call sites to HeapAlloc/HeapFree.
+#define MIDL_user_allocate(size) \
+    HeapAlloc(GetProcessHeap(), 0, (size))
+#define MIDL_user_free(ptr) \
+    if (ptr != NULL) { HeapFree(GetProcessHeap(), NULL, ptr); }
 
 // xplat-todo: get a better name for this macro
 #define _u(s) L##s
