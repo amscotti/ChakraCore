@@ -1,0 +1,10 @@
+pass
+ERROR attempting to coerce error to string, using alternate handler
+boom-loadscript-module
+	at code ((unknown):??:??)
+ERROR attempting to coerce error to string, using alternate handler
+boom-loadmodule
+	at code ((unknown):??:??)
+ERROR attempting to coerce error to string, using alternate handler
+boom-eval-module
+	at code ((unknown):??:??)

@@ -466,4 +466,10 @@ Below test fails with difference in space. Investigate the cause and re-enable t
       <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>dataview_unaligned_ub.js</files>
+      <tags>typedarray</tags>
+    </default>
+  </test>
 </regress-exe>

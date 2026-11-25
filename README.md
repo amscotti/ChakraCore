@@ -59,8 +59,8 @@ All active platform builds use the Zig `0.17.0` front end pinned in [mise.toml](
 
 ```sh
 mise exec -- zig build                              # default (test) profile -> zig-out/
-mise exec -- zig build check                        # regression (2110/0) + bytecode + native + smoke + metadata + selftest
-mise exec -- zig build -Dprofile=debug-static check # static Debug archive + 8/8 native suites (2162/0)
+mise exec -- zig build check                        # regression (2113/0) + bytecode + native + smoke + metadata + selftest
+mise exec -- zig build -Dprofile=debug-static check # static Debug archive + 8/8 native suites (2165/0)
 mise exec -- zig build -Dprofile=release-shared check-package
 mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-wasm-jit check-fulljit # P1 WASM (382/382 MVP+sign-ext+nontrapping) + FullJit (643/0); multi-value (-WasmMultiValue) & SIMD (-WasmSimd) are P3
 mise exec -- zig build -Dsanitize=address check-sanitize

@@ -225,4 +225,10 @@
       <tags>exclude_sanitize_address</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>module_unnamed_throw_error.js</files>
+      <baseline>module_unnamed_throw_error.baseline</baseline>
+    </default>
+  </test>
 </regress-exe>
