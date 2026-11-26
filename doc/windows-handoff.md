@@ -1,13 +1,13 @@
 # ChakraCore Modernization -- Windows x64 (`B6`) `zig build` Bring-Up & Certification Handoff
 
-> Status: **WIRED ON `modernize/phase4` — AWAITING FIRST NATIVE WINDOWS EXECUTION (`B6`)**
+> Status: **INTEGRATED ON `modernize/baseline` (`1e30ad2af`) -- AWAITING CLEAN NATIVE WINDOWS RE-CERTIFICATION (`B6`)**
 > Target / Host Contract: **`x86_64-windows-msvc`**, Zig **`0.17.0`** (`mise.toml` or `zig 0.17.0` on Windows)
 > Companion Docs: [README.md](../README.md), [modernization-plan.md](modernization-plan.md),
 > [vision-and-roadmap.md](vision-and-roadmap.md), [linux-handoff.md](linux-handoff.md),
 > [node-api-receipt.md](node-api-receipt.md), [b5-package.md](b5-package.md), [build.md](build.md) (legacy MSBuild reference)
 
 > [!IMPORTANT]
-> **Scope & Honesty Note:** This handoff covers the native `x86_64-windows-msvc` `zig build` front end (`tools/build/windows.zig`, `tools/build/tables_windows.zig`, `tools/windows-gate-tests.zig`), PE32+ metadata/smoke/Node-API gates (`check_metadata_windows.py`, `check_smoke_windows.py`, `check_nodeapi.py`, `gen_nodeapi_exports.py --def`), Windows packaging (`tools/package/*`), and hosted CI ([.github/workflows/zig-windows.yml](../.github/workflows/zig-windows.yml)). Because `modernize/phase4` development runs on macOS ARM64, the Windows graph and unit tests are cross-checked structurally on macOS/Linux, while **native compilation, runtime gates, Node-API matrices, packaging execution, Test262, and benchmarks require execution on a native Windows x64 host or `windows-latest` runner**.
+> **Scope & Honesty Note:** This handoff covers the native `x86_64-windows-msvc` `zig build` front end (`tools/build/windows.zig`, `tools/build/tables_windows.zig`, `tools/windows-gate-tests.zig`, including §31 bring-up fixes, `VS_VERSION_INFO` resource embedding via `zig rc` for `-Serialized`, and `debug-static` CRT/UBSan linking now promoted to `modernize/baseline` `1e30ad2af`), PE32+ metadata/smoke/Node-API gates (`check_metadata_windows.py`, `check_smoke_windows.py`, `check_nodeapi.py`, `gen_nodeapi_exports.py --def`), Windows packaging (`tools/package/*`), and hosted CI ([.github/workflows/zig-windows.yml](../.github/workflows/zig-windows.yml)). Because `modernize/baseline` development runs on macOS ARM64, the Windows graph and unit tests are cross-checked structurally on macOS/Linux, while **native compilation, runtime gates, Node-API matrices, packaging execution, Test262, and benchmarks require execution on a native Windows x64 host or `windows-latest` runner**.
 
 ---
 
@@ -21,7 +21,7 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 |---|---|---|
 | `-Dprofile` | `test` *(default)*, `debug-static`, `release-shared` | `test` -> `zig-out/` (RelWithDebInfo shared + JIT); `debug-static` -> `out/debug-static/` (Debug static `ChakraCore.lib`, standalone `ch.exe`, `DBG=1` asserts, no `ChakraCore.dll`); `release-shared` -> `out/release-shared/` (Release shared, no WABT) |
 | `-Djit` | `true` *(default)*, `false` | `false` sets `-DDISABLE_JIT=1`, omits `lib/Backend` C++ sources and the 2 backend `.asm` files (`LinearScanMdA.asm`, `Thunks.asm`) |
-| `-Dicu` | `icu4c` *(default)*, `windows`, `none` | `icu4c`: links `vcpkg` `icu:x64-windows` or `CHAKRA_ICU_DIR` (`HAS_ICU=1`, `INTL_ICU=1`, `U_DISABLE_RENAMING=1`) for full `I1`/`I2` ECMA-402 parity; `windows`: selects `WINDOWS10_ICU=1` (`<icu.h>`); `none`: omits ICU (falls back to `INTL_WINGLOB=1`) |
+| `-Dicu` | `icu4c` *(default)*, `windows`, `none` | `icu4c`: links `vcpkg` `icu:x64-windows` or `CHAKRA_ICU_DIR` (`HAS_ICU=1`, `INTL_ICU=1`) for full `I1`/`I2` ECMA-402 parity; `windows`: selects `WINDOWS10_ICU=1` (`<icu.h>`); `none`: omits ICU (falls back to `INTL_WINGLOB=1`) |
 | `-Dicu-include=<dir>` | optional path | Overrides auto-detected `CHAKRA_ICU_DIR` / `VCPKG_ROOT\installed\x64-windows\include` header directory |
 | `-Dicu-libdir=<dir>` | optional path | Overrides auto-detected `CHAKRA_ICU_DIR` / `VCPKG_ROOT\installed\x64-windows\lib` import-library directory |
 | `-Dml64=<path>` | optional path | Overrides auto-discovered `ml64.exe` (PATH / `VCToolsInstallDir` / `vswhere.exe`) |
@@ -109,20 +109,18 @@ In Git Bash (confirming style & bytecode-header purity):
 
 ```sh
 python3 tools/StyleChecks/check_style_portable.py --self-test
-for base in origin/master modernize/baseline; do
-  STYLECHECK_BASE="$base" bash tools/StyleChecks/check_eol.sh
-  STYLECHECK_BASE="$base" bash tools/StyleChecks/check_tabs.sh
-  STYLECHECK_BASE="$base" bash tools/StyleChecks/check_ascii.sh
-  STYLECHECK_BASE="$base" bash tools/StyleChecks/check_copyright.sh
-done
-git diff --exit-code modernize/baseline -- \
+STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_eol.sh
+STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_tabs.sh
+STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_ascii.sh
+STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_copyright.sh
+git diff --exit-code 1bf42d1f6 -- \
   lib/Runtime/Base/JnDirectFields.h \
   lib/Runtime/InternalPropertyList.h \
   lib/Runtime/Library/InJavascript/Intl.js \
   'lib/Runtime/Library/InJavascript/JsBuiltIn*.bc.*.h'
 ```
 
-Expected: all Zig/Python unit suites and self-tests PASS; `8/8` StyleChecks `NO PROBLEMS DETECTED`; empty bytecode-header diff.
+Expected: all Zig/Python unit suites and self-tests PASS; `4/4` StyleChecks `NO PROBLEMS DETECTED`; empty bytecode-header diff (vs pre-Phase-4 `1bf42d1f6`).
 
 ### Step 2 -- Default `test` Profile Build (`x86_64-windows-msvc`)
 
@@ -254,7 +252,7 @@ Confirm [.github/workflows/zig-windows.yml](../.github/workflows/zig-windows.yml
 # B6: Windows x64 `zig build` Certification Receipt
 
 - Date: YYYY-MM-DD
-- Commit: `<full 40-char git rev-parse HEAD>` (`modernize/phase4`)
+- Commit: `<full 40-char git rev-parse HEAD>` (`modernize/baseline`)
 - Host OS: Windows <10|11> x64 (`<build number>`)
 - Toolchain: Zig `0.17.0`, VS 2022 `<version>`, Windows SDK `<version>`, `ml64.exe <version>`
 - ICU: `vcpkg icu:x64-windows` (`<icu version>`)
@@ -297,13 +295,13 @@ The Windows x64 build assembles 5 core MASM files (`amd64_SAVE_REGISTERS.asm`, `
 `vcpkg install icu:x64-windows` builds dynamic `icuuc*.dll`, `icuin*.dll`, and `icudt*.dll` in `%VCPKG_ROOT%\installed\x64-windows\bin`. Because Windows does not support ELF `$ORIGIN` RPATHs, running `zig-out/bin/ch.exe` or `zig build check-*` fails with `STATUS_DLL_NOT_FOUND` (`0xc0000135`) unless `%CHAKRA_ICU_DIR%\bin` (`%VCPKG_ROOT%\installed\x64-windows\bin`) is on `PATH` or the ICU DLLs are copied next to the executable.
 
 ### 4.3 `-DENABLE_OOP_NATIVE_CODEGEN=0` & `-DDISABLE_JS_ETW` (`ml64.exe`-Only Build)
-Legacy MSBuild (`Build\Chakra.Core.sln`) defaults `ENABLE_OOP_NATIVE_CODEGEN` to `1` (invoking `midl.exe` over `JITIDL` and linking `JITClient`/`JITServer` COM/RPC projects) and defines `ENABLE_JS_ETW` (requiring `mc.exe` / `CoreManifests`). In `modernize/phase4`:
+Legacy MSBuild (`Build\Chakra.Core.sln`) defaults `ENABLE_OOP_NATIVE_CODEGEN` to `1` (invoking `midl.exe` over `JITIDL` and linking `JITClient`/`JITServer` COM/RPC projects) and defines `ENABLE_JS_ETW` (requiring `mc.exe` / `CoreManifests`). On `modernize/baseline`:
 - `lib/Common/CommonDefines.h` wraps `#define ENABLE_OOP_NATIVE_CODEGEN 1` in `#ifndef ENABLE_OOP_NATIVE_CODEGEN` and guards `ENABLE_JS_ETW` with `#if !defined(CHAKRACORE_LITE) && !defined(DISABLE_JS_ETW)`.
 - `tools/build/windows.zig` passes both `-DENABLE_OOP_NATIVE_CODEGEN=0` (clean in-process JIT without `midl.exe` or `JITIDL`/`JITClient`/`JITServer`) and `-DDISABLE_JS_ETW` (no `mc.exe` / `CoreManifests`), leaving **`ml64.exe`** as the sole external MSVC binary required by `zig build`, while keeping legacy MSBuild's `1` / ETW defaults `100%` intact.
 - `bin/ChakraCore/ChakraCore.def` guards `JsInitializeJITServer` and `lib/Jsrt/JsrtCommonExports.inc` guards `JsConnectJITProcess` and `JsEnableOOPJIT` with `#if !defined(ENABLE_OOP_NATIVE_CODEGEN) || ENABLE_OOP_NATIVE_CODEGEN` so `.def` preprocessing omits them from `ChakraCore.dll` exports when `ENABLE_OOP_NATIVE_CODEGEN == 0`; `bin/ch/ChakraRtInterface.cpp` (`GetChakraCoreSymbol`) and `bin/ch/ch.cpp` resolve `JsConnectJITProcess` / `JsInitializeJITServer` dynamically via `GetProcAddress` (never statically imported from `ChakraCore.dll`), while `lib/Jsrt/Core/JsrtCore.cpp` defines `JsEnableOOPJIT` / `JsConnectJITProcess` on `_WIN32` returning `JsErrorNotImplemented` when `ENABLE_OOP_NATIVE_CODEGEN == 0`.
 
 ### 4.4 `-Dicu=icu4c` vs `-Dicu=windows` vs `-Dicu=none` Trade-Offs
-- **`-Dicu=icu4c` (Default):** Defines `HAS_ICU=1`, `INTL_ICU=1`, `U_DISABLE_RENAMING=1` against `vcpkg` `icu:x64-windows` (`unicode/*.h`). Gives full `I1`/`I2` ECMA-402 C-API parity (`Intl.Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `supportedValuesOf`, `DurationFormat`) and modern ICU Unicode property escapes, at the cost of deploying `vcpkg` ICU DLLs.
+- **`-Dicu=icu4c` (Default):** Defines `HAS_ICU=1` and `INTL_ICU=1` against `vcpkg` `icu:x64-windows` (`unicode/*.h`). Gives full `I1`/`I2` ECMA-402 C-API parity (`Intl.Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `supportedValuesOf`, `DurationFormat`) and modern ICU Unicode property escapes, at the cost of deploying `vcpkg` ICU DLLs.
 - **`-Dicu=windows`:** Defines `HAS_ICU=1`, `INTL_ICU=1`, `WINDOWS10_ICU=1` (`lib/Runtime/PlatformAgnostic/ChakraICU.h` includes `<icu.h>` with `NTDDI_WIN10_RS5` and `tools/build/windows.zig` links `-licu` when `icu.lib` is present in SDK `Lib\<ver>\um\x64`, or `-licuuc -licuin` if `icu.lib` is absent). Avoids third-party ICU DLLs, **but** Windows inbox `<icu.h>` targets an older Redstone C API subset and OS-bundled CLDR/Unicode data that may lack newer ICU4C 74+ `I1`/`I2` APIs or match older Unicode tables depending on Windows OS version.
 - **`-Dicu=none`:** Omits `HAS_ICU` and `INTL_ICU`, so `lib/Common/CommonDefines.h` defines `INTL_WINGLOB=1` (`Windows.Globalization`). Legacy WinGlob `Intl` lacks `I1`/`I2` modern `INTL_ICU` constructors and ICU-backed Unicode `RegExp` property escapes.
 

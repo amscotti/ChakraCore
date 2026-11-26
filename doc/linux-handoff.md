@@ -1,6 +1,6 @@
 # ChakraCore Modernization -- Linux Bring-Up and Testing Handoff
 
-> Phase-4 Handoff (`G0-phase4`): **2026-11-22** (`modernize/phase4` prep landed: SimpleJIT cross-site `IsThrowingFunctionNative`, `check_metadata_linux.py` `681` static members + `u8a_codec.o` + `161` Node-API / `0` `zig_u8a_*`, `check_regression_linux.py --allow-higher`, `linux-gate-tests.zig` `10/10`, `.github/workflows/zig-linux.yml`; `modernize/baseline` at `1bf42d1f6`)
+> Phase-4 Handoff (`G0-phase4`): **2026-11-25** (`modernize/baseline` `1e30ad2af`: `modernize/phase4` promoted + §30 selective Linux follow-ups landed -- `IntlEnumeration`, engine-table `v`-flag folding, Linux `dlsym` `exp`, PAL/Recycler atomics, `RECORDED_BASELINE` `2925/2388`, `115` `test_build_tools.py` tests, `15/15` `test_package_tools.py`, `linux-gate-tests.zig` `10/10`, `.github/workflows/zig-linux.yml`; historical pre-Phase-4 `G0` baseline was `1bf42d1f6`)
 > Original Handoff: 2026-11-16 (`modernize/baseline` at `526393e26`, `8f4e85d62..526393e26`)
 > Synchronized: **2026-11-17** (`modernize/baseline` at `06d783c64`, including Linux bring-up `4778b3a2b..c639e9f02` and post-review fixes `193c95046..06d783c64`)
 > Companion Docs: [architecture-and-readiness-review.md](architecture-and-readiness-review.md),
@@ -9,7 +9,7 @@
 > [perf-baseline.md](perf-baseline.md), [windows-handoff.md](windows-handoff.md)
 
 > [!IMPORTANT]
-> **Active Branch (`modernize/phase4`):** `G0` baseline revalidation (`8b447ac48..1bf42d1f6`) is complete on `modernize/baseline` and merged into `modernize/phase4` ([b4-linux-run.md](b4-linux-run.md) §12). Use **§0A below** for the **`G0-phase4`** single-pass Linux x64 revalidation covering `Q1.1` (Node-API v10 `161` exports), `Z1` (`lib/ZigCodec/u8a_codec.zig`), `I1`/`I2` (modern C-ICU4C `Intl`), `C3.1` (Explicit Resource Management), `P1` (JIT bailout/tier-up), `Pre-Q1.5` (UBSan/Math hardening), and `Q1.2`–`Q3` (ES2025 `99.57%` / broad `88.97%` on macOS ARM64). Existing `G0` baseline receipts (§0, Phase 1–6 summary, and §§1–4) remain preserved verbatim below §0A.
+> **Active Branch (`modernize/baseline` `1e30ad2af`):** Historical `G0` baseline revalidation (`8b447ac48..1bf42d1f6`) is complete ([b4-linux-run.md](b4-linux-run.md) §12), and all Phase-4 tracks plus §30 Linux follow-ups are now promoted into **`modernize/baseline`**. Use **§0A below** for the **`G0-phase4`** single-pass Linux x64 re-certification covering `Q1.1` (Node-API v10 `161` exports), `Z1` (`lib/ZigCodec/u8a_codec.zig`), `I1`/`I2` (modern C-ICU4C `Intl` + `UCURR_NON_DEPRECATED`), `C3.1` (Explicit Resource Management), `P1` (JIT bailout/tier-up), `Pre-Q1.5` (UBSan/Math hardening), `Q1.2`–`Q3` (ES2025 `99.57%` / broad `88.97%` on macOS ARM64), Waves 1–5b, and §30 follow-up fixes. Existing `G0` baseline receipts (§0, Phase 1–6 summary, and §§1–4) remain preserved verbatim below §0A.
 
 ## 0A. Phase-4 (`G0-phase4`) Single-Pass Linux x64 Revalidation Runbook
 
@@ -19,19 +19,17 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    ```sh
    git fetch origin master:refs/remotes/origin/master
    python3 tools/StyleChecks/check_style_portable.py --self-test
-   for base in origin/master modernize/baseline; do
-     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_eol.sh
-     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_tabs.sh
-     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_ascii.sh
-     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_copyright.sh
-   done
-   git diff --exit-code modernize/baseline -- \
+   STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_eol.sh
+   STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_tabs.sh
+   STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_ascii.sh
+   STYLECHECK_BASE=origin/master bash tools/StyleChecks/check_copyright.sh
+   git diff --exit-code 1bf42d1f6 -- \
      lib/Runtime/Base/JnDirectFields.h \
      lib/Runtime/InternalPropertyList.h \
      lib/Runtime/Library/InJavascript/Intl.js \
      'lib/Runtime/Library/InJavascript/JsBuiltIn*.bc.*.h'
    ```
-   Expected: `8/8` `--- NO PROBLEMS DETECTED ---`, `check_style_portable.py --self-test` clean, empty bytecode-header diff (`exit 0`).
+   Expected: `4/4` `--- NO PROBLEMS DETECTED ---`, `check_style_portable.py --self-test` clean, empty bytecode-header diff (`exit 0` vs pre-Phase-4 `1bf42d1f6`).
 
 2. **Step 2 — Build-Tool Unit Suites, `linux-gate-tests.zig`, & Zig Unit Tests (No Engine Build Required):**
    ```sh
@@ -45,7 +43,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    mise exec -- zig test doc/examples/owned-bytes.zig
    mise exec -- zig test lib/ZigCodec/u8a_codec.zig
    ```
-   Expected: `check-build-tools` (`test_build_tools.py`) `108` tests OK; `test_package_tools.py` (`12/12`), `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`10/10` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptError.cpp` [`SuppressedError`], `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
+   Expected: `check-build-tools` (`test_build_tools.py`) `115` tests OK; `test_package_tools.py` (`15/15`), `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`10/10` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptError.cpp` [`SuppressedError`], `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
 
 3. **Step 3 — Default `test` Build, Core Gates, Phase-4 Slices, & `RECORDED_BASELINE` Re-Pin:**
    ```sh
@@ -72,9 +70,9 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
          Date/date_set_es2025.js Function/toString_es2025_and_arrow_ub.js)
        ```
    - **How to audit & re-pin `RECORDED_BASELINE` in `tools/build/check_regression_linux.py`:**
-     - `G0` (`modernize/baseline`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}` (`tools/build/check_regression_linux.py:72`).
-     - `modernize/phase4` adds new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, and `C3.1` tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2098/2150`, `+34` non-JIT tests; Linux also executes JIT/AsmJs suites).
-     - Run `mise exec -- zig build check-regression`: confirm **`0` failures** in both `interpreted` and `dynapogo`, reconcile the exact `passed` delta against `git diff modernize/baseline -- 'test/*/rlexe.xml'`, update `RECORDED_BASELINE` and its docstring in `tools/build/check_regression_linux.py` (plus any matching `test_build_tools.py` pin tests), and run full `mise exec -- zig build check` to confirm exit `0`.
+     - Historical `G0` (`1bf42d1f6`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}`; §30 updated it on `modernize/baseline` (`1e30ad2af`) to `{"interpreted": (2925, 0), "dynapogo": (2388, 0)}`.
+     - Phase-4 + Waves 1–5b added new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, `C3.1`, and audit regression tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2113/2165`; Linux also executes JIT/AsmJs suites).
+     - Run `mise exec -- zig build check-regression`: confirm **`0` failures** in both `interpreted` and `dynapogo`, reconcile any `passed` delta against `git diff 1bf42d1f6 -- 'test/*/rlexe.xml'`, update `RECORDED_BASELINE` and its docstring in `tools/build/check_regression_linux.py` if needed (plus any matching `test_build_tools.py` pin tests), and run full `mise exec -- zig build check` to confirm exit `0`.
    - Confirm `check_metadata_linux` passes cleanly with zero leaked `zig_u8a_*` symbols and `verify-bytecode` exits `0`.
 
 4. **Step 4 — Linux Build Variants (`-Djit=false`, `debug-static`, `release-shared`):**
@@ -99,7 +97,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    mise exec -- zig build -Dsanitize=thread check-sanitize
    ```
    Also run `I1`/`I2`/`C3.1`/`Q1.5`/`Q3` tests under `./out/sanitize-{address,undefined}/bin/ch -CollectGarbage`, and under TSan run `bash test/nodeapi/probes/run_host_async_probe.sh` and `./out/sanitize-thread/bin/ch test/es7/s6-growable-cross-agent.js`.
-   Expected: ASan & UBSan **`27/27`** (or higher; clean incl. `nodeapi:v10_multi_addon_probe` and all Phase-4 legs); verify whether TSan reproduces only the `G0`-triaged PAL startup lock-count read (`cs.cpp:723` vs `cs.cpp:775/907`, [open-cards.md](open-cards.md) §12) or surfaces any new race.
+   Expected: ASan & UBSan clean (`27+` legs incl. `nodeapi:v10_multi_addon_probe` and all Phase-4 legs); fix or account for the open `tools/build/linux.zig:1587` sanitizer `--profile` mismatch (`side_name` vs `profile.name()` + sanitizer-aware `check_metadata_linux.py` rules, [open-cards.md](open-cards.md) §28.3); keep Linux TSan (`9/24` failing, `27` GC-level reports on the prior branch) explicitly open without masking concurrent-GC paths with blanket suppressions (§30).
 
 7. **Step 7 — Node-API v10 Stack (`161` Exports, `19/19` Probes, `--addon`, `52/17/0` C Matrix):**
    ```sh
@@ -131,7 +129,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    python3 tools/bench/run.py --binary zig-out/bin/ch --tier jit --iterations 5 -o tools/bench/results/linux-x64-jit.json
    python3 tools/bench/run.py --binary zig-out/bin/ch --tier interp --iterations 5 -o tools/bench/results/linux-x64-interp.json
    ```
-   Expected: Compare against macOS ARM64 `modernize/phase4` (**`99.57%` ES2025 = `80,195 / 349`**, **`88.97%` broad = `82,866 / 10,275`**, `--intl402` `1,886 / 6,764`) and Linux `G0` (`98.58%` / `86.15%`): expect only Ubuntu ICU `74` Unicode/CLDR deltas (e.g., `RegExp/property-escapes` Unicode 15.1 vs macOS ICU 79.1 Unicode 18.0) and futex/parallel scheduling variance (`Atomics/{notify,wait,waitAsync}`, re-checking any parallel flakes standalone with `--jobs 1`), **`0` shape suspects**, **`0` engine regressions**. Publish (`--publish`) only on a clean tree after auditing flips.
+   Expected: Compare against macOS ARM64 `modernize/baseline` (**`99.57%` ES2025 = `80,195 / 349`**, **`88.97%` broad = `82,866 / 10,275`**, `--intl402` `1,886 / 6,764`) and Linux `G0` (`98.58%` / `86.15%`): expect only Ubuntu ICU `74` Unicode/CLDR deltas (e.g., `RegExp/property-escapes` Unicode 15.1 vs macOS ICU 79.1 Unicode 18.0) and futex/parallel scheduling variance (`Atomics/{notify,wait,waitAsync}`, re-checking any parallel flakes standalone with `--jobs 1`), **`0` shape suspects**, **`0` engine regressions**. Publish (`--publish`) only on a clean tree after auditing flips.
 
 10. **Step 10 — Hosted CI Confirmation & Receipt Recording in `doc/b4-linux-run.md`:**
     - Confirm [.github/workflows/zig-linux.yml](../.github/workflows/zig-linux.yml) (`style`, `zig`, `zig-variants`, `nodeapi`, `record`) and [.github/workflows/zig-macos.yml](../.github/workflows/zig-macos.yml) are green on hosted runners.

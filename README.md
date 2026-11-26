@@ -4,19 +4,19 @@
 [![Licensed under the MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Microsoft/ChakraCore/blob/master/LICENSE.txt)
 [![PR's Welcome](https://img.shields.io/badge/PRs%20-welcome-brightgreen.svg)](#contribute)
 
-ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4` with `161` exports; v8 / `150` exports on `modernize/baseline`). On `modernize/phase4`, it builds with a single Zig `0.17.0` front end across **macOS ARM64** (certified), **Linux x64** (`G0` baseline verified; `G0-phase4` revalidation queued), and **Windows x64** (`B6` native `x86_64-windows-msvc` `zig build` wired, awaiting native certification), delivering a `~5.5 MB` release package (`~5.3 MB` on `modernize/baseline`), **`99.57%`** certified ES2025 edition conformance (**`80,195 / 80,544`**) and **`88.97%`** broad conformance (**`82,866 / 93,141`**) on macOS ARM64, 3-tier JIT + concurrent `Recycler` GC, and WebAssembly JIT (MVP + sign-extension + nontrapping conversions: `382/382` P1 via `check-wasm` / `check-wasm-jit`; multi-value off by default via `-WasmMultiValue`, experimental SIMD off by default via `-WasmSimd`, bulk-memory unsupported).
+ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/baseline` with `161` exports; previously v8 / `150` exports pre-Phase-4). With Phase-4 (`Q1.1`–`Q3`, `I1`/`I2`, `P1`, `C3.1`), Waves 1–5b security/UB remediations, and audited Linux/Windows bring-up fixes promoted into `modernize/baseline` (`1e30ad2af`), it builds with a single Zig `0.17.0` front end across **macOS ARM64** (certified), **Linux x64** (`G0` baseline verified; §30 follow-ups landed, `G0-phase4` native re-certification queued), and **Windows x64** (`B6` native `x86_64-windows-msvc` `zig build`, `VS_VERSION_INFO`, and `debug-static` CRT/UBSan fixes landed, awaiting native certification), delivering a `~5.5 MB` release package (`~5.3 MB` pre-Phase-4), **`99.57%`** certified ES2025 edition conformance (**`80,195 / 80,544`**) and **`88.97%`** broad conformance (**`82,866 / 93,141`**) on macOS ARM64, 3-tier JIT + concurrent `Recycler` GC, and WebAssembly JIT (MVP + sign-extension + nontrapping conversions: `382/382` P1 via `check-wasm` / `check-wasm-jit`; multi-value off by default via `-WasmMultiValue`, experimental SIMD off by default via `-WasmSimd`, bulk-memory unsupported).
 
 ## Project Direction: The Embeddable JIT Sweet Spot
 
-This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` `237` exports + `libChakraNodeApi` `161` exports) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WebAssembly (MVP/sign-extension/nontrapping default-on; opt-in `-WasmMultiValue` and experimental `-WasmSimd`), and narrow Zig C-ABI leaf wedges outside the C++ engine core. Highlights landed on `modernize/phase4`:
+This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` `237` exports + `libChakraNodeApi` `161` exports) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WebAssembly (MVP/sign-extension/nontrapping default-on; opt-in `-WasmMultiValue` and experimental `-WasmSimd`), and narrow Zig C-ABI leaf wedges outside the C++ engine core. Highlights promoted into `modernize/baseline`:
 
 - **`Q1.1` Node-API v9/v10 + Multi-Addon (`161` exports):** `155` `napi_*`/`node_api_*` + `6` host helpers, `--addon` multi-addon registry, per-context shared `Buffer` marker, `19/19` probes, `52/17/0` C matrix.
-- **`Q1.2`–`Q1.5` ES2025 Conformance Sweeps I–III:** Lifted certified ES2025 edition conformance from `98.89%` (`modernize/baseline`) through `99.06%` (`Q1.2`), `99.25%` (`Q1.4`), `99.26%` (`Q2`/`C3.1`), and `99.56%` (`Q1.5`, `+247` non-`waitAsync` fixes across `133` files with `0` JIT diffs) to **`99.57%`** (`Q3`).
+- **`Q1.2`–`Q1.5` ES2025 Conformance Sweeps I–III:** Lifted certified ES2025 edition conformance from `98.89%` (historical pre-Phase-4 baseline) through `99.06%` (`Q1.2`), `99.25%` (`Q1.4`), `99.26%` (`Q2`/`C3.1`), and `99.56%` (`Q1.5`, `+247` non-`waitAsync` fixes across `133` files with `0` JIT diffs) to **`99.57%`** (`Q3`).
 - **`Q1.3` / `Q2` / `Q3` ES2026 Waves 1–3 & `Z1` Zig Codec:** `Error.isError`, `Math.sumPrecise`, `Array.fromAsync`, `Uint8Array` Base64/Hex backed by `lib/ZigCodec/u8a_codec.zig` (`Z1`), `Iterator.concat`, `Map`/`WeakMap` `getOrInsert*`, `JSON.rawJSON`/`isRawJSON`/`context.source`, `Iterator.{zip,zipKeyed}`, `Iterator.prototype.{chunks,windows,includes,join}`, and `Promise.{allKeyed,allSettledKeyed}` (`+578` broad Test262 in `Q3` with `622/0` JIT parity).
 - **`I1` / `I2` Modern ECMA-402 over C ICU4C:** `Intl.{Locale,ListFormat,RelativeTimeFormat,DisplayNames,Segmenter,getCanonicalLocales,supportedValuesOf,DurationFormat}` implemented strictly in C++ over C ICU4C APIs (`Intl.js` and `JsBuiltIn*.bc.*.h` untouched).
-- **`P1`, `C3.1`, `ARM64 WB`, & `Pre-Q1.5` Hardening:** Pathological JIT bailout/ReJIT and ARM64 asm.js tier-up fixes (`1.453x` 64-test geomean vs baseline JIT; `Kraken/audio-fft.js` `65.94x`), Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262), ARM64 JIT software write-barrier fix under `ConcurrentCollect`, and `Pre-Q1.5` hardening (`29/29` JIT+WASM ASan & UBSan clean under `halt_on_error=1`, `-ParserStateCache` `ImmutableList` UB, ARM64 `Math.{ceil,floor}` `-0` `44/0`, `108` build-tool tests).
+- **`P1`, `C3.1`, `ARM64 WB`, & Waves 1–5b Hardening:** Pathological JIT bailout/ReJIT and ARM64 asm.js tier-up fixes (`1.453x` 64-test geomean vs pre-Phase-4 JIT; `Kraken/audio-fft.js` `65.94x`), Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262), ARM64 JIT software write-barrier fix under `ConcurrentCollect`, and Waves 1–5b security/memory-safety/UB fixes (`2113/0` `test`, `2165/0` `debug-static`, `643/0` `check-fulljit`, `32/32` & `34/34` Mac sanitize, `115` build-tool tests).
 
-See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for Phase-4 tracking (`G0-phase4`, `B6`, `I3`, `H1`) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
+See [doc/modernization-plan.md](doc/modernization-plan.md#active-next-up-execution-queue-modernizebaseline) for the active Now/Next/Later queue, [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for Phase-4 tracks (`G0-phase4`, `B6`, `I3`, `H1`), and [doc/open-cards.md](doc/open-cards.md) for verified gates and open items.
 
 ## Upstream History
 
@@ -45,15 +45,15 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 * [Blogs, talks and other resources](https://github.com/chakra-core/ChakraCore/wiki/Resources)
 * [Modernization documentation and verified baselines](doc/README.md)
 
-## Zig `0.17.0` Build & Test Quickstarts (`modernize/phase4`)
+## Zig `0.17.0` Build & Test Quickstarts (`modernize/baseline`)
 
 All active platform builds use the Zig `0.17.0` front end pinned in [mise.toml](mise.toml) (`zig` on `PATH` or `mise exec -- zig ...`).
 
 | Platform | Target / Toolchain | Default Install | Verification & Handoff |
 |---|---|---|---|
-| **macOS ARM64** | `aarch64-macos.26.0`, Xcode 26.5 SDK, Homebrew `icu4c` | `zig-out/` (`out/<profile>/`) | Certified on `modernize/phase4`; CI [.github/workflows/zig-macos.yml](.github/workflows/zig-macos.yml) |
-| **Linux x64** | `x86_64-linux-gnu` (Ubuntu 24.04: `glibc 2.39`, `ICU 74`, `clang` for sanitizers) | `zig-out/` (`out/<profile>/`) | `G0` verified; Phase-4 runbook [doc/linux-handoff.md](doc/linux-handoff.md) §0A; CI [.github/workflows/zig-linux.yml](.github/workflows/zig-linux.yml) |
-| **Windows x64** | `x86_64-windows-msvc`, VS 2022 Build Tools + Win10/11 SDK (`ml64.exe` only; no `midl.exe`/`mc.exe`), `vcpkg` `icu:x64-windows` | `zig-out\` (`out\<profile>\`) | `B6` wired, awaiting native certification; runbook [doc/windows-handoff.md](doc/windows-handoff.md); CI [.github/workflows/zig-windows.yml](.github/workflows/zig-windows.yml) |
+| **macOS ARM64** | `aarch64-macos.26.0`, Xcode 26.5 SDK, Homebrew `icu4c` | `zig-out/` (`out/<profile>/`) | Certified on `modernize/baseline`; CI [.github/workflows/zig-macos.yml](.github/workflows/zig-macos.yml) |
+| **Linux x64** | `x86_64-linux-gnu` (Ubuntu 24.04: `glibc 2.39`, `ICU 74`, `clang` for sanitizers) | `zig-out/` (`out/<profile>/`) | `G0` verified; §30 fixes landed, `G0-phase4` re-certification in [doc/linux-handoff.md](doc/linux-handoff.md) §0A; CI [.github/workflows/zig-linux.yml](.github/workflows/zig-linux.yml) |
+| **Windows x64** | `x86_64-windows-msvc`, VS 2022 Build Tools + Win10/11 SDK (`ml64.exe` only; no `midl.exe`/`mc.exe`), `vcpkg` `icu:x64-windows` | `zig-out\` (`out\<profile>\`) | `B6` bring-up + `VS_VERSION_INFO`/`debug-static` fixes landed, awaiting native certification; runbook [doc/windows-handoff.md](doc/windows-handoff.md); CI [.github/workflows/zig-windows.yml](.github/workflows/zig-windows.yml) |
 
 ### macOS ARM64
 
@@ -122,7 +122,7 @@ contract**. This does not provide a Node.js runtime: there is no
 Node runtime compatibility. Addons requesting `NAPI_VERSION` >
 10 (including `NAPI_VERSION_EXPERIMENTAL`) are rejected at load.
 (`Q1.1` additive `NAPI_VERSION=9/10` exports and multi-addon registry
-support landed on `modernize/phase4`; a separate Zig + `libuv` host
+support promoted into `modernize/baseline`; a separate Zig + `libuv` host
 runtime [`H1`] is documented in
 [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md).)
 
