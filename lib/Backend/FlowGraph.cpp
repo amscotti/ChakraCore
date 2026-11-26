@@ -59,25 +59,28 @@ IR::LabelInstr * FlowGraph::DeleteLeaveChainBlocks(IR::BranchInstr *leaveInstr, 
     return exitLabel;
 }
 
-bool FlowGraph::Dominates(Region *region1, Region *region2)
+bool FlowGraph::Dominates(Region *exitLabelRegion, Region *finallyRegion)
 {
-    Assert(region1);
-    Assert(region2);
-    Region *startR1 = region1;
-    Region *startR2 = region2;
-    int region1Depth = 0;
-    while (startR1 != nullptr)
+    Assert(exitLabelRegion);
+    Assert(finallyRegion);
+    Region *guardedTryRegion = finallyRegion->GetMatchingTryRegion();
+    Assert(guardedTryRegion);
+    if (guardedTryRegion == nullptr)
     {
-        region1Depth++;
-        startR1 = startR1->GetParent();
+        return false;
     }
-    int region2Depth = 0;
-    while (startR2 != nullptr)
+
+    // An exit stays inside the try-finally only if its target region is the
+    // matching try region itself or nested inside it; depth-only comparison
+    // misclassifies exits to the same-depth try region as early exits.
+    for (Region *region = exitLabelRegion; region != nullptr; region = region->GetParent())
     {
-        region2Depth++;
-        startR2 = startR2->GetParent();
+        if (region == guardedTryRegion)
+        {
+            return true;
+        }
     }
-    return region1Depth > region2Depth;
+    return false;
 }
 
 bool FlowGraph::DoesExitLabelDominate(IR::BranchInstr *leaveInstr)

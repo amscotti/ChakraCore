@@ -110,7 +110,7 @@ NESTED_ENTRY AsmJsJitCall, _TEXT, NoHandler
     str     d0, [x20, #8]       ; float return (d0)
     ldr     x19, [fp, #16+0*8]
     ldr     x20, [fp, #16+1*8]
-    ldr     x21, [fp, #16+2*8]
+    ldp     x21, x22, [fp, #16+2*8]
     mov     sp, fp              ; back to bridge frame
     EPILOG_RESTORE_REG_PAIR_INDEXED  fp, lr, (16+16*8)
     ret

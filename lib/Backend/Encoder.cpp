@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
@@ -561,7 +562,12 @@ Encoder::Encode()
     unwindInfo.FinalizeUnwindInfo((BYTE*)m_func->GetJITOutput()->GetCodeAddress(), (DWORD)codeSize);
 #else
     UnwindInfoManager &unwindInfo = m_func->m_unwindInfo;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // EmitDarwinArm64EhFrame records functionStart as FDE pc_begin rather than reading code bytes.
+    unwindInfo.FinalizeUnwindInfo((BYTE*)m_func->GetJITOutput()->GetCodeAddress(), (DWORD)codeSize);
+#else
     unwindInfo.FinalizeUnwindInfo((BYTE*)localAddress, (DWORD)codeSize);
+#endif
 #endif
 
     char * localXdataAddr = nullptr;

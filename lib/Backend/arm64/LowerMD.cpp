@@ -7754,8 +7754,8 @@ LowererMD::GenerateFastRecyclerAlloc(size_t allocSize, IR::RegOpnd* newObjDst, I
     IR::BranchInstr * branchToAllocHelperInstr = IR::BranchInstr::New(Js::OpCode::BHI, allocHelperLabel, this->m_func);
     insertionPointInstr->InsertBefore(branchToAllocHelperInstr);
 
-    // LDR allocator->freeObjectList, nextMemBlock
-    IR::Instr * setFreeObjectListInstr = IR::Instr::New(Js::OpCode::LDR, freeObjectListOpnd, nextMemBlockOpnd, this->m_func);
+    // STR allocator->freeObjectList, nextMemBlock
+    IR::Instr * setFreeObjectListInstr = IR::Instr::New(Js::OpCode::STR, freeObjectListOpnd, nextMemBlockOpnd, this->m_func);
     insertionPointInstr->InsertBefore(setFreeObjectListInstr);
     LegalizeMD::LegalizeInstr(setFreeObjectListInstr);
 
@@ -9164,6 +9164,32 @@ LowererMD::GenerateFastInlineBuiltInMathRound(IR::Instr* instr)
         instr->InsertBefore(IR::Instr::New(Js::OpCode::FMOV_GEN, negZeroReg, floatOpnd, instr->m_func));
     }
 
+    IR::Opnd * intOpnd = IR::RegOpnd::New(TyInt32, this->m_func);
+    IR::LabelInstr * ltHalfLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
+    IR::LabelInstr * addHalfLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
+
+    // Handle [-0.5, 0.5) directly before adding 0.5 so inputs like 0.49999999999999994
+    // (0.5 - 2^-54, where +0.5 rounds to 1.0 in IEEE-754 double) still yield 0.
+    // Checking 0.5 > floatOpnd leaves NaN in the add/FCVTM path so FPSR.IOC bails out.
+    IR::Opnd * pointFiveCmp = IR::MemRefOpnd::New(m_func->GetThreadContextInfo()->GetDoublePointFiveAddr(), IRType::TyFloat64, this->m_func, IR::AddrOpndKindDynamicDoubleRef);
+    this->m_lowerer->InsertCompareBranch(pointFiveCmp, floatOpnd, Js::OpCode::BrGt_A, ltHalfLabel, instr);
+    Lowerer::InsertBranch(LowererMD::MDUncondBranchOpcode, addHalfLabel, instr);
+
+    instr->InsertBefore(ltHalfLabel);
+    IR::Opnd * negPointFive = IR::MemRefOpnd::New(m_func->GetThreadContextInfo()->GetDoubleNegPointFiveAddr(), IRType::TyFloat64, this->m_func, IR::AddrOpndKindDynamicDoubleRef);
+    this->m_lowerer->InsertCompareBranch(floatOpnd, negPointFive, Js::OpCode::BrLt_A, addHalfLabel, instr);
+    if (negZeroReg)
+    {
+        IR::BranchInstr * tbnzInstr = IR::BranchInstr::New(Js::OpCode::TBNZ, bailoutLabel, this->m_func);
+        tbnzInstr->SetSrc1(negZeroReg);
+        tbnzInstr->SetSrc2(IR::IntConstOpnd::New(63, TyMachReg, this->m_func));
+        instr->InsertBefore(tbnzInstr);
+    }
+    Lowerer::InsertMove(intOpnd, IR::IntConstOpnd::New(0, TyInt32, this->m_func), instr);
+    Lowerer::InsertBranch(LowererMD::MDUncondBranchOpcode, doneLabel, instr);
+
+    instr->InsertBefore(addHalfLabel);
+
     // Add 0.5
     IR::Opnd * pointFive = IR::MemRefOpnd::New(m_func->GetThreadContextInfo()->GetDoublePointFiveAddr(), IRType::TyFloat64, this->m_func, IR::AddrOpndKindDynamicDoubleRef);
     this->m_lowerer->InsertAdd(false, floatOpnd, floatOpnd, pointFive, instr);
@@ -9174,7 +9200,6 @@ LowererMD::GenerateFastInlineBuiltInMathRound(IR::Instr* instr)
     instr->InsertBefore(setFPSRInstr);
 
     // FCVTM intOpnd, floatOpnd
-    IR::Opnd * intOpnd = IR::RegOpnd::New(TyInt32, this->m_func);
     instr->InsertBefore(IR::Instr::New(Js::OpCode::FCVTM, intOpnd, floatOpnd, instr->m_func));
 
     // FCVTM would set FPSR.IOC (0th bit in FPSR) if the source cannot be represented within the destination register
@@ -10423,7 +10448,7 @@ LowererMD::LowerTypeof(IR::Instr* typeOfInstr)
     //   MOV dst, "undefined"
     //   B $done
     typeOfInstr->InsertBefore(falsyLabel);
-    IR::Opnd * undefinedDisplayStringOpnd = IR::IndirOpnd::New(typeDisplayStringsArrayOpnd, Js::TypeIds_Undefined, TyMachPtr, func);
+    IR::Opnd * undefinedDisplayStringOpnd = IR::IndirOpnd::New(typeDisplayStringsArrayOpnd, Js::TypeIds_Undefined * sizeof(Js::Var), TyMachPtr, func);
     m_lowerer->InsertMove(dst, undefinedDisplayStringOpnd, typeOfInstr);
     m_lowerer->InsertBranch(Js::OpCode::Br, doneLabel, typeOfInstr);
 

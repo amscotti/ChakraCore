@@ -1505,11 +1505,11 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         {
             if (size == 8)
             {
-                bytes = EmitNeonUmov64(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()), 0, (size == 8) ? SIZE_1D : SIZE_1S);
+                bytes = EmitNeonUmov64(Emitter, this->GetRegEncode(dst->AsRegOpnd()), this->GetFloatRegEncode(src1->AsRegOpnd()), 0, SIZE_1D);
             }
             else
             {
-                bytes = EmitNeonUmov(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()), 0, (size == 8) ? SIZE_1D : SIZE_1S);
+                bytes = EmitNeonUmov(Emitter, this->GetRegEncode(dst->AsRegOpnd()), this->GetFloatRegEncode(src1->AsRegOpnd()), 0, SIZE_1S);
             }
         }
         break;

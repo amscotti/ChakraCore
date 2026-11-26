@@ -3758,11 +3758,14 @@ namespace Js
 #ifdef ENABLE_WASM
             if (body->IsWasmFunction() && body->GetByteCodeCount() == 0)
             {
-                // The only valid 2 entrypoints if the function hasn't been parsed
-                // ARM64: JS dispatch uses the Var-convention external entry
+                // The only valid entrypoints if the function hasn't been parsed
+                // ARM64: default/original stays on AsmJsDefaultEntryThunk for
+                // slot-image callers, while JS dispatch uses AsmJsExternalEntryPoint
                 // (installed at link); EnsureWasmEntrypoint parses on first call.
 #if defined(_M_ARM64)
-                return directEntryPoint == (JavascriptMethod)&Js::AsmJsExternalEntryPoint || directEntryPoint == WasmLibrary::WasmLazyTrapCallback;
+                return directEntryPoint == AsmJsDefaultEntryThunk
+                    || directEntryPoint == (JavascriptMethod)&Js::AsmJsExternalEntryPoint
+                    || directEntryPoint == WasmLibrary::WasmLazyTrapCallback;
 #else
                 return directEntryPoint == AsmJsDefaultEntryThunk || directEntryPoint == WasmLibrary::WasmLazyTrapCallback;
 #endif

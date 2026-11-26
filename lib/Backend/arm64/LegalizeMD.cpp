@@ -471,7 +471,11 @@ void LegalizeMD::LegalizeSymOffset(IR::Instr * instr, IR::SymOpnd * symOpnd, Leg
 
     // Determine scale factor for scaled offsets
     int scale;
-    if (symOpnd->GetSize() == 8)
+    if (symOpnd->GetSize() == 16)
+    {
+        scale = 4;
+    }
+    else if (symOpnd->GetSize() == 8)
     {
         scale = 3;
     }

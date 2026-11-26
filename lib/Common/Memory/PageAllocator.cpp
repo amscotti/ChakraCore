@@ -276,7 +276,13 @@ PageSegmentBase<T>::Initialize(DWORD allocFlags, bool excludeGuardPages)
     {
         if (freePageCount != 0)
         {
+#if defined(__APPLE__) && defined(_M_ARM64)
+            // Apple ARM64 MAP_JIT segments cannot be VirtualProtect'ed to PAGE_NOACCESS;
+            // their per-thread write windows are managed by CustomHeapJitWriteProtect.
+            if (this->GetAllocator()->processHandle == GetCurrentProcess() && !this->IsInCustomHeapAllocator())
+#else
             if (this->GetAllocator()->processHandle == GetCurrentProcess())
+#endif
             {
                 DWORD oldProtect;
                 BOOL vpresult = VirtualProtect(this->address, this->GetAvailablePageCount() * AutoSystemInfo::PageSize, PAGE_NOACCESS, &oldProtect);
@@ -376,7 +382,11 @@ PageSegmentBase<T>::AllocPages(uint pageCount)
             Assert(freePageCount == (uint)this->GetCountOfFreePages());
 
 #ifdef PAGEALLOCATOR_PROTECT_FREEPAGE
+#if defined(__APPLE__) && defined(_M_ARM64)
+            if (this->GetAllocator()->processHandle == GetCurrentProcess() && !this->IsInCustomHeapAllocator())
+#else
             if (this->GetAllocator()->processHandle == GetCurrentProcess())
+#endif
             {
                 DWORD oldProtect;
                 BOOL vpresult = VirtualProtect(allocAddress, pageCount * AutoSystemInfo::PageSize, PAGE_READWRITE, &oldProtect);
@@ -485,7 +495,11 @@ PageSegmentBase<T>::ReleasePages(_In_ void * address, uint pageCount)
     Assert(freePageCount == (uint)this->GetCountOfFreePages());
 
 #ifdef PAGEALLOCATOR_PROTECT_FREEPAGE
+#if defined(__APPLE__) && defined(_M_ARM64)
+    if (this->GetAllocator()->processHandle == GetCurrentProcess() && !this->IsInCustomHeapAllocator())
+#else
     if (this->GetAllocator()->processHandle == GetCurrentProcess())
+#endif
     {
         DWORD oldProtect;
         BOOL vpresult = VirtualProtect(address, pageCount * AutoSystemInfo::PageSize, PAGE_NOACCESS, &oldProtect);
@@ -1680,6 +1694,17 @@ template<typename TVirtualAlloc, typename TSegment, typename TPageSegment>
 void
 PageAllocatorBase<TVirtualAlloc, TSegment, TPageSegment>::MemSetLocal(_In_ void *dst, int val, size_t sizeInBytes)
 {
+#if defined(__APPLE__) && defined(_M_ARM64)
+    if (this->type == PageAllocatorType::PageAllocatorType_CustomHeap && this->processHandle == GetCurrentProcess())
+    {
+        // CustomHeap release paths call CustomHeapJitWriteProtect(FALSE) before ReleasePages;
+        // open the calling thread's MAP_JIT write window for debug fills, then reclose it.
+        VIRTUALJitWriteProtect(TRUE);
+        memset(dst, val, sizeInBytes);
+        VIRTUALJitWriteProtect(FALSE);
+        return;
+    }
+#endif
     memset(dst, val, sizeInBytes);
 }
 
