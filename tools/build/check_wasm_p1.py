@@ -67,6 +67,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 EXPECTED_P1_TOTAL = 383
+SIMD_SUITES = ("wasm.simd",)
+EXPECTED_SIMD_TOTAL = 14
 P1_SUITES = ["WasmSpec", "wasm", "AsmJs", "ASMJSParser"]
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
@@ -512,11 +514,11 @@ def runtests_arch_flag(plat=None, machine=None):
     return "--x64"
 
 
-def run_suite(runtests, ch, jit=False):
-    """Run the gated P1 command with reporter flags; return (rc, lines).
+def run_suite(runtests, ch, jit=False, include_simd=False):
+    """Run the gated P1 (and optional wasm.simd) command with reporter flags; return (rc, lines).
 
-    jit=False runs the P1 interpreted gate (--variants=interpreted plus
-    -nonative). jit=True runs the P2 FullJIT gate over the same entry
+    jit=False runs the interpreted gate (--variants=interpreted plus
+    -nonative). jit=True runs the FullJIT gate over the same entry
     set (--variants=dynapogo: -forceNative -off:simpleJit).
     """
     abs_ch = os.path.abspath(ch)
@@ -533,10 +535,11 @@ def run_suite(runtests, ch, jit=False):
     else:
         variant_args = ["--variants=interpreted",
                         "--extra-flags=-nonative"]
+    suites = list(P1_SUITES) + (list(SIMD_SUITES) if include_simd else [])
     cmd = ([sys.executable, abs_runtests, "--test", runtests_arch_flag()]
            + variant_args
            + ["--include-slow", "-v", "-j", "3",
-              "--binary=" + abs_ch] + P1_SUITES)
+              "--binary=" + abs_ch] + suites)
     print("check_wasm_p1: running: %s" % " ".join(cmd))
     print("check_wasm_p1: cwd %s (-v + --include-slow added so every "
           "P1 entry emits a joinable block)" % test_root)
@@ -561,31 +564,43 @@ def run_suite(runtests, ch, jit=False):
 
 
 def grade_log(lines, test_root, manifest_path, expected_total=None,
-              mode="interp"):
+              mode="interp", include_simd=False, suites=None):
     """Load manifest/rlexe, join log lines, and return (rc, detail).
 
-    rc 0 iff the gate passes, 1 for P1 verdict failure (failed,
-    missing, unmatched, duplicate, Total mismatch, P1-pin drift),
+    rc 0 iff the gate passes, 1 for verdict failure (failed,
+    missing, unmatched, duplicate, Total mismatch, pin drift),
     2 for unparseable inputs. mode selects the joined command shape
     ("interp" or "jit"); see grade_join.
     """
-    if expected_total is None:
-        expected_total = EXPECTED_P1_TOTAL
     entries, _meta = load_manifest(manifest_path)
     manifest_ids = {e["test-id"] for e in entries}
     p1_ids = [e["test-id"] for e in entries if e["phase"] == "P1"]
-    id_to_ref, _t2r, _by = build_id_map(test_root)
+    if include_simd:
+        simd_ids = [e["test-id"] for e in entries if e["suite"] in SIMD_SUITES]
+        required_ids = p1_ids + simd_ids
+        if expected_total is None:
+            if len(p1_ids) != EXPECTED_P1_TOTAL or len(simd_ids) != EXPECTED_SIMD_TOTAL:
+                expected_total = EXPECTED_P1_TOTAL + EXPECTED_SIMD_TOTAL
+            else:
+                expected_total = len(required_ids)
+    else:
+        required_ids = p1_ids
+        if expected_total is None:
+            expected_total = EXPECTED_P1_TOTAL
+    if suites is None:
+        suites = (list(P1_SUITES) + list(SIMD_SUITES)) if include_simd else P1_SUITES
+    id_to_ref, _t2r, _by = build_id_map(test_root, suites=suites)
     blocks = parse_blocks(lines)
     try:
         total_parsed = parse_total(normalize_lines(lines))
     except ValueError as e:
         # No trustworthy Total: the join is incomplete by definition.
-        detail = grade_join(blocks, id_to_ref, manifest_ids, p1_ids,
+        detail = grade_join(blocks, id_to_ref, manifest_ids, required_ids,
                             expected_total, mode)
         print_report(detail, None, "check_wasm_p1: FAIL: %s" % e)
         return 1, detail
     total_err = check_total(total_parsed, blocks)
-    detail = grade_join(blocks, id_to_ref, manifest_ids, p1_ids,
+    detail = grade_join(blocks, id_to_ref, manifest_ids, required_ids,
                         expected_total, mode)
     detail["total_parsed"] = total_parsed
     detail["total_err"] = total_err
@@ -876,16 +891,52 @@ def self_test():
                 ] + good[2:-1]
         check("lookalike Total", look, test_root, man, expected=4,
               want_ok=False)
-        # Real-manifest pin: the checked-in manifest must hold 383 P1.
+        # include_simd=True enforces wasm.simd alongside P1.
+        write_rlexe(test_root, "wasm.simd", [("simd_ok.js", "-WasmSimd", "")])
+        simd_man_path = os.path.join(test_root, "simd-man.json")
+        simd_man = list(man) + [{
+            "test-id": "wasm.simd[0]", "suite": "wasm.simd",
+            "features": ["mvp", "simd"], "runnerTags": [], "phase": "P3",
+        }]
+        with open(simd_man_path, "w", encoding="utf-8") as mf:
+            json.dump({"entries": simd_man}, mf)
+        simd_id_map, _, _ = build_id_map(test_root, suites=["S1", "S2", "wasm.simd"])
+        simd_refs = [simd_id_map[i] for i in sorted(simd_id_map)]
+        simd_good = _log_for(simd_refs, {}, test_root, binary)
+        rc_sg, _ = grade_log(simd_good, test_root, simd_man_path,
+                             expected_total=5, mode="interp", include_simd=True,
+                             suites=["S1", "S2", "wasm.simd"])
+        if rc_sg == 0:
+            print("self-test %-24s -> PASS (verdict=accept)" % "include_simd green")
+        else:
+            print("self-test %-24s -> FAIL (verdict=reject want accept)" % "include_simd green")
+            bad += 1
+        rc_sb, _ = grade_log(good, test_root, simd_man_path,
+                             expected_total=5, mode="interp", include_simd=True,
+                             suites=["S1", "S2", "wasm.simd"])
+        if rc_sb == 1:
+            print("self-test %-24s -> PASS (verdict=reject)" % "include_simd missing")
+        else:
+            print("self-test %-24s -> FAIL (verdict=accept want reject)" % "include_simd missing")
+            bad += 1
+        # Real-manifest pin: the checked-in manifest must hold 383 P1 and 14 wasm.simd.
         real_path = os.path.join(ROOT, "test", "wasm-arm64-manifest.json")
         entries, _m = load_manifest(real_path)
         p1n = sum(1 for e in entries if e["phase"] == "P1")
+        simdn = sum(1 for e in entries if e["suite"] in SIMD_SUITES)
         if p1n == EXPECTED_P1_TOTAL:
             print("self-test %-24s -> PASS (P1 pin %d)" % ("real pin",
                                                          EXPECTED_P1_TOTAL))
         else:
             print("self-test %-24s -> FAIL (P1 pin got %d)"
                   % ("real pin", p1n))
+            bad += 1
+        if simdn == EXPECTED_SIMD_TOTAL:
+            print("self-test %-24s -> PASS (wasm.simd pin %d)"
+                  % ("simd pin", EXPECTED_SIMD_TOTAL))
+        else:
+            print("self-test %-24s -> FAIL (wasm.simd pin got %d)"
+                  % ("simd pin", simdn))
             bad += 1
     # Outer-ceiling pin: a hung child must raise loudly, not hang.
     try:
@@ -909,6 +960,7 @@ def main(argv):
     log_path = None
     manifest_path = None
     jit = False
+    include_simd = False
     rest = []
     i = 0
     while i < len(args):
@@ -920,6 +972,9 @@ def main(argv):
             i += 2
         elif args[i] == "--jit":
             jit = True
+            i += 1
+        elif args[i] == "--include-simd":
+            include_simd = True
             i += 1
         else:
             rest.append(args[i])
@@ -938,7 +993,7 @@ def main(argv):
                 return 2
             test_root = os.path.dirname(os.path.abspath(runtests))
         else:
-            print("usage: check_wasm_p1.py [--jit] [--log SAVED.log] "
+            print("usage: check_wasm_p1.py [--jit] [--include-simd] [--log SAVED.log] "
                   "[<runtests.py> <ch>] [--manifest PATH]", file=sys.stderr)
             return 2
         if manifest_path is None:
@@ -957,10 +1012,10 @@ def main(argv):
         print("check_wasm_p1: replaying log %s (mode %s)"
               % (log_path, mode))
         rc, _detail = grade_log(lines, test_root, manifest_path,
-                                mode=mode)
+                                mode=mode, include_simd=include_simd)
         return rc
     if len(rest) != 2:
-        print("usage: check_wasm_p1.py [--jit] <runtests.py> <ch> "
+        print("usage: check_wasm_p1.py [--jit] [--include-simd] <runtests.py> <ch> "
               "[--manifest PATH]", file=sys.stderr)
         return 2
     runtests, ch = rest[0], rest[1]
@@ -976,12 +1031,12 @@ def main(argv):
         print("check_wasm_p1: missing file: %s" % manifest_path,
               file=sys.stderr)
         return 2
-    rc, lines = run_suite(runtests, ch, jit)
+    rc, lines = run_suite(runtests, ch, jit, include_simd=include_simd)
     if rc == 124:
         return 1
     print("check_wasm_p1: exit=%d" % rc)
     grc, _detail = grade_log(lines, test_root, manifest_path,
-                             mode=mode)
+                             mode=mode, include_simd=include_simd)
     # Non-P1 failures also set runtests exit 1; they are not the P1
     # verdict (task contract: nonzero iff P1 failed or join broke).
     # Only an unexpected runtests exit (not 0/1) overrides the grade.

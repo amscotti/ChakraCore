@@ -331,6 +331,14 @@ def verify_extracted_dir(target_dir, expected_profile=None):
             except RuntimeError as e:
                 errors.append(str(e))
                 continue
+            for rp in info.get("rpaths", []):
+                if ".zig-cache" in rp:
+                    errors.append("Mach-O '{}' has forbidden .zig-cache LC_RPATH '{}'".format(rel_p, rp))
+                elif rp.startswith(("/opt/", "/usr/local/")):
+                    errors.append("Mach-O '{}' has forbidden external LC_RPATH '{}'".format(rel_p, rp))
+                elif not rp.startswith("@"):
+                    errors.append("Mach-O '{}' has non-relocatable LC_RPATH '{}' (must start with '@')".format(
+                        rel_p, rp))
             uses_rpath_icu = False
             for dep in info["deps"]:
                 is_external = not dep.startswith(("@rpath/", "@loader_path/", "@executable_path/",
@@ -373,8 +381,13 @@ def verify_extracted_dir(target_dir, expected_profile=None):
                 errors.append(str(e))
                 continue
             for rp in elf_info["rpaths"]:
-                if rp.startswith(("/opt/", "/usr/local/")):
-                    errors.append("ELF '{}' has non-portable RPATH/RUNPATH '{}'".format(rel_p, rp))
+                if ".zig-cache" in rp:
+                    errors.append("ELF '{}' has forbidden .zig-cache RPATH/RUNPATH '{}'".format(rel_p, rp))
+                elif rp.startswith(("/opt/", "/usr/local/")):
+                    errors.append("ELF '{}' has forbidden /opt or /usr/local RPATH/RUNPATH '{}'".format(rel_p, rp))
+                elif not rp.startswith(("$ORIGIN", "/")):
+                    errors.append("ELF '{}' has relative RPATH/RUNPATH '{}' (must start with '$ORIGIN' or '/')".format(
+                        rel_p, rp))
             for dep in elf_info["needed"]:
                 if "libstdc++" in dep or "libc++" in dep:
                     errors.append("ELF '{}' has unexpected C++ runtime NEEDED '{}'".format(rel_p, dep))

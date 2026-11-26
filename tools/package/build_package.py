@@ -510,24 +510,54 @@ def stage_package(prefix, staging_dir, repo_root, version, target, profile=None,
                         prefix)
                 )
     elif is_windows:
-        if icu_mode == "bundled":
+        if icu_mode in ("auto", "bundled"):
+            search_dirs = []
+            seen_dirs = set()
+
+            def _add_win_dir(cand):
+                if not cand:
+                    return
+                norm = os.path.normcase(os.path.abspath(cand))
+                if norm not in seen_dirs and os.path.isdir(cand):
+                    seen_dirs.add(norm)
+                    search_dirs.append(cand)
+
+            _add_win_dir(os.path.join(prefix, "bin"))
+            _add_win_dir(prefix)
+            chakra_icu_dir = os.environ.get("CHAKRA_ICU_DIR", "").strip()
+            if chakra_icu_dir:
+                _add_win_dir(os.path.join(chakra_icu_dir, "bin"))
+                _add_win_dir(chakra_icu_dir)
+            icu_lib_dir = os.environ.get("ICU_LIB_DIR", "").strip()
+            if icu_lib_dir:
+                _add_win_dir(os.path.join(os.path.dirname(icu_lib_dir), "bin"))
+                _add_win_dir(icu_lib_dir)
+            icu_bin_dir = os.environ.get("ICU_BIN_DIR", "").strip()
+            if icu_bin_dir:
+                _add_win_dir(icu_bin_dir)
+
             win_icu = []
-            for d in (os.path.join(prefix, "bin"), prefix):
-                if os.path.isdir(d):
-                    for fn in sorted(os.listdir(d)):
-                        low = fn.lower()
-                        if low.endswith(".dll") and low.startswith(("icuuc", "icuin", "icudt")):
-                            src_dll = os.path.join(d, fn)
-                            if os.path.isfile(src_dll) and fn not in win_icu:
-                                copy_with_mode(src_dll, os.path.join(bin_dir, fn), 0o755)
-                                win_icu.append(fn)
-            if not win_icu:
+            seen_dlls = set()
+            for d in search_dirs:
+                for fn in sorted(os.listdir(d)):
+                    low = fn.lower()
+                    if low.endswith(".dll") and low.startswith(("icuuc", "icuin", "icudt")):
+                        src_dll = os.path.join(d, fn)
+                        if os.path.isfile(src_dll) and low not in seen_dlls:
+                            copy_with_mode(src_dll, os.path.join(bin_dir, fn), 0o755)
+                            win_icu.append(fn)
+                            seen_dlls.add(low)
+
+            if win_icu:
+                effective_icu_mode = "bundled"
+                bundled_icu_names = sorted(win_icu)
+            elif icu_mode == "bundled":
                 raise RuntimeError(
-                    "Requested --icu-mode=bundled on Windows, but no icu*.dll files were found in prefix '{}'".format(
+                    "Requested --icu-mode=bundled on Windows, but no icu*.dll files were found in prefix '{}', CHAKRA_ICU_DIR, or ICU_LIB_DIR".format(
                         prefix)
                 )
-            effective_icu_mode = "bundled"
-            bundled_icu_names = sorted(win_icu)
+            else:
+                effective_icu_mode = "external"
     else:
         if icu_mode == "bundled":
             effective_icu_mode, bundled_icu_names = bundle_linux_icu(bin_dir, lib_dir)

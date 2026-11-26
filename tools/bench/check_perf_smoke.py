@@ -64,8 +64,10 @@ DEFAULT_FAST_TESTS = (
 )
 
 MICRO_SUITE = "Micro"
-DEFAULT_ITERATIONS = 3
+DEFAULT_ITERATIONS = 9
+DEFAULT_WARMUP = 1
 DEFAULT_MAX_REGRESSION_PCT = 15.0
+DEFAULT_MAX_MAD_PCT = 15.0
 DEFAULT_TIMEOUT = 60.0
 
 POSTFIX_INCR_JS = """\
@@ -586,6 +588,14 @@ def _micro_ratio(entries_by_label, key):
     return p_med / c_med
 
 
+def evaluate_mad_variance(med_a, mad_a, med_b, mad_b, max_mad_pct=DEFAULT_MAX_MAD_PCT):
+    """Return (cand_mad_pct, base_mad_pct, high_variance) from median/MAD pairs."""
+    cand_mad_pct = (mad_b / med_b * 100.0) if (med_b and med_b > 0.0) else 0.0
+    base_mad_pct = (mad_a / med_a * 100.0) if (med_a and med_a > 0.0) else 0.0
+    high_var = max_mad_pct > 0.0 and max(cand_mad_pct, base_mad_pct) > max_mad_pct
+    return cand_mad_pct, base_mad_pct, high_var
+
+
 def run_ab_gate(
     binary_a,
     digest_a,
@@ -598,9 +608,10 @@ def run_ab_gate(
     runnable,
     excluded,
     iterations=DEFAULT_ITERATIONS,
-    warmup=0,
+    warmup=DEFAULT_WARMUP,
     timeout=DEFAULT_TIMEOUT,
     max_regression_pct=DEFAULT_MAX_REGRESSION_PCT,
+    max_mad_pct=DEFAULT_MAX_MAD_PCT,
     tol_map=None,
     baseline_map=None,
     runner=None,
@@ -627,6 +638,7 @@ def run_ab_gate(
 
     results = []
     failed_tests = []
+    inconclusive_tests = []
     advisory_warns = []
 
     with tempfile.TemporaryDirectory(prefix="perf-smoke-micro-") as tmp:
@@ -684,16 +696,29 @@ def run_ab_gate(
             med_a, mad_a = bench_run.median_mad(vals_a)
             med_b, mad_b = bench_run.median_mad(vals_b)
             cmp_info = compute_comparison(entry.kind, med_a, med_b, tol_pct)
+            cand_mad_pct, base_mad_pct, high_var = evaluate_mad_variance(
+                med_a, mad_a, med_b, mad_b, max_mad_pct=max_mad_pct
+            )
             adv = _advisory_note(entry, med_b, tol_pct, baseline_map)
             ratio_s, delta_s = _format_ratio_delta(cmp_info)
 
             if cmp_info["regressed"]:
                 reg_pct = cmp_info["regressionPct"]
                 reg_s = f"{reg_pct:.1f}%" if reg_pct is not None else "inf%"
-                reason = f"regressed {reg_s} > {tol_pct:.1f}%"
-                status_text = f"FAIL ({reason})"
-                status_key = "fail"
-                failed_tests.append((entry.label, reason))
+                if high_var:
+                    peak_mad = max(cand_mad_pct, base_mad_pct)
+                    reason = (
+                        f"high variance mad/median {peak_mad:.1f}% > {max_mad_pct:.1f}% "
+                        f"(delta {reg_s} > {tol_pct:.1f}%)"
+                    )
+                    status_text = f"INCONCLUSIVE ({reason})"
+                    status_key = "inconclusive"
+                    inconclusive_tests.append((entry.label, reason))
+                else:
+                    reason = f"regressed {reg_s} > {tol_pct:.1f}%"
+                    status_text = f"FAIL ({reason})"
+                    status_key = "fail"
+                    failed_tests.append((entry.label, reason))
             else:
                 status_text = "PASS"
                 status_key = "pass"
@@ -737,12 +762,14 @@ def run_ab_gate(
         "mode": "ab",
         "passed": passed_count,
         "failed": len(failed_tests),
+        "inconclusive": len(inconclusive_tests),
         "total": total_run,
         "excluded": len(excluded),
         "advisoryWarnings": advisory_warns,
+        "inconclusives": [{"test": n, "reason": r} for n, r in inconclusive_tests],
         "microPostfixPrefixRatioA": micro_a,
         "microPostfixPrefixRatioB": micro_b,
-        "verdict": "FAIL" if failed_tests else "PASS",
+        "verdict": "FAIL" if failed_tests else ("INCONCLUSIVE" if inconclusive_tests else "PASS"),
     }
     payload = {
         "mode": "ab",
@@ -752,6 +779,7 @@ def run_ab_gate(
         "warmup": warmup,
         "timeoutSec": timeout,
         "maxRegressionPct": max_regression_pct,
+        "maxMadPct": max_mad_pct,
         "tolerances": tol_map,
         "a": {"label": label_a, "binary": str(binary_a), "sha256": digest_a, "flags": flags_a},
         "b": {"label": label_b, "binary": str(binary_b), "sha256": digest_b, "flags": flags_b},
@@ -763,7 +791,10 @@ def run_ab_gate(
         msg = f"check_perf_smoke: FAIL ({len(failed_tests)}/{total_run} failed: {names})"
         print(msg, file=sys.stderr)
         return 1, payload
-    print(f"check_perf_smoke: PASS ({passed_count}/{total_run} tests within threshold)")
+    inconc_suffix = (
+        f", {len(inconclusive_tests)} inconclusive (high variance)" if inconclusive_tests else ""
+    )
+    print(f"check_perf_smoke: PASS ({passed_count}/{total_run} tests within threshold{inconc_suffix})")
     return 0, payload
 
 
@@ -774,9 +805,10 @@ def run_single_mode(
     runnable,
     excluded,
     iterations=DEFAULT_ITERATIONS,
-    warmup=0,
+    warmup=DEFAULT_WARMUP,
     timeout=DEFAULT_TIMEOUT,
     max_regression_pct=DEFAULT_MAX_REGRESSION_PCT,
+    max_mad_pct=DEFAULT_MAX_MAD_PCT,
     tol_map=None,
     baseline_map=None,
     strict_baseline=False,
@@ -801,6 +833,7 @@ def run_single_mode(
 
     results = []
     failed_tests = []
+    inconclusive_tests = []
     advisory_warns = []
 
     with tempfile.TemporaryDirectory(prefix="perf-smoke-micro-") as tmp:
@@ -838,6 +871,9 @@ def run_single_mode(
 
             vals = [r["value"] for r in runs]
             med, mad = bench_run.median_mad(vals)
+            cand_mad_pct, base_mad_pct, high_var = evaluate_mad_variance(
+                0.0, 0.0, med, mad, max_mad_pct=max_mad_pct
+            )
             adv = _advisory_note(entry, med, tol_pct, baseline_map)
             base_s = f"{adv['baselineMedian']:.1f}" if adv else "-"
             delta_s = f"{adv['deltaPct']:+.1f}%" if (adv and adv.get("deltaPct") is not None) else "-"
@@ -852,12 +888,21 @@ def run_single_mode(
             elif adv and adv.get("regressed"):
                 reg_pct = adv["regressionPct"]
                 reg_s = f"{reg_pct:.1f}%" if reg_pct is not None else "inf%"
-                reason = f"regressed {reg_s} > {tol_pct:.1f}% vs baseline"
-                if strict_baseline:
+                if strict_baseline and high_var:
+                    reason = (
+                        f"high variance mad/median {cand_mad_pct:.1f}% > {max_mad_pct:.1f}% "
+                        f"(delta {reg_s} > {tol_pct:.1f}% vs baseline)"
+                    )
+                    status_key = "inconclusive"
+                    status_text = f"INCONCLUSIVE ({reason})"
+                    inconclusive_tests.append((entry.label, reason))
+                elif strict_baseline:
+                    reason = f"regressed {reg_s} > {tol_pct:.1f}% vs baseline"
                     status_key = "fail"
                     status_text = f"FAIL ({reason})"
                     failed_tests.append((entry.label, reason))
                 else:
+                    reason = f"regressed {reg_s} > {tol_pct:.1f}% vs baseline"
                     status_text = f"ADVISORY WARN ({reason})"
                     advisory_warns.append(entry.label)
 
@@ -888,11 +933,13 @@ def run_single_mode(
         "mode": mode_name,
         "passed": passed_count,
         "failed": len(failed_tests),
+        "inconclusive": len(inconclusive_tests),
         "total": total_run,
         "excluded": len(excluded),
         "advisoryWarnings": advisory_warns,
+        "inconclusives": [{"test": n, "reason": r} for n, r in inconclusive_tests],
         "microPostfixPrefixRatio": micro_ratio,
-        "verdict": "FAIL" if failed_tests else "PASS",
+        "verdict": "FAIL" if failed_tests else ("INCONCLUSIVE" if inconclusive_tests else "PASS"),
     }
     payload = {
         "mode": mode_name,
@@ -902,6 +949,7 @@ def run_single_mode(
         "warmup": warmup,
         "timeoutSec": timeout,
         "maxRegressionPct": max_regression_pct,
+        "maxMadPct": max_mad_pct,
         "tolerances": tol_map,
         "binary": str(binary),
         "sha256": digest,
@@ -913,7 +961,12 @@ def run_single_mode(
         names = ", ".join(f"{name} ({why})" for name, why in failed_tests)
         print(f"check_perf_smoke: FAIL ({len(failed_tests)}/{total_run} failed: {names})", file=sys.stderr)
         return 1, payload
-    warn_suffix = f", {len(advisory_warns)} advisory warning(s)" if advisory_warns else ""
+    parts = []
+    if inconclusive_tests:
+        parts.append(f"{len(inconclusive_tests)} inconclusive (high variance)")
+    if advisory_warns:
+        parts.append(f"{len(advisory_warns)} advisory warning(s)")
+    warn_suffix = f", {', '.join(parts)}" if parts else ""
     print(f"check_perf_smoke: PASS ({passed_count}/{total_run} smoke checks clean{warn_suffix})")
     return 0, payload
 
@@ -1046,6 +1099,7 @@ else:
             "--binary-b", str(stub_fast),
             "--tests", "Kraken/stanford-crypto-ccm.js,Octane/crypto.js",
             "--iterations", "3",
+            "--warmup", "0",
             "--json-out", str(json_out),
         ])
         trace_lines = trace_log.read_text(encoding="utf-8").splitlines()
@@ -1069,6 +1123,40 @@ else:
         )
         bad += report("interleaved A,B,A,B order verified", trace_lines == want_order,
                       detail="" if trace_lines == want_order else f"got {trace_lines}")
+
+        # 2b. High-variance (mad/median > 15%) regression is treated cleanly as INCONCLUSIVE (rc=0),
+        #     while low-variance regression fails hard (rc=1).
+        var_log = root / "var_counter.txt"
+        stub_noisy = root / "stub_noisy.py"
+        _write_stub_ch(stub_noisy, f"""
+import sys
+p = {str(var_log)!r}
+try:
+    n = int(open(p).read())
+except Exception:
+    n = 0
+open(p, "w").write(str(n + 1))
+# Cycle across [90..250]: after 1 warmup, 9 runs hit [110..270] -> med ~190, mad=40 (mad/med ~21% > 15%)
+vals = [90, 110, 130, 150, 170, 190, 210, 230, 250, 270]
+print("### TIME: %d ms" % vals[n % len(vals)])
+""")
+        json_var = root / "var_report.json"
+        rc_var, out_var, _ = run_quiet([
+            "--binary-a", str(stub_base),
+            "--binary-b", str(stub_noisy),
+            "--tests", "Kraken/stanford-crypto-ccm.js",
+            "--iterations", "9",
+            "--warmup", "1",
+            "--json-out", str(json_var),
+        ])
+        var_payload = json.loads(json_var.read_text(encoding="utf-8"))
+        bad += report(
+            "high mad/median variance marks inconclusive rc=0",
+            rc_var == 0 and "INCONCLUSIVE" in out_var
+            and var_payload["summary"]["inconclusive"] == 1
+            and var_payload["summary"]["failed"] == 0,
+            repr(var_payload.get("summary")),
+        )
 
         # 2. Time regression > 15% fails rc=1 and names exact regressed test.
         rc_time_fail, _, err_time = run_quiet([
@@ -1198,12 +1286,14 @@ def parse_args(argv):
                     help="exclude built-in micro-probes from default selection")
     ap.add_argument("--iterations", type=int, default=DEFAULT_ITERATIONS,
                     help=f"measured iterations per config per test (default: {DEFAULT_ITERATIONS})")
-    ap.add_argument("--warmup", type=int, default=0,
-                    help="unmeasured warmup iterations per test (default: 0)")
+    ap.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
+                    help=f"unmeasured warmup iterations per test (default: {DEFAULT_WARMUP})")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
                     help=f"per-run timeout in seconds (default: {DEFAULT_TIMEOUT:g})")
     ap.add_argument("--max-regression-pct", type=float, default=DEFAULT_MAX_REGRESSION_PCT,
                     help=f"maximum allowed regression %% (default: {DEFAULT_MAX_REGRESSION_PCT:g})")
+    ap.add_argument("--max-mad-pct", type=float, default=DEFAULT_MAX_MAD_PCT,
+                    help=f"maximum mad/median %% before a regressed result is marked inconclusive (0 disables, default: {DEFAULT_MAX_MAD_PCT:g})")
     ap.add_argument("--tolerance", action="append", default=[],
                     help="per-test tolerance override TEST=PCT (repeatable)")
     ap.add_argument("--json-out", "-o", "--output", dest="json_out", default="",
@@ -1229,6 +1319,8 @@ def main(argv=None, bench_dir=None, runner=None):
             raise UsageError(f"--timeout must be > 0, got {args.timeout}")
         if not math.isfinite(args.max_regression_pct) or args.max_regression_pct < 0.0:
             raise UsageError(f"--max-regression-pct must be >= 0, got {args.max_regression_pct}")
+        if not math.isfinite(args.max_mad_pct) or args.max_mad_pct < 0.0:
+            raise UsageError(f"--max-mad-pct must be >= 0, got {args.max_mad_pct}")
 
         tol_map = parse_tolerances(args.tolerance)
         baseline_map = load_baseline_json(args.baseline_json) if args.baseline_json else None
@@ -1261,6 +1353,7 @@ def main(argv=None, bench_dir=None, runner=None):
                 warmup=args.warmup,
                 timeout=args.timeout,
                 max_regression_pct=args.max_regression_pct,
+                max_mad_pct=args.max_mad_pct,
                 tol_map=tol_map,
                 baseline_map=baseline_map,
                 runner=runner,
@@ -1274,6 +1367,7 @@ def main(argv=None, bench_dir=None, runner=None):
                     warmup=args.warmup,
                     timeout=args.timeout,
                     max_regression_pct=args.max_regression_pct,
+                    max_mad_pct=args.max_mad_pct,
                     tol_map=tol_map,
                     baseline_map=baseline_map,
                     strict_baseline=args.strict_baseline,
@@ -1288,6 +1382,7 @@ def main(argv=None, bench_dir=None, runner=None):
                     warmup=args.warmup,
                     timeout=args.timeout,
                     max_regression_pct=args.max_regression_pct,
+                    max_mad_pct=args.max_mad_pct,
                     tol_map=tol_map,
                     baseline_map=baseline_map,
                     runner=runner,
@@ -1301,6 +1396,7 @@ def main(argv=None, bench_dir=None, runner=None):
                     warmup=args.warmup,
                     timeout=args.timeout,
                     max_regression_pct=args.max_regression_pct,
+                    max_mad_pct=args.max_mad_pct,
                     tol_map=tol_map,
                     baseline_map=baseline_map,
                     runner=runner,
@@ -1312,6 +1408,7 @@ def main(argv=None, bench_dir=None, runner=None):
                     warmup=args.warmup,
                     timeout=args.timeout,
                     max_regression_pct=args.max_regression_pct,
+                    max_mad_pct=args.max_mad_pct,
                     tol_map=tol_map,
                     baseline_map=None,
                     strict_baseline=False,

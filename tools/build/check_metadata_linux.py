@@ -521,6 +521,80 @@ def nm_dynamic_symbols(path):
     return parse_nm_symbol_names(out)
 
 
+def parse_nm_archive_members(out):
+    """Parse per-member symbol sets from GNU/LLVM/BSD `nm` output on an archive."""
+    members = {}
+    current = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(("nm:", "llvm-nm:")):
+            continue
+        if line.endswith(":"):
+            header = line[:-1]
+            if header.endswith(")") and "(" in header:
+                header = header.rsplit("(", 1)[1][:-1]
+            member = os.path.basename(header.strip())
+            if member and not member.startswith("__.SYMDEF"):
+                current = member
+                members.setdefault(current, set())
+            else:
+                current = None
+            continue
+        toks = line.split()
+        if not toks:
+            continue
+        if current is None:
+            continue
+        if len(toks) == 1:
+            sym = toks[0]
+        elif toks[0] in ("U", "u", "w", "W"):
+            sym = toks[1]
+        elif len(toks) >= 3 and toks[1] in ("U", "u", "w", "W", "T", "t", "D", "d", "B", "b", "R", "r", "S", "s"):
+            sym = toks[2]
+        else:
+            sym = toks[-1]
+        members[current].add(sym)
+    return members
+
+
+def _is_ar_archive(path):
+    try:
+        if os.path.getsize(path) < 128:
+            return False
+        with open(path, "rb") as f:
+            return f.read(8) == b"!<arch>\n"
+    except OSError:
+        return False
+
+
+def nm_archive_undefined_by_member(path):
+    """Per-member undefined symbol sets in an archive via `nm -u` (plus `ar t`)."""
+    rc, out, err = common.run_capture(["nm", "-u", path])
+    if rc != 0:
+        raise ValueError("nm -u %s failed (rc=%d err=%r)"
+                         % (path, rc, err))
+    members = parse_nm_archive_members(out)
+    if _is_ar_archive(path):
+        ar_rc, ar_out, _ = common.run_capture(["ar", "t", path])
+        if ar_rc == 0:
+            for raw in ar_out.splitlines():
+                m = os.path.basename(raw.strip())
+                if m and m != "/" and not m.startswith("__.SYMDEF"):
+                    members.setdefault(m, set())
+    return members
+
+
+def nm_archive_all_by_member(path):
+    """Per-member defined+undefined symbol sets in an archive via `nm`."""
+    rc, out, err = common.run_capture(["nm", path])
+    if rc != 0:
+        raise ValueError("nm %s failed (rc=%d err=%r)"
+                         % (path, rc, err))
+    return parse_nm_archive_members(out)
+
+
 def nm_archive_undefined(path):
     """Undefined symbol names in an archive via `nm -u`."""
     rc, out, err = common.run_capture(["nm", "-u", path])
@@ -617,14 +691,63 @@ def check_elf_sanitizer_symbols(path, sanitize=None):
     return check_sanitizer_symbols_list(path, names, sanitize)
 
 
+def _is_asm_archive_member(member):
+    return os.path.basename(member).lower().endswith(".s.o")
+
+
+def check_archive_members_sanitizer_symbols(path, member_undefs, sanitize=None, member_all=None):
+    """Verify sanitizer instrumentation coverage per object member in an archive."""
+    if not member_undefs:
+        return "%s: archive yielded no object members" % path
+    if sanitize is None:
+        for member, names in sorted(member_undefs.items()):
+            err = check_no_sanitizer_symbols_list("%s(%s)" % (path, member), names)
+            if err is not None:
+                return err
+        return None
+    if sanitize not in SANITIZE_MODES:
+        raise ValueError("invalid sanitize mode %r" % sanitize)
+    req = SANITIZER_REQUIRED_SYM_PREFIXES[sanitize]
+    forbid = SANITIZER_FORBIDDEN_SYM_PREFIXES[sanitize]
+    all_names = set()
+    for names in member_undefs.values():
+        all_names.update(names)
+    if not any(n.startswith(req) for n in all_names):
+        return ("%s: lacks %s sanitizer instrumentation symbols (%s)"
+                % (path, sanitize, ", ".join(req)))
+    for member, names in sorted(member_undefs.items()):
+        label = "%s(%s)" % (path, member)
+        foreign = sorted({n for n in names if n.startswith(forbid)})
+        if foreign:
+            return ("%s: carries foreign sanitizer symbols for %s: %r"
+                    % (label, sanitize, foreign[:8]))
+        if _is_asm_archive_member(member):
+            continue
+        if any(n.startswith(req) for n in names):
+            continue
+        if os.path.basename(member) == "u8a_codec.o":
+            if member_all is None and os.path.isfile(path):
+                try:
+                    member_all = nm_archive_all_by_member(path)
+                except (OSError, ValueError):
+                    member_all = {}
+            all_u8a = (member_all or {}).get(member, set()) | set(names)
+            if any("debug.panic" in s or "zig_probe_stack" in s for s in all_u8a):
+                continue
+            return ("%s: lacks %s sanitizer or Zig safety-check symbols"
+                    % (label, sanitize))
+        if sanitize in ("address", "thread"):
+            return ("%s: lacks %s sanitizer instrumentation symbols (%s)"
+                    % (label, sanitize, ", ".join(req)))
+    return None
+
+
 def check_archive_sanitizer_symbols(path, sanitize=None):
     try:
-        names = nm_archive_undefined(path)
+        member_undefs = nm_archive_undefined_by_member(path)
     except (OSError, ValueError) as e:
         return str(e)
-    if sanitize is None:
-        return check_no_sanitizer_symbols_list(path, names)
-    return check_sanitizer_symbols_list(path, names, sanitize)
+    return check_archive_members_sanitizer_symbols(path, member_undefs, sanitize=sanitize)
 
 
 def check_exports_subset(path, ref_file):
@@ -1346,6 +1469,110 @@ def self_test():
                       check_nodeapi_exports_ref(NODEAPI_EXPORTS, 160) is not None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # RV-10: Per-member archive sanitizer coverage checks (nm -u per member,
+    # accounting cleanly for assembly-only .S.o members and Zig u8a_codec.o).
+    from unittest import mock as _mock
+    res_single_missing = check_archive_members_sanitizer_symbols(
+        "fake.a",
+        {
+            "a.cpp.o": {"__asan_init", "__asan_handle_no_return"},
+            "b.cpp.o": {"malloc", "free"},
+            "Thunks.S.o": set(),
+            "u8a_codec.o": set(),
+        },
+        sanitize="address",
+        member_all={"u8a_codec.o": {"zig_u8a_encode_hex", "debug.panicExtra__func_0"}},
+    )
+    bad += report(
+        "per-member catches single unsanitized C++ member",
+        res_single_missing is not None and "b.cpp.o" in res_single_missing,
+    )
+    res_u8a_unsanitized = check_archive_members_sanitizer_symbols(
+        "fake.a",
+        {
+            "a.cpp.o": {"__asan_init"},
+            "Thunks.S.o": set(),
+            "u8a_codec.o": set(),
+        },
+        sanitize="address",
+        member_all={"u8a_codec.o": {"zig_u8a_encode_hex"}},
+    )
+    bad += report(
+        "per-member catches unsanitized u8a_codec.o",
+        res_u8a_unsanitized is not None and "u8a_codec.o" in res_u8a_unsanitized,
+    )
+    res_per_member_ok = check_archive_members_sanitizer_symbols(
+        "fake.a",
+        {
+            "a.cpp.o": {"__asan_init"},
+            "b.c.o": {"__asan_init"},
+            "Thunks.S.o": set(),
+            "arm64_SAVE_REGISTERS.S.o": set(),
+            "u8a_codec.o": {"__zig_probe_stack"},
+        },
+        sanitize="address",
+        member_all={"u8a_codec.o": {"zig_u8a_encode_hex", "debug.panicExtra__func_0"}},
+    )
+    bad += report(
+        "per-member allows .S.o and debug-checked u8a_codec.o",
+        res_per_member_ok is None,
+    )
+    res_asm_foreign = check_archive_members_sanitizer_symbols(
+        "fake.a",
+        {
+            "a.cpp.o": {"__asan_init"},
+            "Thunks.S.o": {"__tsan_init"},
+            "u8a_codec.o": {"__asan_init"},
+        },
+        sanitize="address",
+        member_all={},
+    )
+    bad += report(
+        "per-member rejects foreign sanitizer in .S.o",
+        res_asm_foreign is not None and "Thunks.S.o" in res_asm_foreign,
+    )
+    res_non_san_leak = check_archive_members_sanitizer_symbols(
+        "fake.a",
+        {
+            "a.cpp.o": {"malloc"},
+            "u8a_codec.o": {"__asan_init"},
+        },
+        sanitize=None,
+    )
+    bad += report(
+        "non-sanitizer catches single member sanitizer leak",
+        res_non_san_leak is not None and "u8a_codec.o" in res_non_san_leak,
+    )
+    parsed_members = parse_nm_archive_members(
+        "libChakraCoreStatic.a(Foo.cpp.o):\n"
+        "                 U __asan_init\n"
+        "Thunks.S.o:\n"
+        "u8a_codec.o:\n"
+        "                 U memcpy\n"
+    )
+    bad += report(
+        "parse_nm_archive_members handles GNU/LLVM headers",
+        set(parsed_members.keys()) == {"Foo.cpp.o", "Thunks.S.o", "u8a_codec.o"}
+        and "__asan_init" in parsed_members["Foo.cpp.o"]
+        and parsed_members["Thunks.S.o"] == set(),
+    )
+    with _mock.patch.object(
+        common,
+        "run_capture",
+        return_value=(
+            0,
+            "Foo.cpp.o:\n                 U __asan_init\n"
+            "Bar.cpp.o:\n                 U free\n"
+            "Thunks.S.o:\n",
+            "",
+        ),
+    ):
+        err_mock = check_archive_sanitizer_symbols("nonexistent.a", sanitize="address")
+        bad += report(
+            "check_archive_sanitizer_symbols rejects Bar.cpp.o via mocked nm -u",
+            err_mock is not None and "Bar.cpp.o" in err_mock,
+        )
 
     print("check_metadata_linux self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0

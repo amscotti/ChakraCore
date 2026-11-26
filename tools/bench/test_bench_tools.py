@@ -332,7 +332,7 @@ print("### TIME: 100 ms")
 """)
             rc, _, err = run_cli(check_perf_smoke.main, [
                 "--binary-a", str(stub_ok), "--binary-b", str(stub_flaky),
-                "--tests", "Kraken/audio-fft.js", "--iterations", "3",
+                "--tests", "Kraken/audio-fft.js", "--iterations", "3", "--warmup", "0",
             ])
             self.assertEqual(rc, 1)
             self.assertIn("B run #2: rc=11", err)
@@ -507,6 +507,66 @@ print("### TIME: 55 ms")
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("check_perf_smoke self-test: ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+
+class TestWave2PerfSmokeVariance(unittest.TestCase):
+    def test_defaults_iterations_and_warmup(self):
+        self.assertGreaterEqual(check_perf_smoke.DEFAULT_ITERATIONS, 9)
+        self.assertGreaterEqual(check_perf_smoke.DEFAULT_WARMUP, 1)
+        args = check_perf_smoke.parse_args(["--binary", "/bin/true"])
+        self.assertEqual(args.iterations, check_perf_smoke.DEFAULT_ITERATIONS)
+        self.assertEqual(args.warmup, check_perf_smoke.DEFAULT_WARMUP)
+        self.assertGreater(args.max_mad_pct, 0.0)
+
+    def test_high_mad_median_ab_returns_inconclusive_zero(self):
+        entry = check_perf_smoke.BenchmarkEntry("Kraken", "kraken.js", "Kraken/kraken.js", "time", None, "/* stub */")
+        base_vals = [100.0] * 9
+        noisy_vals = [90.0, 110.0, 130.0, 150.0, 170.0, 190.0, 210.0, 230.0, 250.0]
+        seq = {"i": 0}
+
+        def fake_runner(cmd, **kwargs):
+            _ = cmd, kwargs
+            idx = seq["i"]
+            seq["i"] += 1
+            if idx < 2:
+                val = 100.0 if idx == 0 else 170.0
+            else:
+                pair_idx = idx - 2
+                val = base_vals[pair_idx // 2] if (pair_idx % 2 == 0) else noisy_vals[pair_idx // 2]
+            return 0, f"### TIME: {val} ms\n", ""
+
+        rc, payload = check_perf_smoke.run_ab_gate(
+            "a", "da", [], "A", "b", "db", [], "B",
+            [entry], [], iterations=9, warmup=1, max_regression_pct=15.0, max_mad_pct=15.0,
+            runner=fake_runner,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["summary"]["failed"], 0)
+        self.assertEqual(payload["summary"]["inconclusive"], 1)
+        self.assertEqual(payload["summary"]["verdict"], "INCONCLUSIVE")
+
+    def test_high_mad_median_strict_baseline_inconclusive(self):
+        entry = check_perf_smoke.BenchmarkEntry("Kraken", "kraken.js", "Kraken/kraken.js", "time", None, "/* stub */")
+        noisy_vals = [90.0, 110.0, 130.0, 150.0, 170.0, 190.0, 210.0, 230.0, 250.0]
+        seq = {"i": 0}
+
+        def fake_runner(cmd, **kwargs):
+            _ = cmd, kwargs
+            idx = seq["i"]
+            seq["i"] += 1
+            val = 170.0 if idx == 0 else noisy_vals[idx - 1]
+            return 0, f"### TIME: {val} ms\n", ""
+
+        rc, payload = check_perf_smoke.run_single_mode(
+            "b", "db", [], [entry], [],
+            iterations=9, warmup=1, max_regression_pct=15.0, max_mad_pct=15.0,
+            baseline_map={"Kraken/kraken.js": {"kind": "time", "median": 100.0}},
+            strict_baseline=True,
+            runner=fake_runner,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["summary"]["failed"], 0)
+        self.assertEqual(payload["summary"]["inconclusive"], 1)
 
 
 if __name__ == "__main__":

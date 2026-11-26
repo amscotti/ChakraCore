@@ -635,5 +635,180 @@ class PackagingToolsTest(unittest.TestCase):
         self.assertTrue(any("non-portable external dependency" in e for e in errs_tamper), errs_tamper)
 
 
+def _make_fake_pkg_tree(td, profile="jit", is_darwin=True, is_windows=False):
+    repo_root = os.path.join(td, "repo")
+    prefix = os.path.join(td, "prefix")
+    for fn, data in (
+        ("LICENSE.txt", b"MIT\n"),
+        ("THIRD-PARTY-NOTICES.txt", b"Notices\n"),
+        ("README.md", b"# ChakraCore\n"),
+        (os.path.join("lib", "Common", "ChakraCoreVersion.h"),
+         b"#define CHAKRA_CORE_MAJOR_VERSION 1\n#define CHAKRA_CORE_MINOR_VERSION 13\n#define CHAKRA_CORE_PATCH_VERSION 0\n"),
+    ):
+        make_dummy_file(os.path.join(repo_root, fn), data)
+    for hname in ("ChakraCore.h", "ChakraCommon.h", "ChakraDebug.h", "ChakraCoreVersion.h"):
+        make_dummy_file(os.path.join(prefix, "include", hname), "// {}\n".format(hname).encode("ascii"))
+    for nh in ("js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h"):
+        make_dummy_file(os.path.join(prefix, "include", "nodeapi", nh), "// {}\n".format(nh).encode("ascii"))
+    make_dummy_file(os.path.join(prefix, ".profile"), (profile + "\n").encode("ascii"))
+    if is_windows:
+        make_dummy_file(os.path.join(prefix, "bin", "ch.exe"), b"MZch", 0o755)
+        make_dummy_file(os.path.join(prefix, "bin", "ch-nodeapi.exe"), b"MZnode", 0o755)
+        make_dummy_file(os.path.join(prefix, "bin", "ChakraCore.dll"), b"MZcore", 0o755)
+        make_dummy_file(os.path.join(prefix, "bin", "libChakraNodeApi.dll"), b"MZnapi", 0o755)
+        make_dummy_file(os.path.join(prefix, "lib", "ChakraCore.lib"), b"!<arch>\nc", 0o755)
+        make_dummy_file(os.path.join(prefix, "lib", "libChakraNodeApi.lib"), b"!<arch>\nn", 0o755)
+    else:
+        ext = "dylib" if is_darwin else "so"
+        make_dummy_file(os.path.join(prefix, "bin", "ch"), b"#!/bin/sh\necho 'ch version 1.13.0'\necho 'package smoke'\n", 0o755)
+        make_dummy_file(os.path.join(prefix, "bin", "ch-nodeapi"), b"#!/bin/sh\necho 'hello: world'\n", 0o755)
+        make_dummy_file(os.path.join(prefix, "lib", "libChakraCore." + ext), b"dummy-core", 0o755)
+        make_dummy_file(os.path.join(prefix, "lib", "libChakraNodeApi." + ext), b"dummy-napi", 0o755)
+    return repo_root, prefix
+
+
+class TestWave2RpathAndIcu(unittest.TestCase):
+    def test_verify_rejects_bad_macho_rpaths_mocked(self):
+        with tempfile.TemporaryDirectory(prefix="chakra-rv05-macho-") as td:
+            repo_root, prefix = _make_fake_pkg_tree(td, profile="jit")
+            out_dir = os.path.join(td, "pkg")
+            self.assertEqual(build_package.main([
+                "--prefix", prefix, "--profile", "jit", "--out-dir", out_dir,
+                "--version", "1.13.0", "--target", "darwin-arm64",
+                "--icu-mode", "external", "--repo-root", repo_root,
+            ]), 0)
+            archive = os.path.join(out_dir, "chakracore-1.13.0-jit-darwin-arm64.tar.gz")
+            for bad_rp, needle in (
+                (".zig-cache/o/abc123", ".zig-cache"),
+                ("/opt/homebrew/opt/icu4c/lib", "external LC_RPATH"),
+                ("relative/lib", "non-relocatable LC_RPATH"),
+            ):
+                with unittest.mock.patch.object(sys, "platform", "darwin"), \
+                     unittest.mock.patch.object(verify_package, "is_macho_file", return_value=True), \
+                     unittest.mock.patch.object(
+                         verify_package.subprocess,
+                         "run",
+                         return_value=unittest.mock.Mock(returncode=0, stdout="", stderr=""),
+                     ), \
+                     unittest.mock.patch.object(
+                         verify_package,
+                         "parse_macho_load_commands",
+                         return_value={"deps": ["/usr/lib/libSystem.B.dylib"], "rpaths": [bad_rp]},
+                     ):
+                    ok, errs = verify_package.verify_package(archive, expected_profile="jit")
+                    self.assertFalse(ok, "Expected failure for rpath {!r}".format(bad_rp))
+                    self.assertTrue(any(needle in e for e in errs), repr(errs))
+
+    def test_verify_rejects_bad_elf_runpath_mocked(self):
+        with tempfile.TemporaryDirectory(prefix="chakra-rv05-elf-") as td:
+            repo_root, prefix = _make_fake_pkg_tree(td, profile="release-shared", is_darwin=False)
+            out_dir = os.path.join(td, "pkg")
+            self.assertEqual(build_package.main([
+                "--prefix", prefix, "--profile", "release-shared", "--out-dir", out_dir,
+                "--version", "1.13.0", "--target", "linux-x64",
+                "--icu-mode", "external", "--repo-root", repo_root,
+            ]), 0)
+            archive = os.path.join(out_dir, "chakracore-1.13.0-release-shared-linux-x64.tar.gz")
+            for bad_rp, needle in (
+                (".zig-cache/o/deadbeef", ".zig-cache"),
+                ("lib/relative", "relative RPATH/RUNPATH"),
+                ("/opt/custom/lib", "/opt or /usr/local"),
+            ):
+                with unittest.mock.patch.object(sys, "platform", "linux"), \
+                     unittest.mock.patch.object(verify_package.shutil, "which", return_value="/usr/bin/readelf"), \
+                     unittest.mock.patch.object(verify_package, "is_elf_file", return_value=True), \
+                     unittest.mock.patch.object(
+                         verify_package,
+                         "parse_elf_dynamic",
+                         return_value={"rpaths": [bad_rp], "needed": ["libc.so.6"]},
+                     ):
+                    ok, errs = verify_package.verify_package(archive, expected_profile="release-shared")
+                    self.assertFalse(ok, "Expected ELF rejection for {!r}".format(bad_rp))
+                    self.assertTrue(any(needle in e for e in errs), repr(errs))
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "requires macOS clang")
+    def test_macho_rpath_and_out_of_tree_provider_dlopen(self):
+        with tempfile.TemporaryDirectory(prefix="chakra-rv05-real-") as td:
+            repo_root, prefix = _make_fake_pkg_tree(td, profile="release-shared")
+            core_c = os.path.join(td, "core.c")
+            prov_c = os.path.join(td, "prov.c")
+            with open(core_c, "w", encoding="utf-8") as f:
+                f.write("int chakra_core_ping(void) { return 42; }\n")
+            with open(prov_c, "w", encoding="utf-8") as f:
+                f.write(
+                    "extern int chakra_core_ping(void);\n"
+                    "int napi_get_version(void* env, unsigned int* res) { (void)env; if (res) *res = (unsigned int)chakra_core_ping(); return 0; }\n"
+                )
+            core_dylib = os.path.join(prefix, "lib", "libChakraCore.dylib")
+            prov_dylib = os.path.join(prefix, "lib", "libChakraNodeApi.dylib")
+            subprocess.check_call([
+                "clang", "-dynamiclib", "-install_name", "@rpath/libChakraCore.dylib",
+                core_c, "-o", core_dylib,
+            ])
+            subprocess.check_call([
+                "clang", "-dynamiclib", "-install_name", "@rpath/libChakraNodeApi.dylib",
+                "-Wl,-rpath,@loader_path", prov_c, core_dylib, "-o", prov_dylib,
+            ])
+            out_dir = os.path.join(td, "pkg_good")
+            self.assertEqual(build_package.main([
+                "--prefix", prefix, "--profile", "release-shared", "--out-dir", out_dir,
+                "--version", "1.13.0", "--target", "darwin-arm64",
+                "--icu-mode", "external", "--repo-root", repo_root,
+            ]), 0)
+            archive = os.path.join(out_dir, "chakracore-1.13.0-release-shared-darwin-arm64.tar.gz")
+            ok, errs = verify_package.verify_package(archive, expected_profile="release-shared")
+            self.assertTrue(ok, errs)
+            self.assertEqual(test_package.main(["--tarball", archive, "--repo-root", repo_root]), 0)
+
+            # Negative control: provider with .zig-cache rpath (missing @loader_path) fails both verify and Test 5 dlopen.
+            subprocess.check_call([
+                "clang", "-dynamiclib", "-install_name", "@rpath/libChakraNodeApi.dylib",
+                "-Wl,-rpath,.zig-cache/o/bad123", prov_c, core_dylib, "-o", prov_dylib,
+            ])
+            out_bad = os.path.join(td, "pkg_bad")
+            self.assertEqual(build_package.main([
+                "--prefix", prefix, "--profile", "release-shared", "--out-dir", out_bad,
+                "--version", "1.13.0", "--target", "darwin-arm64",
+                "--icu-mode", "external", "--repo-root", repo_root,
+            ]), 0)
+            bad_archive = os.path.join(out_bad, "chakracore-1.13.0-release-shared-darwin-arm64.tar.gz")
+            ok_bad, errs_bad = verify_package.verify_package(bad_archive, expected_profile="release-shared")
+            self.assertFalse(ok_bad)
+            self.assertTrue(any(".zig-cache" in e for e in errs_bad), errs_bad)
+            staging_bad = os.path.join(out_bad, "chakracore-1.13.0-release-shared-darwin-arm64")
+            with self.assertRaises(RuntimeError) as cm:
+                test_package.run_package_smoke_tests(staging_bad, repo_root)
+            self.assertIn("dlopen failed", str(cm.exception))
+
+    def test_windows_auto_and_env_icu_bundling(self):
+        for env_key in ("CHAKRA_ICU_DIR", "ICU_LIB_DIR"):
+            with self.subTest(env_key=env_key), tempfile.TemporaryDirectory(prefix="chakra-rv17-") as td:
+                repo_root, prefix = _make_fake_pkg_tree(td, profile="release-shared", is_windows=True)
+                icu_root = os.path.join(td, "icu_stage")
+                icu_bin = os.path.join(icu_root, "bin")
+                os.makedirs(icu_bin, exist_ok=True)
+                for dll in ("icuuc74.dll", "icuin74.dll", "icudt74.dll"):
+                    make_dummy_file(os.path.join(icu_bin, dll), b"MZ" + dll.encode("ascii"))
+                env_val = icu_root if env_key == "CHAKRA_ICU_DIR" else os.path.join(icu_root, "lib")
+                os.makedirs(env_val, exist_ok=True)
+                out_dir = os.path.join(td, "pkg_win")
+                with unittest.mock.patch.dict(os.environ, {env_key: env_val}, clear=False):
+                    self.assertEqual(build_package.main([
+                        "--prefix", prefix, "--profile", "release-shared", "--out-dir", out_dir,
+                        "--version", "1.13.0", "--target", "windows-x64",
+                        "--icu-mode", "auto", "--repo-root", repo_root,
+                    ]), 0)
+                archive = os.path.join(out_dir, "chakracore-1.13.0-release-shared-windows-x64.tar.gz")
+                ok, errs = verify_package.verify_package(archive, expected_profile="release-shared")
+                self.assertTrue(ok, errs)
+                with tarfile.open(archive, "r:gz") as tf:
+                    names = tf.getnames()
+                    mf = [n for n in names if os.path.basename(n) == "MANIFEST.json"][0]
+                    manifest = json.loads(tf.extractfile(mf).read().decode("utf-8"))
+                    self.assertEqual(manifest["icu_mode"], "bundled")
+                    for dll in ("icuuc74.dll", "icuin74.dll", "icudt74.dll"):
+                        self.assertTrue(any(n == "bin/" + dll or n.endswith("/bin/" + dll) for n in names), names)
+
+
 if __name__ == "__main__":
     unittest.main()

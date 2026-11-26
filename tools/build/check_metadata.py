@@ -326,16 +326,17 @@ def self_test():
         src = os.path.join(tmp, "garbage.dylib")
         with open(src, "wb") as f:
             f.write(b"not a mach-o file, just tampered bytes\n" * 16)
-        bad += report("garbage victim fails minos gate",
-                      check_minos(src) is not None)
-        bad += report("garbage victim fails stack gate",
-                      check_stack(src) is not None)
-        bad += report("garbage victim fails exports gate",
-                      check_exports(src) != [])
-        bad += report("garbage victim fails static-archive gate",
-                      check_static_archive(src) != [])
-        bad += report("garbage victim fails self-contained gate",
-                      check_self_contained(src) is not None)
+        if sys.platform == "darwin":
+            bad += report("garbage victim fails minos gate",
+                          check_minos(src) is not None)
+            bad += report("garbage victim fails stack gate",
+                          check_stack(src) is not None)
+            bad += report("garbage victim fails exports gate",
+                          check_exports(src) != [])
+            bad += report("garbage victim fails static-archive gate",
+                          check_static_archive(src) != [])
+            bad += report("garbage victim fails self-contained gate",
+                          check_self_contained(src) is not None)
         # A prefix containing a dylib fails the static no-dylib gate.
         os.makedirs(os.path.join(tmp, "bin"))
         with open(os.path.join(tmp, "bin", "libChakraCore.dylib"),
@@ -382,8 +383,9 @@ def self_test():
                       WANT_STACK_BY_PROFILE.get("release-jit") == 8388608)
         bad += report("static archive wants 538 members",
                       WANT_STATIC_MEMBERS == 538)
-        bad += report("garbage victim fails static-archive gate with custom count",
-                      check_static_archive(src, want_static_members=683) != [])
+        if sys.platform == "darwin":
+            bad += report("garbage victim fails static-archive gate with custom count",
+                          check_static_archive(src, want_static_members=683) != [])
 
         # Sanitizer side-profile resolution + exact marker controls (B-5/B-7/B-9).
         bad += report("resolve jit -> (jit, None)",
@@ -441,10 +443,190 @@ def self_test():
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
 
+    bad += report("per-member catches single unsanitized C++ member",
+                  check_archive_members_sanitizer_symbols(
+                      "fake.a",
+                      {"a.cpp.o": {"___asan_init"}, "b.cpp.o": {"_malloc"}, "Thunks.S.o": set(), "u8a_codec.o": set()},
+                      sanitize="address",
+                      member_all={"u8a_codec.o": {"_debug.panicExtra__func_0"}},
+                  ) is not None)
+    bad += report("per-member catches unsanitized u8a_codec.o",
+                  check_archive_members_sanitizer_symbols(
+                      "fake.a",
+                      {"a.cpp.o": {"___asan_init"}, "Thunks.S.o": set(), "u8a_codec.o": set()},
+                      sanitize="address",
+                      member_all={"u8a_codec.o": {"_zig_u8a_encode_hex"}},
+                  ) is not None)
+    bad += report("per-member allows .S.o and debug u8a_codec.o",
+                  check_archive_members_sanitizer_symbols(
+                      "fake.a",
+                      {"a.cpp.o": {"___asan_init"}, "Thunks.S.o": set(), "u8a_codec.o": set()},
+                      sanitize="address",
+                      member_all={"u8a_codec.o": {"_debug.panicExtra__func_0"}},
+                  ) is None)
+    bad += report("non-sanitizer catches single member sanitizer leak",
+                  check_archive_members_sanitizer_symbols(
+                      "fake.a",
+                      {"a.cpp.o": {"_malloc"}, "u8a_codec.o": {"___asan_init"}},
+                      sanitize=None,
+                  ) is not None)
+
     print("check_metadata self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
              else "%d CONTROL(S) MISBEHAVE" % bad))
     return 1 if bad else 0
+
+
+_SAN_ALL_PREFIXES = ("___asan_", "__asan_", "___ubsan_", "__ubsan_", "___tsan_", "__tsan_", "___msan_", "__msan_")
+_SAN_REQ_PREFIXES = {
+    "address": ("___asan_", "__asan_"),
+    "undefined": ("___ubsan_", "__ubsan_"),
+    "thread": ("___tsan_", "__tsan_"),
+}
+_SAN_FORBID_PREFIXES = {
+    "address": ("___tsan_", "__tsan_", "___msan_", "__msan_"),
+    "undefined": ("___asan_", "__asan_", "___tsan_", "__tsan_", "___msan_", "__msan_"),
+    "thread": ("___asan_", "__asan_", "___ubsan_", "__ubsan_", "___msan_", "__msan_"),
+}
+_SAN_DYLIB_NEEDLE = {
+    "address": "libclang_rt.asan_osx_dynamic.dylib",
+    "undefined": "libclang_rt.ubsan_osx_dynamic.dylib",
+    "thread": "libclang_rt.tsan_osx_dynamic.dylib",
+}
+
+
+def _run_tool(cmd):
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    return res.returncode, res.stdout, res.stderr
+
+
+def parse_nm_archive_members(out):
+    """Parse per-member symbol sets from macOS/LLVM `nm` archive output."""
+    members = {}
+    current = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("nm:", "llvm-nm:")):
+            continue
+        if line.endswith(":"):
+            header = line[:-1]
+            if header.endswith(")") and "(" in header:
+                header = header.rsplit("(", 1)[1][:-1]
+            member = os.path.basename(header.strip())
+            if member and not member.startswith("__.SYMDEF"):
+                current = member
+                members.setdefault(current, set())
+            else:
+                current = None
+            continue
+        if current is None:
+            continue
+        toks = line.split()
+        if not toks:
+            continue
+        if len(toks) == 1:
+            sym = toks[0]
+        elif toks[0] in ("U", "u", "w", "W"):
+            sym = toks[1]
+        elif len(toks) >= 3 and toks[1] in ("U", "u", "w", "W", "T", "t", "D", "d", "B", "b", "R", "r", "S", "s"):
+            sym = toks[2]
+        else:
+            sym = toks[-1]
+        members[current].add(sym)
+    return members
+
+
+def _is_real_ar_archive(path):
+    try:
+        if os.path.getsize(path) < 128:
+            return False
+        with open(path, "rb") as f:
+            return f.read(8) == b"!<arch>\n"
+    except OSError:
+        return False
+
+
+def check_archive_members_sanitizer_symbols(path, member_undefs, sanitize=None, member_all=None):
+    """Audit per-member sanitizer coverage (C/C++, .S.o, and Zig u8a_codec.o)."""
+    if not member_undefs:
+        return "%s: archive yielded no object members" % path
+    if sanitize is None:
+        for member, names in sorted(member_undefs.items()):
+            hits = sorted({n for n in names if n.startswith(_SAN_ALL_PREFIXES)})
+            if hits:
+                return "%s(%s): carries unexpected sanitizer symbols: %r" % (path, member, hits[:8])
+        return None
+    if sanitize not in _SAN_REQ_PREFIXES:
+        raise ValueError("invalid sanitize mode %r" % sanitize)
+    req = _SAN_REQ_PREFIXES[sanitize]
+    forbid = _SAN_FORBID_PREFIXES[sanitize]
+    all_names = set()
+    for names in member_undefs.values():
+        all_names.update(names)
+    if not any(n.startswith(req) for n in all_names):
+        return "%s: lacks %s sanitizer instrumentation symbols (%s)" % (path, sanitize, ", ".join(req))
+    for member, names in sorted(member_undefs.items()):
+        label = "%s(%s)" % (path, member)
+        foreign = sorted({n for n in names if n.startswith(forbid)})
+        if foreign:
+            return "%s: carries foreign sanitizer symbols for %s: %r" % (label, sanitize, foreign[:8])
+        if os.path.basename(member).lower().endswith(".s.o"):
+            continue
+        if any(n.startswith(req) for n in names):
+            continue
+        if os.path.basename(member) == "u8a_codec.o":
+            if member_all is None and _is_real_ar_archive(path):
+                rc_a, out_a, _ = _run_tool(["nm", path])
+                member_all = parse_nm_archive_members(out_a) if rc_a == 0 else {}
+            all_u8a = (member_all or {}).get(member, set()) | set(names)
+            if any("debug.panic" in s or "zig_probe_stack" in s for s in all_u8a):
+                continue
+            return "%s: lacks %s sanitizer or Zig safety-check symbols" % (label, sanitize)
+        if sanitize in ("address", "thread"):
+            return "%s: lacks %s sanitizer instrumentation symbols (%s)" % (label, sanitize, ", ".join(req))
+    return None
+
+
+def check_archive_sanitizer_symbols(path, sanitize=None):
+    rc, out, err = _run_tool(["nm", "-u", path])
+    if rc != 0:
+        return "nm -u %s failed (rc=%d err=%r)" % (path, rc, err)
+    members = parse_nm_archive_members(out)
+    if _is_real_ar_archive(path):
+        ar_rc, ar_out, _ = _run_tool(["ar", "t", path])
+        if ar_rc == 0:
+            for raw in ar_out.splitlines():
+                m = os.path.basename(raw.strip())
+                if m and m != "/" and not m.startswith("__.SYMDEF"):
+                    members.setdefault(m, set())
+    return check_archive_members_sanitizer_symbols(path, members, sanitize=sanitize)
+
+
+def check_macho_sanitizer(path, sanitize=None):
+    rc_u, out_u, err_u = _run_tool(["nm", "-u", path])
+    if rc_u != 0:
+        return "nm -u %s failed (rc=%d err=%r)" % (path, rc_u, err_u)
+    undefs = {line.strip().split()[-1] for line in out_u.splitlines() if line.strip()}
+    rc_l, out_l, err_l = _run_tool(["otool", "-L", path])
+    if rc_l != 0:
+        return "otool -L %s failed (rc=%d err=%r)" % (path, rc_l, err_l)
+    if sanitize is None:
+        hits = sorted({n for n in undefs if n.startswith(_SAN_ALL_PREFIXES)})
+        if hits:
+            return "%s: non-sanitizer Mach-O carries sanitizer symbols: %r" % (path, hits[:8])
+        for needle in _SAN_DYLIB_NEEDLE.values():
+            if needle in out_l:
+                return "%s: non-sanitizer Mach-O links %s" % (path, needle)
+        return None
+    req = _SAN_REQ_PREFIXES[sanitize]
+    forbid = _SAN_FORBID_PREFIXES[sanitize]
+    foreign = sorted({n for n in undefs if n.startswith(forbid)})
+    if foreign:
+        return "%s: carries foreign sanitizer symbols for %s: %r" % (path, sanitize, foreign[:8])
+    want_rt = _SAN_DYLIB_NEEDLE[sanitize]
+    if want_rt not in out_l and not any(n.startswith(req) for n in undefs):
+        return "%s: lacks %s runtime (%s) or sanitizer symbols" % (path, sanitize, want_rt)
+    return None
 
 
 def main(argv):
@@ -453,6 +635,7 @@ def main(argv):
         return self_test()
     profile = "test"
     static_members = WANT_STATIC_MEMBERS
+    static_archive_override = None
     rest = []
     i = 0
     while i < len(args):
@@ -495,17 +678,27 @@ def main(argv):
                       % static_members, file=sys.stderr)
                 return 2
             i += 1
+        elif args[i] == "--static-archive":
+            if i + 1 >= len(args):
+                print("check_metadata: --static-archive needs a path",
+                      file=sys.stderr)
+                return 2
+            static_archive_override = args[i + 1]
+            i += 2
+        elif args[i].startswith("--static-archive="):
+            static_archive_override = args[i].split("=", 1)[1]
+            i += 1
         else:
             rest.append(args[i])
             i += 1
     try:
-        base_profile, _sanitize_mode = resolve_profile(profile)
+        base_profile, sanitize_mode = resolve_profile(profile)
     except ValueError as e:
         print("check_metadata: %s" % e, file=sys.stderr)
         return 2
     if len(rest) != 1:
         print("usage: check_metadata.py <prefix> "
-              "[--profile <name>] [--static-members N]",
+              "[--profile <name>] [--static-members N] [--static-archive PATH]",
               file=sys.stderr)
         return 2
     prefix = os.path.abspath(rest[0])
@@ -552,6 +745,26 @@ def main(argv):
             dylib = os.path.join(prefix, DYLIBS[0])
             if os.path.exists(dylib):
                 failures.extend(check_exports(os.path.realpath(dylib)))
+        for rel in EXECUTABLES + (() if is_static else DYLIBS):
+            p = os.path.join(prefix, rel)
+            if os.path.exists(p):
+                err_s = check_macho_sanitizer(os.path.realpath(p), sanitize=sanitize_mode)
+                if err_s is not None:
+                    failures.append(err_s)
+        arch_to_check = static_archive_override or (
+            os.path.join(prefix, STATIC_ARCHIVE)
+            if os.path.exists(os.path.join(prefix, STATIC_ARCHIVE)) else None
+        )
+        if arch_to_check is not None and not is_static:
+            err_a = check_archive_sanitizer_symbols(arch_to_check, sanitize=sanitize_mode)
+            if err_a is not None:
+                failures.append(err_a)
+        elif is_static:
+            arch_p = os.path.join(prefix, STATIC_ARCHIVE)
+            if os.path.exists(arch_p):
+                err_a = check_archive_sanitizer_symbols(arch_p, sanitize=sanitize_mode)
+                if err_a is not None:
+                    failures.append(err_a)
     except subprocess.TimeoutExpired as e:
         failures.append("probe exceeded the %ds ceiling: %s"
                         % (e.timeout, " ".join(e.cmd)))

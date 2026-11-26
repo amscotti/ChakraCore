@@ -1211,10 +1211,12 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("lib/ZigCodec/u8a_codec.zig"),
             .target = target,
-            .optimize = .fast,
+            .optimize = if (profile.isDebug() or sanitize != .none) .debug else .fast,
             .pic = true,
             .link_libc = false,
             .link_libcpp = false,
+            .sanitize_c = if (sanitize == .undefined) .full else if (sanitize != .none) .trap else null,
+            .sanitize_thread = if (sanitize == .thread) true else null,
         }),
     });
     static_objs.append(arena, u8a_codec_obj.getEmittedBin()) catch @panic("OOM");
@@ -1407,31 +1409,62 @@ pub fn build(b: *std.Build) void {
     // NodeApiObjects.cpp's napi_define_properties has no definition of
     // napi_create_function and the library does not link (landed wiring
     // by N2.6; N2.4 owns the TU, not this list).
+    const NodeapiCxx = struct {
+        fn addPrefix(context: *const Ctx, cmd: *std.Build.Step.Run, host_target: []const u8, prof_target: []const u8) void {
+            if (context.sanitize != .none) {
+                cmd.addArgs(&.{ "-target", host_target, "-isysroot", context.sdk_path, "-std=gnu++17" });
+                if (!context.profile.isDebug()) cmd.addArg("-O1");
+                cmd.addArgs(&.{ "-g", "-fno-omit-frame-pointer", context.sanitize.fsanitizeFlag() });
+            } else {
+                cmd.addArgs(&.{ "-target", prof_target, "--sysroot", context.sdk_path, "-std=gnu++17", "-O3", "-g" });
+            }
+        }
+        fn addTail(context: *const Ctx, cmd: *std.Build.Step.Run) void {
+            if (context.sanitize != .none) {
+                cmd.addArg("-mcpu=apple-m1");
+            } else {
+                cmd.addArg("-isystem");
+                cmd.addArg(context.sdk_isystem);
+                cmd.addArg("-F");
+                cmd.addArg("/System/Library/Frameworks");
+                cmd.addArg("-mcpu=apple_m1");
+            }
+            cmd.addArg("-Wno-date-time");
+        }
+        fn compileObj(
+            context: *const Ctx,
+            host_target: []const u8,
+            prof_target: []const u8,
+            src_rel: []const u8,
+            obj_name: []const u8,
+            dep_name: []const u8,
+            extra_flags: []const []const u8,
+            include_internal: bool,
+        ) std.Build.LazyPath {
+            const tu = if (context.sanitize != .none)
+                context.b.addSystemCommand(&.{context.host_cxx})
+            else
+                context.b.addSystemCommand(&.{ context.zig_exe, "c++" });
+            addPrefix(context, tu, host_target, prof_target);
+            for (extra_flags) |f| tu.addArg(f);
+            tu.addArgs(&.{ "-DNAPI_VERSION=10", "-Iinclude/nodeapi" });
+            if (include_internal) {
+                tu.addArgs(&.{ "-Ilib/Jsrt", "-Ilib/NodeApi" });
+            }
+            addTail(context, tu);
+            tu.addArgs(&.{ "-MD", "-MF" });
+            _ = tu.addDepFileOutputArg(dep_name);
+            tu.addArg("-o");
+            const out = tu.addOutputFileArg(obj_name);
+            tu.addArg("-c");
+            tu.addFileArg(context.b.path(src_rel));
+            return out;
+        }
+    };
+
     const prov_lib: ?LinkedArtifact = if (is_static) null else blk: {
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (tables.nodeapi_provider_tus) |src| {
-            const tu = if (sanitize != .none) cmd_blk: {
-                const c = b.addSystemCommand(&.{ctx.host_cxx});
-                c.addArg("-target");
-                c.addArg(host_clang_target);
-                c.addArg("-isysroot");
-                c.addArg(ctx.sdk_path);
-                c.addArg("-std=gnu++17");
-                if (!profile.isDebug()) c.addArg("-O1");
-                c.addArgs(&.{ "-g", "-fno-omit-frame-pointer", sanitize.fsanitizeFlag() });
-                break :cmd_blk c;
-            } else cmd_blk: {
-                const c = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-                c.addArg("-target");
-                c.addArg(profile_target);
-                c.addArg("--sysroot");
-                c.addArg(ctx.sdk_path);
-                c.addArg("-std=gnu++17");
-                c.addArg("-O3");
-                c.addArg("-g");
-                break :cmd_blk c;
-            };
-            tu.addArg("-fPIC");
             // HIGH-5: hidden by default. The 155 napi_*/node_api_*
             // declarations already carry __attribute__((visibility("default")))
             // via NAPI_EXTERN in the vendored headers, and the private
@@ -1442,25 +1475,17 @@ pub fn build(b: *std.Build) void {
             // provider explicitly does NOT define
             // CHAKRA_NODEAPI_TEST_HOOKS (release must not export
             // the root-counter hooks).
-            tu.addArg("-fvisibility=hidden");
-            tu.addArg("-DNAPI_VERSION=10");
-            tu.addArg("-Ilib/Jsrt");
-            tu.addArg("-Iinclude/nodeapi");
-            tu.addArg("-Ilib/NodeApi");
-            if (sanitize != .none) {
-                tu.addArg("-mcpu=apple-m1");
-            } else {
-                tu.addArg("-isystem");
-                tu.addArg(ctx.sdk_isystem);
-                tu.addArg("-F");
-                tu.addArg("/System/Library/Frameworks");
-                tu.addArg("-mcpu=apple_m1");
-            }
-            tu.addArg("-Wno-date-time");
-            tu.addArg("-o");
-            const out = tu.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.basename(src)}));
-            tu.addArg("-c");
-            tu.addFileArg(b.path(src));
+            const base = std.fs.path.basename(src);
+            const out = NodeapiCxx.compileObj(
+                &ctx,
+                host_clang_target,
+                profile_target,
+                src,
+                b.fmt("{s}.o", .{base}),
+                b.fmt("nodeapi-prov-{s}.d", .{base}),
+                &.{ "-fPIC", "-fvisibility=hidden" },
+                true,
+            );
             prov_objs.append(arena, out) catch @panic("OOM");
         }
         if (sanitize != .none) {
@@ -1472,6 +1497,8 @@ pub fn build(b: *std.Build) void {
                 "-Wl,-current_version,1.0.0",
                 "-install_name",
                 "@rpath/libChakraNodeApi.dylib",
+                "-Wl,-rpath,@loader_path",
+                "-Wl,-headerpad_max_install_names",
             });
             for (prov_objs.items) |o| link.addFileArg(o);
             link.addFileArg(dylib.?.bin);
@@ -1480,28 +1507,27 @@ pub fn build(b: *std.Build) void {
             link.step.dependOn(dylib.?.step);
             break :blk .{ .bin = out, .step = &link.step, .name = "ChakraNodeApi" };
         } else {
-            const mod = createLinkModule(&ctx);
-            for (prov_objs.items) |o| mod.addObjectFile(o);
-            mod.linkLibrary(dylib.?.compile.?);
-            addSdkLinkPaths(&ctx, mod);
-            // No direct ICU / CoreFoundation / Security edges: the
-            // provider references no ICU or framework symbols (verified
-            // via `nm -u` on the built dylib: only Js* + libc/libSystem),
-            // and the engine dylib already carries ICU as LC_LOAD_DYLIB.
-            // Linking ICU here would add hardcoded -L paths that cannot
-            // work under --sysroot (the ch-nodeapi host documents the
-            // same for its SystemCommand link) and would duplicate the
-            // engine's dependency. The Module link therefore keeps only
-            // the dependent-dylib edge to libChakraCore.
-            const lib = b.addLibrary(.{
-                .name = "ChakraNodeApi",
-                .root_module = mod,
-                .linkage = .dynamic,
-                .version = .{ .major = 1, .minor = 0, .patch = 0 },
+            const link = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            link.addArgs(&.{
+                "-target",
+                profile_target,
+                "-isysroot",
+                ctx.sdk_path,
+                b.fmt("-L{s}/usr/lib", .{ctx.sdk_path}),
+                b.fmt("-F{s}/System/Library/Frameworks", .{ctx.sdk_path}),
+                "-dynamiclib",
+                "-Wl,-compatibility_version,1.0.0",
+                "-Wl,-current_version,1.0.0",
+                "-Wl,-install_name,@rpath/libChakraNodeApi.dylib",
+                "-Wl,-rpath,@loader_path",
+                "-Wl,-headerpad_max_install_names",
             });
-            lib.install_name = "@rpath/libChakraNodeApi.dylib";
-            lib.headerpad_max_install_names = true;
-            break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraNodeApi" };
+            for (prov_objs.items) |o| link.addFileArg(o);
+            link.addFileArg(dylib.?.bin);
+            link.addArg("-o");
+            const out = link.addOutputFileArg("libChakraNodeApi.dylib");
+            link.step.dependOn(dylib.?.step);
+            break :blk .{ .bin = out, .step = &link.step, .name = "ChakraNodeApi" };
         }
     };
 
@@ -1673,42 +1699,22 @@ pub fn build(b: *std.Build) void {
             }
         }.call;
 
-        const addNodeapiCompilePrefix = struct {
-            fn call(context: *const Ctx, cmd: *std.Build.Step.Run) void {
-                if (context.sanitize != .none) {
-                    cmd.addArgs(&.{ "-target", host_clang_target, "-isysroot", context.sdk_path, "-std=gnu++17" });
-                    if (!context.profile.isDebug()) cmd.addArg("-O1");
-                    cmd.addArgs(&.{ "-g", "-fno-omit-frame-pointer", context.sanitize.fsanitizeFlag() });
-                } else {
-                    cmd.addArgs(&.{ "-target", profile_target, "--sysroot", context.sdk_path, "-std=gnu++17", "-O3", "-g" });
-                }
-            }
-        }.call;
-        const addNodeapiTail = struct {
-            fn call(context: *const Ctx, cmd: *std.Build.Step.Run) void {
-                if (context.sanitize != .none) {
-                    cmd.addArg("-mcpu=apple-m1");
-                } else {
-                    cmd.addArg("-isystem");
-                    cmd.addArg(context.sdk_isystem);
-                    cmd.addArg("-F");
-                    cmd.addArg("/System/Library/Frameworks");
-                    cmd.addArg("-mcpu=apple_m1");
-                }
-                cmd.addArg("-Wno-date-time");
-            }
-        }.call;
-
+        const nodeapi_host_obj = NodeapiCxx.compileObj(
+            &ctx,
+            host_clang_target,
+            profile_target,
+            "tools/nodeapi/ch-nodeapi.cpp",
+            "ch-nodeapi.cpp.o",
+            "nodeapi-host.d",
+            &.{},
+            true,
+        );
         const nodeapi_host = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-        addNodeapiCompilePrefix(&ctx, nodeapi_host);
-        nodeapi_host.addArg("-DNAPI_VERSION=10");
-        nodeapi_host.addArg("-Ilib/Jsrt");
-        nodeapi_host.addArg("-Iinclude/nodeapi");
-        nodeapi_host.addArg("-Ilib/NodeApi");
-        addNodeapiTail(&ctx, nodeapi_host);
+        NodeapiCxx.addPrefix(&ctx, nodeapi_host, host_clang_target, profile_target);
+        NodeapiCxx.addTail(&ctx, nodeapi_host);
         nodeapi_host.addArg("-o");
         const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
-        nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
+        nodeapi_host.addFileArg(nodeapi_host_obj);
         nodeapi_host.addFileArg(engine_lib);
         nodeapi_host.addArg("-framework");
         nodeapi_host.addArg("CoreFoundation");
@@ -1719,19 +1725,24 @@ pub fn build(b: *std.Build) void {
         nodeapi_host.addArg("-Wl,-rpath,@executable_path/../lib");
         nodeapi_host.step.dependOn(engine_compile.step);
 
+        const nodeapi_stub_obj = NodeapiCxx.compileObj(
+            &ctx,
+            host_clang_target,
+            profile_target,
+            "tools/nodeapi/stub/stub_provider.cpp",
+            "stub_provider.cpp.o",
+            "nodeapi-stub.d",
+            &.{"-fPIC"},
+            true,
+        );
         const nodeapi_stub = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-        addNodeapiCompilePrefix(&ctx, nodeapi_stub);
-        nodeapi_stub.addArg("-fPIC");
+        NodeapiCxx.addPrefix(&ctx, nodeapi_stub, host_clang_target, profile_target);
         nodeapi_stub.addArg("-shared");
         nodeapi_stub.addArg("-Wl,-undefined,dynamic_lookup");
-        nodeapi_stub.addArg("-DNAPI_VERSION=10");
-        nodeapi_stub.addArg("-Ilib/Jsrt");
-        nodeapi_stub.addArg("-Iinclude/nodeapi");
-        nodeapi_stub.addArg("-Ilib/NodeApi");
-        addNodeapiTail(&ctx, nodeapi_stub);
+        NodeapiCxx.addTail(&ctx, nodeapi_stub);
         nodeapi_stub.addArg("-o");
         const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.dylib");
-        nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
+        nodeapi_stub.addFileArg(nodeapi_stub_obj);
 
         if (side_name == null) {
             nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
@@ -1744,17 +1755,24 @@ pub fn build(b: *std.Build) void {
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/libChakraNodeApiStub.dylib", .{side_root}), nodeapi_stub_bin, cp_step).step);
         }
         for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
+            const addon_obj = NodeapiCxx.compileObj(
+                &ctx,
+                host_clang_target,
+                profile_target,
+                b.fmt("tools/nodeapi/addons/{s}.cpp", .{name}),
+                b.fmt("{s}.cpp.o", .{name}),
+                b.fmt("nodeapi-addon-{s}.d", .{name}),
+                &.{"-fPIC"},
+                false,
+            );
             const addon = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-            addNodeapiCompilePrefix(&ctx, addon);
-            addon.addArg("-fPIC");
+            NodeapiCxx.addPrefix(&ctx, addon, host_clang_target, profile_target);
             addon.addArg("-shared");
             addon.addArg("-Wl,-undefined,dynamic_lookup");
-            addon.addArg("-DNAPI_VERSION=10");
-            addon.addArg("-Iinclude/nodeapi");
-            addNodeapiTail(&ctx, addon);
+            NodeapiCxx.addTail(&ctx, addon);
             addon.addArg("-o");
             const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
-            addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
+            addon.addFileArg(addon_obj);
             if (side_name == null) {
                 nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
             } else {
@@ -1842,6 +1860,7 @@ pub fn build(b: *std.Build) void {
     if (profile.isJit() and profile.hasDebugFlags() and ctx.wasm) {
         const jit_wasm = b.addSystemCommand(&.{python});
         jit_wasm.addFileArg(b.path("tools/build/check_wasm_p1.py"));
+        if (!profile.isDebug()) jit_wasm.addArg("--include-simd");
         jit_wasm.addFileArg(b.path("test/runtests.py"));
         jit_wasm.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
         jit_wasm.addFileInput(ch.bin);
@@ -1854,6 +1873,7 @@ pub fn build(b: *std.Build) void {
         const jit_wasm_jit = b.addSystemCommand(&.{python});
         jit_wasm_jit.addFileArg(b.path("tools/build/check_wasm_p1.py"));
         jit_wasm_jit.addArg("--jit");
+        if (!profile.isDebug()) jit_wasm_jit.addArg("--include-simd");
         jit_wasm_jit.addFileArg(b.path("test/runtests.py"));
         jit_wasm_jit.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
         jit_wasm_jit.addFileInput(ch.bin);
@@ -1889,6 +1909,7 @@ pub fn build(b: *std.Build) void {
     if (profile.isJit() and profile.hasDebugFlags()) {
         const fj_step = b.addSystemCommand(&.{python});
         fj_step.addFileArg(b.path("tools/build/check_fulljit.py"));
+        if (!profile.isDebug()) fj_step.addArg("--all-jit-suites");
         fj_step.addFileArg(b.path("test/runtests.py"));
         fj_step.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
         fj_step.addArg("--select");
@@ -1910,7 +1931,9 @@ pub fn build(b: *std.Build) void {
         perf_step.addArg("--binary");
         perf_step.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
         perf_step.addArg("--iterations");
-        perf_step.addArg("3");
+        perf_step.addArg("9");
+        perf_step.addArg("--warmup");
+        perf_step.addArg("1");
         perf_step.addFileInput(ch.bin);
         perf_step.step.dependOn(&copy_out.?.step);
         perf_step.stdio = .inherit;

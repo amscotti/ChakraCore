@@ -210,4 +210,27 @@ test "Phase-4 TUs present in tables_linux.zig / linux.zig with zero duplicates a
         try cwd.access(io, tu, .{});
     }
     try std.testing.expect(std.mem.indexOf(u8, linux_src, "mac_tables.nodeapi_provider_tus") != null);
+
+    // RV-10: u8a_codec_obj propagates sanitize_c and .debug when sanitized or debug.
+    const u8a_idx = std.mem.indexOf(u8, linux_src, "const u8a_codec_obj =") orelse return error.MissingU8aCodec;
+    const u8a_end = std.mem.indexOfPos(u8, linux_src, u8a_idx, "});") orelse return error.MissingU8aEnd;
+    const u8a_block = linux_src[u8a_idx..u8a_end];
+    try std.testing.expect(std.mem.indexOf(u8, u8a_block, ".sanitize_c =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, u8a_block, ".debug") != null);
+
+    // RV-04d: ch-nodeapi host must NOT directly link prov_so or depend on prov_link (uses dlopen/dlsym).
+    const host_idx = std.mem.indexOf(u8, linux_src, "const nodeapi_host_obj =") orelse return error.MissingNodeapiHost;
+    const stub_idx = std.mem.indexOfPos(u8, linux_src, host_idx, "const nodeapi_stub_obj =") orelse return error.MissingNodeapiStub;
+    const host_block = linux_src[host_idx..stub_idx];
+    try std.testing.expect(std.mem.indexOf(u8, host_block, "so_bin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, host_block, "\"-ldl\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, host_block, "\"-lpthread\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, host_block, "prov_so") == null);
+    try std.testing.expect(std.mem.indexOf(u8, host_block, "prov_link") == null);
+
+    // RV-11: shared Node-API depfile helper covers provider, host, stub, and addon TUs.
+    try std.testing.expect(std.mem.indexOf(u8, linux_src, "addDepFileOutputArg(dep_name)") != null);
+    for ([_][]const u8{ "nodeapi-prov-", "\"nodeapi-host.d\"", "\"nodeapi-stub.d\"", "nodeapi-addon-" }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, linux_src, needle) != null);
+    }
 }

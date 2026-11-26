@@ -340,15 +340,24 @@ test "Windows B6 first-contact compile fixes: unused-command-line-argument and N
     }
 
     const win_src = @embedFile("build/windows.zig");
-    try expectBlockContains(win_src, "for (tables.nodeapi_provider_tus) |src|", "const prov_link =", "\"-DNOMINMAX\"");
-    try expectBlockContains(win_src, "const nodeapi_host =", "tools/nodeapi/ch-nodeapi.cpp", "\"-DNOMINMAX\"");
-    try expectBlockContains(win_src, "const nodeapi_stub =", "tools/nodeapi/stub/stub_provider.cpp", "\"-DNOMINMAX\"");
-    try expectBlockContains(win_src, "const addon = b.addSystemCommand", "tools/nodeapi/addons/", "\"-DNOMINMAX\"");
+    try expectBlockContains(win_src, "const compileWinNodeapiObj =", "const prov_link =", "\"-DNOMINMAX\"");
+    try expectBlockContains(win_src, "const compileWinNodeapiObj =", "const prov_link =", "addDepFileOutputArg");
+    try expectBlockContains(win_src, "const nodeapi_host_obj =", "const nodeapi_host_bin =", "compileWinNodeapiObj");
+    try expectBlockContains(win_src, "const nodeapi_host_obj =", "const nodeapi_host_bin =", "\"nodeapi-host.d\"");
+    try expectBlockContains(win_src, "const nodeapi_stub_obj =", "const nodeapi_stub_bin =", "compileWinNodeapiObj");
+    try expectBlockContains(win_src, "const nodeapi_stub_obj =", "const nodeapi_stub_bin =", "\"nodeapi-stub.d\"");
+    try expectBlockContains(win_src, "const addon_obj =", "const addon_bin =", "compileWinNodeapiObj");
+    try expectBlockContains(win_src, "const addon_obj =", "const addon_bin =", "\"-DBUILDING_NODE_EXTENSION\"");
+    try expectBlockContains(win_src, "const pkg_out =", "check_pkg_top.dependOn", "\"--profile\"");
+    try expectBlockContains(win_src, "const pkg_out =", "check_pkg_top.dependOn", "out/package/{s}");
+    const pkg_block_start = std.mem.indexOf(u8, win_src, "const pkg_out =") orelse return error.MissingPkgBlock;
+    const pkg_block_end = std.mem.indexOfPos(u8, win_src, pkg_block_start, "const check_pkg_top =") orelse return error.MissingPkgEnd;
+    try std.testing.expect(std.mem.indexOf(u8, win_src[pkg_block_start..pkg_block_end], "addIcuRuntimePath") == null);
 }
 
 test "libChakraNodeApiStub links ChakraCore.lib without full 161-export .def" {
     const win_src = @embedFile("build/windows.zig");
-    const stub_idx = std.mem.indexOf(u8, win_src, "nodeapi_stub.addFileArg(b.path(\"tools/nodeapi/stub/stub_provider.cpp\"));") orelse return error.MissingStubLink;
+    const stub_idx = std.mem.indexOf(u8, win_src, "\"tools/nodeapi/stub/stub_provider.cpp\",") orelse return error.MissingStubLink;
     const out_idx = std.mem.indexOfPos(u8, win_src, stub_idx, "libChakraNodeApiStub.dll") orelse return error.MissingStubOutput;
     const stub_block = win_src[stub_idx..out_idx];
     try std.testing.expect(std.mem.indexOf(u8, stub_block, "dr.implib") != null);

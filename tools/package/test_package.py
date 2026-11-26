@@ -330,6 +330,70 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
         if not ok_intl:
             raise RuntimeError("ch Intl check returned unexpected output: {!r}".format(out4))
 
+    # 5. Out-of-tree cwd provider-first dlopen check (real shared libraries only)
+    def _is_real_shared_lib(p):
+        if not os.path.isfile(p) or os.path.getsize(p) < 256:
+            return False
+        with open(p, "rb") as fh:
+            head = fh.read(4)
+        return head in (
+            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+            b"\x7fELF",
+        ) or head[:2] == b"MZ"
+
+    provider_cands = [
+        os.path.join(package_dir, "lib", "libChakraNodeApi.dylib"),
+        os.path.join(package_dir, "lib", "libChakraNodeApi.so"),
+        os.path.join(package_dir, "bin", "libChakraNodeApi.dll"),
+        os.path.join(package_dir, "lib", "libChakraNodeApi.dll"),
+    ]
+    provider_lib = next((p for p in provider_cands if _is_real_shared_lib(p)), None)
+    if provider_lib:
+        print("--- Test 5: out-of-tree cwd provider-first dlopen ({}) ---".format(provider_lib))
+        dl_env = dict(clean_env)
+        for ev in ("DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "LD_LIBRARY_PATH"):
+            dl_env.pop(ev, None)
+        dl_code = (
+            "import ctypes, os, sys; "
+            "p = sys.argv[1]; "
+            "lib = ctypes.WinDLL(p) if os.name == 'nt' else ctypes.CDLL(p, mode=ctypes.RTLD_GLOBAL); "
+            "fn = getattr(lib, 'napi_get_version', None); "
+            "assert fn is not None, 'missing napi_get_version export'; "
+            "print('dlopen-ok:' + os.path.basename(p))"
+        )
+        with tempfile.TemporaryDirectory(prefix="chakra-pkg-dlopen-cwd-") as outside_dir:
+            res5 = subprocess.run(
+                [sys.executable, "-c", dl_code, provider_lib],
+                cwd=outside_dir,
+                env=dl_env,
+                capture_output=True,
+                text=True,
+            )
+            if res5.returncode != 0 or "dlopen-ok:" not in (res5.stdout or ""):
+                raise RuntimeError(
+                    "Out-of-tree provider-first dlopen failed for '{}' (cwd={}, rc={}):\nstdout: {}\nstderr: {}".format(
+                        provider_lib, outside_dir, res5.returncode, res5.stdout, res5.stderr
+                    )
+                )
+            print("Out-of-tree cwd provider-first dlopen succeeded: {}".format((res5.stdout or "").strip()))
+            if ch_nodeapi_bin and _is_real_shared_lib(ch_nodeapi_bin):
+                res5_host = subprocess.run(
+                    [ch_nodeapi_bin, "--help"],
+                    cwd=outside_dir,
+                    env=dl_env,
+                    capture_output=True,
+                    text=True,
+                )
+                stderr5 = res5_host.stderr or ""
+                if ("dyld: Library not loaded" in stderr5
+                        or "error while loading shared libraries" in stderr5
+                        or "Unable to load" in stderr5):
+                    raise RuntimeError(
+                        "Out-of-tree cwd ch-nodeapi dynamic link check failed:\n{}".format(stderr5)
+                    )
+
     print("\nALL PACKAGE TESTS PASSED SUCCESSFULLY!")
     return True
 

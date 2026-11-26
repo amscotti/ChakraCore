@@ -1301,39 +1301,69 @@ pub fn build(b: *std.Build) void {
         gen_def_cmd.addArg("--def");
         const nodeapi_def = gen_def_cmd.addOutputFileArg("libChakraNodeApi.def");
 
+        const compileWinNodeapiObj = struct {
+            fn call(
+                allocator_b: *std.Build,
+                target_str: []const u8,
+                prof: Profile,
+                icu_mode: IcuMode,
+                icu_inc: ?[]const u8,
+                src_rel: []const u8,
+                obj_name: []const u8,
+                dep_name: []const u8,
+                opt_flag: []const u8,
+                with_debug: bool,
+                extra_defines: []const []const u8,
+                include_internal: bool,
+            ) std.Build.LazyPath {
+                const tu = allocator_b.addSystemCommand(&.{ allocator_b.graph.zig_exe, "c++", "-nostdlib++" });
+                tu.addArgs(&.{
+                    "-target",
+                    target_str,
+                    msRuntimeLibFlag(prof),
+                    "-std=c++17",
+                    opt_flag,
+                });
+                if (with_debug) tu.addArg("-g");
+                tu.addArgs(&.{ "-DNAPI_VERSION=10", "-DNOMINMAX" });
+                for (extra_defines) |d| tu.addArg(d);
+                tu.addArg("-Iinclude/nodeapi");
+                if (include_internal) {
+                    tu.addArgs(&.{ "-Ilib/Jsrt", "-Ilib/NodeApi", "-Wno-date-time" });
+                    if (icu_mode == .icu4c) {
+                        if (icu_inc) |inc| {
+                            tu.addArg("-isystem");
+                            tu.addArg(inc);
+                        }
+                    }
+                }
+                tu.addArgs(&.{ "-MD", "-MF" });
+                _ = tu.addDepFileOutputArg(dep_name);
+                tu.addArg("-o");
+                const out = tu.addOutputFileArg(obj_name);
+                tu.addArg("-c");
+                tu.addFileArg(allocator_b.path(src_rel));
+                return out;
+            }
+        }.call;
+
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (tables.nodeapi_provider_tus) |src| {
-            const tu = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
-            tu.addArgs(&.{
-                "-target",
-                profile_target,
-                msRuntimeLibFlag(profile),
-                "-std=c++17",
-                if (profile == .debug_static) "-O0" else "-O2",
-            });
-            if (profile != .release_shared) tu.addArg("-g");
-            tu.addArgs(&.{
-                "-DNAPI_VERSION=10",
-                "-DNOMINMAX",
-                "-Ilib/Jsrt",
-                "-Iinclude/nodeapi",
-                "-Ilib/NodeApi",
-                "-Wno-date-time",
-            });
-            if (icu == .icu4c) {
-                if (icu_paths.include) |inc| {
-                    tu.addArg("-isystem");
-                    tu.addArg(inc);
-                }
-            }
             const base = std.fs.path.basename(src);
-            tu.addArg("-MD");
-            tu.addArg("-MF");
-            _ = tu.addDepFileOutputArg(b.fmt("nodeapi-{s}.d", .{base}));
-            tu.addArg("-o");
-            const out = tu.addOutputFileArg(b.fmt("nodeapi-{s}.obj", .{base}));
-            tu.addArg("-c");
-            tu.addFileArg(b.path(src));
+            const out = compileWinNodeapiObj(
+                b,
+                profile_target,
+                profile,
+                icu,
+                icu_paths.include,
+                src,
+                b.fmt("nodeapi-{s}.obj", .{base}),
+                b.fmt("nodeapi-{s}.d", .{base}),
+                if (profile == .debug_static) "-O0" else "-O2",
+                profile != .release_shared,
+                &.{},
+                true,
+            );
             prov_objs.append(arena, out) catch @panic("OOM");
         }
 
@@ -1395,45 +1425,46 @@ pub fn build(b: *std.Build) void {
         check_nodeapi_top.dependOn(&exports_check.step);
         check_nodeapi_step_opt = &exports_check.step;
 
-        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
-        nodeapi_host.addArgs(&.{
-            "-target",
+        const nodeapi_host_obj = compileWinNodeapiObj(
+            b,
             profile_target,
-            msRuntimeLibFlag(profile),
-            "-std=c++17",
+            profile,
+            icu,
+            icu_paths.include,
+            "tools/nodeapi/ch-nodeapi.cpp",
+            "nodeapi-ch-nodeapi.obj",
+            "nodeapi-host.d",
             "-O2",
-            "-g",
-            "-DNAPI_VERSION=10",
-            "-DNOMINMAX",
-            "-Ilib/Jsrt",
-            "-Iinclude/nodeapi",
-            "-Ilib/NodeApi",
-            "-Wno-date-time",
-        });
-        nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
+            true,
+            &.{},
+            true,
+        );
+        const nodeapi_host = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
+        nodeapi_host.addArgs(&.{ "-target", profile_target, msRuntimeLibFlag(profile), "-g" });
+        nodeapi_host.addFileArg(nodeapi_host_obj);
         nodeapi_host.addFileArg(dr.implib);
         addWinLibs(nodeapi_host, tables.nodeapi_win_libs);
         const nodeapi_host_bin = nodeapi_host.addPrefixedOutputFileArg("-o", "ch-nodeapi.exe");
         nodeapi_host.step.dependOn(&dr.link.step);
         nodeapi_host_bin_opt = nodeapi_host_bin;
 
-        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
-        nodeapi_stub.addArgs(&.{
-            "-target",
+        const nodeapi_stub_obj = compileWinNodeapiObj(
+            b,
             profile_target,
-            "-shared",
-            msRuntimeLibFlag(profile),
-            "-std=c++17",
+            profile,
+            icu,
+            icu_paths.include,
+            "tools/nodeapi/stub/stub_provider.cpp",
+            "nodeapi-stub_provider.obj",
+            "nodeapi-stub.d",
             "-O2",
-            "-g",
-            "-DNAPI_VERSION=10",
-            "-DNOMINMAX",
-            "-Ilib/Jsrt",
-            "-Iinclude/nodeapi",
-            "-Ilib/NodeApi",
-            "-Wno-date-time",
-        });
-        nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
+            true,
+            &.{},
+            true,
+        );
+        const nodeapi_stub = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
+        nodeapi_stub.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile), "-g" });
+        nodeapi_stub.addFileArg(nodeapi_stub_obj);
         // Stub provider exports only its minimal subset (via NAPI_EXTERN and
         // STUB_HOST_EXPORT) and resolves Js* symbols against ChakraCore.lib;
         // never link the full 161-symbol libChakraNodeApi.def here.
@@ -1454,21 +1485,23 @@ pub fn build(b: *std.Build) void {
         }
 
         for ([_][]const u8{ "hello_world", "missing_register", "promise_probe", "return_replaces", "version_reject" }) |name| {
-            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
-            addon.addArgs(&.{
-                "-target",
+            const addon_obj = compileWinNodeapiObj(
+                b,
                 profile_target,
-                "-shared",
-                msRuntimeLibFlag(profile),
-                "-std=c++17",
+                profile,
+                icu,
+                icu_paths.include,
+                b.fmt("tools/nodeapi/addons/{s}.cpp", .{name}),
+                b.fmt("nodeapi-addon-{s}.obj", .{name}),
+                b.fmt("nodeapi-addon-{s}.d", .{name}),
                 "-O2",
-                "-g",
-                "-DNAPI_VERSION=10",
-                "-DNOMINMAX",
-                "-DBUILDING_NODE_EXTENSION",
-                "-Iinclude/nodeapi",
-            });
-            addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
+                true,
+                &.{"-DBUILDING_NODE_EXTENSION"},
+                false,
+            );
+            const addon = b.addSystemCommand(&.{ b.graph.zig_exe, "c++", "-nostdlib++" });
+            addon.addArgs(&.{ "-target", profile_target, "-shared", msRuntimeLibFlag(profile), "-g" });
+            addon.addFileArg(addon_obj);
             addon.addFileArg(prov_lib);
             const addon_bin = addon.addPrefixedOutputFileArg("-o", b.fmt("{s}.node", .{name}));
             addon.step.dependOn(&prov_link.step);
@@ -1690,6 +1723,7 @@ pub fn build(b: *std.Build) void {
 
     // (10) Release Packaging and package verification.
     if (supportsPackageGate(profile)) {
+        const pkg_out = b.fmt("out/package/{s}", .{profile.name()});
         const pkg_cmd = b.addSystemCommand(&.{python});
         pkg_cmd.addFileArg(b.path("tools/package/build_package.py"));
         pkg_cmd.addArg("--prefix");
@@ -1699,28 +1733,33 @@ pub fn build(b: *std.Build) void {
             pkg_cmd.addArg(prefix_dir);
         }
         pkg_cmd.addArg("--out-dir");
-        pkg_cmd.addArg("out/package");
+        pkg_cmd.addArg(pkg_out);
+        pkg_cmd.addArg("--profile");
+        pkg_cmd.addArg(profile.name());
         pkg_cmd.addArg("--target");
         pkg_cmd.addArg("windows-x64");
+        pkg_cmd.addArg("--icu-mode");
+        pkg_cmd.addArg("auto");
         pkg_cmd.step.dependOn(artifacts_ready);
         if (nodeapi_step_opt) |ns| pkg_cmd.step.dependOn(ns);
         pkg_cmd.stdio = .inherit;
         pkg_cmd.has_side_effects = true;
-        const pkg_top = b.step("package", "Build chakracore-<version>-windows-x64.tar.gz in out/package");
+        const pkg_top = b.step("package", b.fmt("Build chakracore-<version>-windows-x64.tar.gz in {s}", .{pkg_out}));
         pkg_top.dependOn(&pkg_cmd.step);
 
         const verify_cmd = b.addSystemCommand(&.{python});
         verify_cmd.addFileArg(b.path("tools/package/verify_package.py"));
-        verify_cmd.addArg("out/package");
+        verify_cmd.addArg(pkg_out);
+        verify_cmd.addArg("--profile");
+        verify_cmd.addArg(profile.name());
         verify_cmd.step.dependOn(&pkg_cmd.step);
         verify_cmd.stdio = .inherit;
         verify_cmd.has_side_effects = true;
 
         const test_cmd = b.addSystemCommand(&.{python});
         test_cmd.addFileArg(b.path("tools/package/test_package.py"));
-        test_cmd.addArg("out/package");
+        test_cmd.addArg(pkg_out);
         test_cmd.step.dependOn(&verify_cmd.step);
-        addIcuRuntimePath(&ctx, test_cmd, null);
         test_cmd.stdio = .inherit;
         test_cmd.has_side_effects = true;
 

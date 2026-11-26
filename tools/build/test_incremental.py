@@ -508,13 +508,56 @@ def t_concurrent():
               "exit %s in %.1fs wall" % (rc, dt))
 
 
+def t_nodeapi_header():
+    hdr = "lib/NodeApi/NodeApiHostApi.h"
+    targets = ["libChakraNodeApi", "ch-nodeapi"]
+    log("== nodeapi-header: %s (test) ==" % hdr)
+    warm_rc, warm_out, _ = run(
+        ZIG + ["build", "-Dprofile=test"] + targets, BUILD_TIMEOUT)
+    if not build_green("test", warm_out, warm_rc, "nodeapi warm"):
+        return
+    with touched(hdr, PROBE_C):
+        rc, out, dt = run(
+            ZIG + ["build", "--verbose", "-Dprofile=test"] + targets,
+            BUILD_TIMEOUT)
+        save_log("nodeapi-header-touch",
+                 ZIG + ["build", "--verbose", "-Dprofile=test"] + targets,
+                 out)
+        if not build_green("test", out, rc, "nodeapi-header touch"):
+            return
+        lines = out.splitlines()
+        prov_hits = [l for l in lines if " -c " in l and "lib/NodeApi/" in l]
+        host_hits = [l for l in lines if " -c " in l and "tools/nodeapi/ch-nodeapi.cpp" in l]
+        stub_hits = [l for l in lines if " -c " in l and "tools/nodeapi/stub/stub_provider.cpp" in l]
+        engine_hits = [l for l in lines if " -c " in l and ("lib/Runtime/" in l or "lib/Backend/" in l or "lib/Parser/" in l)]
+        check("nodeapi header touch recompiles bounded TUs (0 < n < 25, 0 engine)",
+              0 < len(prov_hits) < 20 and len(host_hits) == 1 and len(stub_hits) == 1 and not engine_hits,
+              "prov=%d host=%d stub=%d engine=%d"
+              % (len(prov_hits), len(host_hits), len(stub_hits), len(engine_hits)))
+    rc_rest, out_rest, _ = run(
+        ZIG + ["build", "--verbose", "-Dprofile=test"] + targets,
+        BUILD_TIMEOUT)
+    if build_green("test", out_rest, rc_rest, "nodeapi-header restore"):
+        eng_rest = [l for l in out_rest.splitlines() if " -c " in l and ("lib/Runtime/" in l or "lib/Backend/" in l or "lib/Parser/" in l)]
+        check("nodeapi header restore rebuilds zero engine TUs",
+              not eng_rest, "%d" % len(eng_rest))
+    rc_noop, out_noop, _ = run(
+        ZIG + ["build", "--verbose", "-Dprofile=test"] + targets,
+        BUILD_TIMEOUT)
+    if build_green("test", out_noop, rc_noop, "nodeapi-header noop"):
+        comp_noop = [l for l in out_noop.splitlines() if " -c " in l and ("lib/NodeApi/" in l or "tools/nodeapi/" in l)]
+        check("nodeapi header post-restore noop has 0 compiles",
+              not comp_noop, "%d" % len(comp_noop))
+
+
 TESTS = {"isolation": t_isolation, "noop": t_noop, "source": t_source,
-         "header": t_header, "jstoc": t_jstoc, "config": t_config,
+         "header": t_header, "nodeapi-header": t_nodeapi_header,
+         "jstoc": t_jstoc, "config": t_config,
          "bzcomment": t_bzcomment, "selection": t_selection,
          "concurrent": t_concurrent}
-QUICK = ("isolation", "noop", "bzcomment", "selection")
-FULL = ("isolation", "noop", "source", "header", "jstoc", "config",
-        "bzcomment", "selection", "concurrent")
+QUICK = ("isolation", "noop", "nodeapi-header", "bzcomment", "selection")
+FULL = ("isolation", "noop", "source", "header", "nodeapi-header", "jstoc",
+        "config", "bzcomment", "selection", "concurrent")
 
 
 def main(argv):
