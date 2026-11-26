@@ -10178,6 +10178,10 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         {
             return JavascriptProxy::DefineOwnPropertyDescriptor(obj, propId, descriptor, throwOnError, scriptContext, flags);
         }
+        else if (VarIs<ModuleNamespace>(obj))
+        {
+            return ModuleNamespace::DefineOwnPropertyDescriptor(VarTo<ModuleNamespace>(obj), propId, descriptor, throwOnError, scriptContext);
+        }
 #ifdef _CHAKRACOREBUILD
         else if (VarIs<CustomExternalWrapperObject>(obj))
         {

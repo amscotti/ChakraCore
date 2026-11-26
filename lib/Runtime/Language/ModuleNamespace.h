@@ -71,10 +71,11 @@ namespace Js
         virtual BOOL SetAttributes(PropertyId propertyId, PropertyAttributes attributes) override { return false; }
         virtual BOOL IsExtensible() override { return false; };
         virtual BOOL PreventExtensions() override { return true; }
-        virtual BOOL Seal() override { return false; }
-        virtual BOOL Freeze() override { return false; }
-        virtual BOOL IsSealed() override { return true; }
-        virtual BOOL IsFrozen() override { return true; }
+        virtual BOOL Seal() override;
+        virtual BOOL Freeze() override;
+        virtual BOOL IsSealed() override;
+        virtual BOOL IsFrozen() override;
+        static BOOL DefineOwnPropertyDescriptor(ModuleNamespace* obj, PropertyId propId, const PropertyDescriptor& descriptor, bool throwOnError, ScriptContext* scriptContext);
         virtual BOOL GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
 

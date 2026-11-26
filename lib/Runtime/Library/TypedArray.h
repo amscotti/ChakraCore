@@ -198,7 +198,7 @@ namespace Js
         // buffer's current [[ArrayBufferByteLength]]. Fixed views keep the
         // captured length and report zero while their range is out of bounds;
         // both recover when the buffer grows again.
-        uint32 GetLength() const
+        uint32 ComputeEffectiveLength() const
         {
             uint32 bufferByteLength = GetArrayBuffer()->GetByteLength();
             if (byteOffset > bufferByteLength)
@@ -213,11 +213,26 @@ namespace Js
             return capturedLength <= availableLength ? capturedLength : 0;
         }
 
-        // Keep the ArrayObject length field equal to GetLength() after a
-        // buffer resize (see capturedLength above).
+        // For all non-GSAB views (!tracksSharedLength), the inherited
+        // ArrayObject::length field caches the effective length (initialized at
+        // construction, updated by RefreshEffectiveLength on resize, and cleared
+        // to 0 by ClearLengthAndBufferOnDetach). Only cross-runtime/length-tracking
+        // SharedArrayBuffer views read the backing buffer byte length live.
+        uint32 GetLength() const
+        {
+            if (!tracksSharedLength)
+            {
+                Assert(GetArrayBuffer() == nullptr || IsDetachedBuffer() || this->length == ComputeEffectiveLength());
+                return this->length;
+            }
+            return ComputeEffectiveLength();
+        }
+
+        // Keep the ArrayObject length field equal to ComputeEffectiveLength()
+        // after a buffer resize (see capturedLength above).
         void RefreshEffectiveLength()
         {
-            this->length = GetLength();
+            this->length = ComputeEffectiveLength();
         }
 
         bool IsOutOfBounds() const

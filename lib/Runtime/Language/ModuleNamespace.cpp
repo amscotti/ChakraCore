@@ -184,6 +184,113 @@ namespace Js
         return GetProperty(this, propertyId, &value, nullptr, GetScriptContext());
     }
 
+    static BOOL RejectDefineProperty(bool throwOnError, ScriptContext* scriptContext, int32 errorCode, const PropertyRecord* propertyRecord)
+    {
+        Assert(scriptContext);
+        Assert(propertyRecord);
+        if (throwOnError)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, errorCode, propertyRecord->GetBuffer());
+        }
+        return FALSE;
+    }
+
+    BOOL ModuleNamespace::DefineOwnPropertyDescriptor(ModuleNamespace* obj, PropertyId propId, const PropertyDescriptor& descriptor, bool throwOnError, ScriptContext* scriptContext)
+    {
+        Assert(obj);
+        Assert(scriptContext);
+
+        // ES2025 10.4.6.6 [[DefineOwnProperty]] ( P, Desc ):
+        // 1. If P is a Symbol, return ! OrdinaryDefineOwnProperty(O, P, Desc).
+        const PropertyRecord* propertyRecord = scriptContext->GetThreadContext()->GetPropertyName(propId);
+        if (propertyRecord->IsSymbol())
+        {
+            PropertyDescriptor currentDescriptor;
+            BOOL isCurrentDescriptorDefined = JavascriptOperators::GetOwnPropertyDescriptor(obj, propId, scriptContext, &currentDescriptor);
+            bool isExtensible = !!obj->IsExtensible();
+            return JavascriptOperators::ValidateAndApplyPropertyDescriptor<true>(
+                obj, propId, descriptor, isCurrentDescriptorDefined ? &currentDescriptor : nullptr, isExtensible, throwOnError, scriptContext);
+        }
+
+        // 2. Let current be ? O.[[GetOwnProperty]](P) (may throw ReferenceError in TDZ).
+        // 3. If current is undefined, return false.
+        PropertyDescriptor currentDescriptor;
+        if (!JavascriptOperators::GetOwnPropertyDescriptor(obj, propId, scriptContext, &currentDescriptor))
+        {
+            return RejectDefineProperty(throwOnError, scriptContext, JSERR_DefineProperty_NotExtensible, propertyRecord);
+        }
+
+        // 4. If Desc.[[Configurable]] is true, return false.
+        // 5. If Desc.[[Enumerable]] is false, return false.
+        // 6. If IsAccessorDescriptor(Desc) is true, return false.
+        // 7. If Desc.[[Writable]] is false, return false.
+        if ((descriptor.ConfigurableSpecified() && descriptor.IsConfigurable()) ||
+            (descriptor.EnumerableSpecified() && !descriptor.IsEnumerable()) ||
+            descriptor.IsAccessorDescriptor() ||
+            (descriptor.WritableSpecified() && !descriptor.IsWritable()))
+        {
+            return RejectDefineProperty(throwOnError, scriptContext, JSERR_DefineProperty_NotConfigurable, propertyRecord);
+        }
+
+        // 8. If Desc has a [[Value]] field, return SameValue(Desc.[[Value]], current.[[Value]]).
+        if (descriptor.ValueSpecified() &&
+            !JavascriptConversion::SameValue(descriptor.GetValue(), currentDescriptor.GetValue()))
+        {
+            return RejectDefineProperty(throwOnError, scriptContext, JSERR_DefineProperty_NotWritable, propertyRecord);
+        }
+
+        // 9. Return true.
+        return TRUE;
+    }
+
+    BOOL ModuleNamespace::Seal()
+    {
+        // SetIntegrityLevel(ns, "sealed"): check [[GetOwnProperty]] (TDZ) across
+        // exports; all exports are already configurable:false, and non-extensible.
+        ScriptContext* scriptContext = GetScriptContext();
+        if (sortedExportedNames != nullptr)
+        {
+            auto count = sortedExportedNames->Count();
+            for (decltype(count) i = 0; i < count; i++)
+            {
+                Var value = nullptr;
+                GetProperty(this, VarTo<JavascriptString>(sortedExportedNames->Item(i)), &value, nullptr, scriptContext);
+            }
+        }
+        return TRUE;
+    }
+
+    BOOL ModuleNamespace::Freeze()
+    {
+        // SetIntegrityLevel(ns, "frozen"): succeeds only when no resolved exports
+        // exist (Symbol.toStringTag is already non-writable, non-configurable).
+        // Any initialized export has writable:true, so freezing rejects; TDZ throws first.
+        ScriptContext* scriptContext = GetScriptContext();
+        if (sortedExportedNames != nullptr)
+        {
+            auto count = sortedExportedNames->Count();
+            for (decltype(count) i = 0; i < count; i++)
+            {
+                Var value = nullptr;
+                if (GetProperty(this, VarTo<JavascriptString>(sortedExportedNames->Item(i)), &value, nullptr, scriptContext))
+                {
+                    return FALSE;
+                }
+            }
+        }
+        return TRUE;
+    }
+
+    BOOL ModuleNamespace::IsSealed()
+    {
+        return Seal();
+    }
+
+    BOOL ModuleNamespace::IsFrozen()
+    {
+        return Freeze();
+    }
+
     BOOL ModuleNamespace::IsConfigurable(PropertyId propertyId)
     {
         SimpleDictionaryPropertyDescriptor<BigPropertyIndex> propertyDescriptor;

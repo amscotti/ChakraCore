@@ -689,7 +689,7 @@ namespace UnifiedRegex
 
         Node* cachedNode = nullptr;
         if (UnicodeProperty::GetPropertyCompiledCache().TryWithCachedRanges(
-                resolved, isNegation, caseInsensitiveFlagPresent, ctAllocator,
+                resolved, isNegation, caseInsensitiveFlagPresent, unicodeSetsFlagPresent, ctAllocator,
                 [this, &cachedNode](const char16* bmpPairs, int32 numBmpPairs, const codepoint_t* astralPairs, int32 numAstralPairs) {
                     cachedNode = BuildPropertyEscapeNode(bmpPairs, numBmpPairs, astralPairs, numAstralPairs);
                 }))
@@ -701,25 +701,42 @@ namespace UnifiedRegex
         if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
             Fail(JSERR_RegExpSyntax); // ICU failed to compute the set
 
-        // \P{...} complements the property over all code points first, and
-        // i-mode case closure (when effective) applies to the complemented
-        // set, so /\P{Lu}/iu matches 'A' through 'a' (Node-verified), while
-        // [^\p{Lu}] closes over \p{Lu} and then complements in the class
-        // path below.
+        // Under v+i, close the raw property set over case equivalence before
+        // complementing so /\P{Lu}/iv excludes 'a' as well as 'A' (complement of
+        // a closed set is already closed). Under plain u+i, \P{...} complements
+        // first and then closes, so /\P{Lu}/iu matches 'A' through 'a'.
         CharSet<codepoint_t> secondSet; // complement (\P) or case closure (i)
-        CharSet<codepoint_t> thirdSet;  // case closure when both applied
+        CharSet<codepoint_t> thirdSet;  // the second step when both apply
         CharSet<codepoint_t>* toUse = &codePointSet;
-        if (isNegation)
+        if (unicodeSetsFlagPresent)
         {
-            codePointSet.ToComplement(ctAllocator, secondSet);
-            codePointSet.FreeBody(ctAllocator);
-            toUse = &secondSet;
+            if (caseInsensitiveFlagPresent)
+            {
+                toUse->ToEquivClass(ctAllocator, secondSet);
+                toUse->FreeBody(ctAllocator);
+                toUse = &secondSet;
+            }
+            if (isNegation)
+            {
+                toUse->ToComplement(ctAllocator, thirdSet);
+                toUse->FreeBody(ctAllocator);
+                toUse = &thirdSet;
+            }
         }
-        if (caseInsensitiveFlagPresent) // effective i state (scoped modifiers)
+        else
         {
-            toUse->ToEquivClass(ctAllocator, thirdSet);
-            toUse->FreeBody(ctAllocator);
-            toUse = &thirdSet;
+            if (isNegation)
+            {
+                codePointSet.ToComplement(ctAllocator, secondSet);
+                codePointSet.FreeBody(ctAllocator);
+                toUse = &secondSet;
+            }
+            if (caseInsensitiveFlagPresent) // effective i state (scoped modifiers)
+            {
+                toUse->ToEquivClass(ctAllocator, thirdSet);
+                toUse->FreeBody(ctAllocator);
+                toUse = &thirdSet;
+            }
         }
 
         int32 numBmpPairs = 0;
@@ -817,7 +834,7 @@ namespace UnifiedRegex
         codepoint_t* astralOwned = guard.astralPairs;
         guard.Disarm();
         UnicodeProperty::GetPropertyCompiledCache().Insert(
-            resolved, isNegation, caseInsensitiveFlagPresent,
+            resolved, isNegation, caseInsensitiveFlagPresent, unicodeSetsFlagPresent,
             bmpOwned, numBmpPairs, astralOwned, numAstralPairs);
         return node;
     }
@@ -2712,10 +2729,33 @@ namespace UnifiedRegex
             return;
         }
 
+        Assert(set.cp.IsEmpty());
         CharSet<codepoint_t> codePointSet;
         if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
             Fail(JSERR_RegExpSyntax);
-        if (!isNegation)
+        // Under i, close the raw property set before complementing \P{...}
+        // (matching ES2024 UnicodeSets + MaybeSimpleCaseFolding; the complement
+        // of a closed set is already closed).
+        if (caseInsensitiveFlagPresent)
+        {
+            CharSet<codepoint_t> closed;
+            codePointSet.ToEquivClass(ctAllocator, closed);
+            codePointSet.FreeBody(ctAllocator);
+            if (!isNegation)
+            {
+                set.cp.UnionInPlace(ctAllocator, closed);
+                closed.FreeBody(ctAllocator);
+            }
+            else
+            {
+                CharSet<codepoint_t> complemented;
+                closed.ToComplement(ctAllocator, complemented);
+                closed.FreeBody(ctAllocator);
+                set.cp.UnionInPlace(ctAllocator, complemented);
+                complemented.FreeBody(ctAllocator);
+            }
+        }
+        else if (!isNegation)
         {
             set.cp.UnionInPlace(ctAllocator, codePointSet);
             codePointSet.FreeBody(ctAllocator);
@@ -2727,14 +2767,6 @@ namespace UnifiedRegex
             codePointSet.FreeBody(ctAllocator);
             set.cp.UnionInPlace(ctAllocator, complemented);
             complemented.FreeBody(ctAllocator);
-        }
-        // Close the property operand so &&/-- see closed operands under i
-        // (the ICU set arrives raw). String-property members were added
-        // above and use the canonical string domain; closing them would
-        // over-fold, so only close when no string members were added.
-        if (set.numStrings == 0 && !set.containsEmptyString)
-        {
-            VCloseOperandIfInsensitive(set);
         }
     }
 
@@ -4951,6 +4983,7 @@ namespace UnifiedRegex
             case 'u':
                 {
                     bool surrogateEncountered = false;
+                    const bool isBracedQuantifier = (ECLookahead() == '{') && AtQuantifier();
                     int lengthOfSurrogate = TryParseExtendedUnicodeEscape(c, surrogateEncountered, true);
                 if (lengthOfSurrogate > 0)
                 {
@@ -4969,6 +5002,25 @@ namespace UnifiedRegex
                         // scan position matches the source text (the '}' and
                         // digit strict rules would otherwise see the tail).
                         ECConsume(lengthOfSurrogate + 2);
+                    }
+                    if (isBracedQuantifier && this->scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                    {
+                        // Without the u/v flag, \u is an Annex B identity
+                        // escape 'u' and {DecimalDigits} already acts as its
+                        // quantifier; only one lazy '?' may follow it, and any
+                        // further quantifier has nothing to repeat.
+                        const EncodedChar la = ECLookahead();
+                        if (la == '?')
+                        {
+                            if (ECCanConsume(2) && ECLookahead(1) == '?')
+                            {
+                                DeferredFailIfNotUnicode(JSERR_RegExpBadQuant);
+                            }
+                        }
+                        else if (AtQuantifier())
+                        {
+                            DeferredFailIfNotUnicode(JSERR_RegExpBadQuant);
+                        }
                     }
                     //Don't fall through
                     break;

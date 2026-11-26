@@ -473,12 +473,25 @@ namespace Js
             lengthTracking = (resizableBuffer || growableSharedBuffer) &&
                 !(args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]));
 
-            // Both ToIndex calls below can run user code that resizes or
-            // detaches the buffer. Coerce first, then re-read the current
-            // byte length before computing the element range.
+            // ES2025 23.2.5.1.3 InitializeTypedArrayFromArrayBuffer:
+            // Coerce byteOffset, validate offset % elementSize == 0, then
+            // coerce length (if not undefined) BEFORE checking detached state or
+            // offset > byteLength / alignment against bufferByteLength. Both
+            // ToIndex calls can run user code that resizes or detaches buffer.
             if (args.Info.Count > 2)
             {
                 offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
+            }
+
+            if ((offset % elementSize) != 0)
+            {
+                JavascriptError::ThrowRangeError(
+                    scriptContext, JSERR_InvalidTypedArrayLength);
+            }
+
+            if (args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]))
+            {
+                mappedLength = ArrayBuffer::ToIndex(args[3], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength / elementSize, false);
             }
 
             if (arrayBuffer->IsDetached())
@@ -492,40 +505,18 @@ namespace Js
                 JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
             }
 
-            // we can start the mapping from the end of the incoming buffer, but with a map of 0 length.
-            // User can't really do anything useful with the typed array but apparently this is allowed.
-            if ((offset % elementSize) != 0)
-            {
-                JavascriptError::ThrowRangeError(
-                    scriptContext, JSERR_InvalidTypedArrayLength);
-            }
-
-            if (args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]))
-            {
-                mappedLength = ArrayBuffer::ToIndex(args[3], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength / elementSize, false);
-            }
-            else
+            if (mappedLength == -1)
             {
                 // A length-tracking view floors a partial trailing element;
                 // a fixed view must fit exactly within the initial buffer.
-                if (!lengthTracking && (byteLength - offset) % elementSize != 0)
+                if (!lengthTracking && (byteLength - (uint32)offset) % elementSize != 0)
                 {
                     JavascriptError::ThrowRangeError(
                         scriptContext, JSERR_InvalidTypedArrayLength);
                 }
-                mappedLength = (byteLength - offset)/elementSize;
+                mappedLength = (byteLength - (uint32)offset) / elementSize;
             }
-
-            // Validation above may have been reordered by user code in the
-            // length conversion; verify the view still fits.
-            if (arrayBuffer->IsDetached())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray]"));
-            }
-
-            byteLength = arrayBuffer->GetByteLength();
-            if ((uint32)offset > byteLength ||
-                (!lengthTracking && (uint32)mappedLength > (byteLength - (uint32)offset) / elementSize))
+            else if (!lengthTracking && (uint32)mappedLength > (byteLength - (uint32)offset) / elementSize)
             {
                 JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
             }

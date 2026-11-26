@@ -2298,6 +2298,8 @@ namespace Js
                         if (ary->GetLength() >= limit)
                             break;
                     }
+                    if (ary->GetLength() >= limit)
+                        break;
                 }
             }
 

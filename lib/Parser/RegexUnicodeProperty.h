@@ -819,6 +819,7 @@ namespace UnifiedRegex
                 bool isGroupValue;
                 bool isNegation;
                 bool isIgnoreCase;
+                bool isUnicodeSets;
                 bool valid;
                 int32 value;
                 int32 numBmpPairs;
@@ -842,6 +843,7 @@ namespace UnifiedRegex
                         entries[s][w].isGroupValue = false;
                         entries[s][w].isNegation = false;
                         entries[s][w].isIgnoreCase = false;
+                        entries[s][w].isUnicodeSets = false;
                         entries[s][w].valid = false;
                         entries[s][w].value = 0;
                         entries[s][w].numBmpPairs = 0;
@@ -879,27 +881,29 @@ namespace UnifiedRegex
                 }
             }
 
-            static uint32 HashKey(const Resolved& r, bool isNegation, bool isIgnoreCase)
+            static uint32 HashKey(const Resolved& r, bool isNegation, bool isIgnoreCase, bool isUnicodeSets)
             {
                 uint32 h = PropertyRangeCache::HashKey(r);
                 if (isNegation)
                     h ^= 0x165667B1u;
                 if (isIgnoreCase)
                     h ^= 0x9E3779B9u;
+                if (isUnicodeSets)
+                    h ^= 0x85EBCA6Bu;
                 return h;
             }
 
-            static bool Matches(const Entry& e, const Resolved& r, bool isNegation, bool isIgnoreCase)
+            static bool Matches(const Entry& e, const Resolved& r, bool isNegation, bool isIgnoreCase, bool isUnicodeSets)
             {
                 return e.valid && e.kind == r.kind && e.value == r.value &&
                     e.isGroupValue == r.isGroupValue && e.isNegation == isNegation &&
-                    e.isIgnoreCase == isIgnoreCase;
+                    e.isIgnoreCase == isIgnoreCase && e.isUnicodeSets == isUnicodeSets;
             }
 
             template <typename Callback>
-            bool TryWithCachedRanges(const Resolved& resolved, bool isNegation, bool isIgnoreCase, ArenaAllocator* allocator, Callback fn)
+            bool TryWithCachedRanges(const Resolved& resolved, bool isNegation, bool isIgnoreCase, bool isUnicodeSets, ArenaAllocator* allocator, Callback fn)
             {
-                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase) & (NumSets - 1);
+                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase, isUnicodeSets) & (NumSets - 1);
                 char16 stackBmp[1024];
                 codepoint_t stackAstral[256];
                 char16* bmpBuf = stackBmp;
@@ -913,7 +917,7 @@ namespace UnifiedRegex
                     for (uint32 w = 0; w < Ways; w++)
                     {
                         const Entry& e = entries[setIdx][w];
-                        if (Matches(e, resolved, isNegation, isIgnoreCase))
+                        if (Matches(e, resolved, isNegation, isIgnoreCase, isUnicodeSets))
                         {
                             numBmpPairs = e.numBmpPairs;
                             numAstralPairs = e.numAstralPairs;
@@ -957,11 +961,11 @@ namespace UnifiedRegex
             }
 
             void Insert(
-                const Resolved& resolved, bool isNegation, bool isIgnoreCase,
+                const Resolved& resolved, bool isNegation, bool isIgnoreCase, bool isUnicodeSets,
                 char16* bmpPairs, int32 numBmpPairs,
                 codepoint_t* astralPairs, int32 numAstralPairs)
             {
-                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase) & (NumSets - 1);
+                const uint32 setIdx = HashKey(resolved, isNegation, isIgnoreCase, isUnicodeSets) & (NumSets - 1);
                 char16* oldBmp = nullptr;
                 int32 oldNumBmp = 0;
                 codepoint_t* oldAstral = nullptr;
@@ -975,7 +979,7 @@ namespace UnifiedRegex
                     for (uint32 w = 0; w < Ways; w++)
                     {
                         const Entry& e = entries[setIdx][w];
-                        if (Matches(e, resolved, isNegation, isIgnoreCase))
+                        if (Matches(e, resolved, isNegation, isIgnoreCase, isUnicodeSets))
                         {
                             alreadyCached = true;
                             break;
@@ -1002,6 +1006,7 @@ namespace UnifiedRegex
                         dst.isGroupValue = resolved.isGroupValue;
                         dst.isNegation = isNegation;
                         dst.isIgnoreCase = isIgnoreCase;
+                        dst.isUnicodeSets = isUnicodeSets;
                         dst.valid = true;
                         dst.value = resolved.value;
                         dst.numBmpPairs = numBmpPairs;
