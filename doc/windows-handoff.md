@@ -45,9 +45,9 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 | `check-nodeapi` | Verifies `gen_nodeapi_exports.py --check` + pure-Python PE32+ export parser `check_nodeapi.py --dll <libChakraNodeApi.dll>` matches all `161` symbols (`155` `napi_*`/`node_api_*` + `6` host) |
 | `check-gcstress` | Runs bounded `GCStress.exe` in-thread and concurrent heap walks |
 | `check-wasm` | Runs `tools/build/check_wasm_p1.py` (`383` P1 entries; requires `-Djit=true` and non-release profile) |
-| `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`) |
+| `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`, pinned in `tools/build/gate_counts.json` at `650/0` `win32_test` and `669/0` `win32_debug`) |
 | `check` | Aggregates `check-selftest`, `verify-bytecode` (non-release), `check-regression` (non-release), `check-smoke`, `check-jit` (when `-Djit=true`), `check-nodeapi` (shared profiles), `check-gcstress`, and `check-metadata` |
-| `package` | Builds deterministic `out/package/chakracore-<version>-windows-x64.tar.gz` + `MANIFEST.json` (shared profiles only) |
+| `package` | Builds deterministic `out/package/<profile>/chakracore-<version>-windows-x64.tar.gz` + `MANIFEST.json` (shared profiles only) |
 | `check-package` | Builds, SHA-256 verifies (`verify_package.py`), and executes packaged `ch.exe` + `ch-nodeapi.exe` (`test_package.py`) |
 
 ---
@@ -227,9 +227,9 @@ Expected: `check-nodeapi` parses `libChakraNodeApi.dll`'s PE32+ Export Directory
 zig build -Dprofile=release-shared libChakraNodeApi ch-nodeapi check-nodeapi package check-package
 ```
 
-*(Packaging invokes `python tools/package/build_package.py --prefix out/release-shared --out-dir out/package --target windows-x64`.)*
+*(Packaging invokes `python tools/package/build_package.py --prefix out/release-shared --out-dir out/package/release-shared --target windows-x64 --profile release-shared --icu-mode auto`.)*
 
-Expected: produces `out/package/chakracore-<version>-windows-x64.tar.gz` and `MANIFEST.json` staging `bin/{ch,ch-nodeapi}.exe`, copied `bin/{ChakraCore,libChakraNodeApi}.dll` (no symlinks), `lib/{ChakraCore,libChakraNodeApi}.lib`, `include/{ChakraCore,ChakraCommon}.h`, `include/nodeapi/*.h`, and notices, with `VERIFY PASS` (`0` errors) and `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`.
+Expected: produces `out/package/release-shared/chakracore-<version>-windows-x64.tar.gz` and `MANIFEST.json` staging `bin/{ch,ch-nodeapi}.exe`, copied `bin/{ChakraCore,libChakraNodeApi}.dll` (no symlinks), `lib/{ChakraCore,libChakraNodeApi}.lib`, ICU runtime DLLs when present, `include/{ChakraCore,ChakraCommon}.h`, `include/nodeapi/*.h`, and notices, with `VERIFY PASS` (`0` errors) and `ALL PACKAGE TESTS PASSED SUCCESSFULLY!` (tested cleanly without vcpkg `PATH` injection).
 
 ### Step 9 -- Certified Windows x64 Test262 & Benchmarks
 
@@ -261,7 +261,7 @@ Confirm [.github/workflows/zig-windows.yml](../.github/workflows/zig-windows.yml
   - `zig-out/bin/ChakraCore.dll`: `<sha256>`
   - `zig-out/bin/ch.exe`: `<sha256>`
   - `zig-out/bin/libChakraNodeApi.dll`: `<sha256>`
-  - `out/package/chakracore-<ver>-windows-x64.tar.gz`: `<sha256>` (`<bytes>` bytes)
+  - `out/package/release-shared/chakracore-<ver>-windows-x64.tar.gz`: `<sha256>` (`<bytes>` bytes)
 
 ## Gate Matrix
 

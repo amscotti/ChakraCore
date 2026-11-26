@@ -480,4 +480,10 @@ Below test fails with difference in space. Investigate the cause and re-enable t
       <tags>typedarray</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>ctor-length-order-validation.js</files>
+      <tags>typedarray</tags>
+    </default>
+  </test>
 </regress-exe>

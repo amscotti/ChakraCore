@@ -873,7 +873,7 @@ class GateCountsTests(unittest.TestCase):
             self.assertNotIsInstance(data[select]["failed"], bool)
             self.assertGreaterEqual(data[select]["passed"], 0)
             self.assertGreaterEqual(data[select]["failed"], 0)
-        self.assertEqual(data["fulljit"], {"passed": 644, "failed": 0})
+        self.assertEqual(data["fulljit"], {"passed": 651, "failed": 0})
         for key in ("debug", "win32_test", "win32_debug"):
             entry = data["fulljit_variants"][key]
             self.assertIsInstance(entry["passed"], int)
@@ -2270,7 +2270,7 @@ class GateIntegrityWave2Tests(unittest.TestCase):
     def test_fulljit_live_selection_matches_gate_counts_pin(self):
         with open(HERE / "gate_counts.json", encoding="utf-8") as f:
             data = json.load(f)
-        self.assertEqual(data["fulljit"], {"passed": 644, "failed": 0})
+        self.assertEqual(data["fulljit"], {"passed": 651, "failed": 0})
         test_root = ROOT / "test"
         folder_tags = check_fulljit.load_folder_tags(str(test_root))
         for select, plat, machine, want in (

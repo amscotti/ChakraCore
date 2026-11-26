@@ -836,4 +836,15 @@
       <baseline>promise-rejection-throwing-stack.baseline</baseline>
     </default>
   </test>
+  <test>
+    <default>
+      <files>async-generator-gc-stress.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>async-generator-yield-throwing-thenable.js</files>
+    </default>
+  </test>
 </regress-exe>

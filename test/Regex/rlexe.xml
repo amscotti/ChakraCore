@@ -259,4 +259,25 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>vflag-negated-property.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>nonunicode-escaped-brace-quantifier.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>es5-split-limit-captures.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>es5-split-limit-captures.js</files>
+      <compile-flags>-ES6RegExSymbols-</compile-flags>
+    </default>
+  </test>
 </regress-exe>

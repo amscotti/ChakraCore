@@ -237,4 +237,10 @@
       <compile-flags>-MuteHostErrorMsg -ES6Module -ESDynamicImport</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>module-namespace-define-seal-freeze.js</files>
+      <compile-flags>-MuteHostErrorMsg -ES6Module -ESDynamicImport</compile-flags>
+    </default>
+  </test>
 </regress-exe>

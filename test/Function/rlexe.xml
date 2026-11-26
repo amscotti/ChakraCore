@@ -532,4 +532,10 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>eval-deep-stack.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>
