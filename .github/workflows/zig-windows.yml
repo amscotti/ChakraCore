@@ -98,6 +98,7 @@ jobs:
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_gcstress.py", "--self-test")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_nodeapi.py", "--self-test")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/gen_nodeapi_exports.py", "--check")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/test_run.py")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/test_edition_policy.py")
           Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/refresh_baseline.py", "--self-test")
           $line = "windows-preflight: gate-tests=PASS build-tools=PASS package-tools=PASS selftests=PASS"
@@ -257,7 +258,7 @@ jobs:
           $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
           zig build @icuFlags 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
           if ($LASTEXITCODE -ne 0) { throw "zig build failed ($LASTEXITCODE)" }
-      - name: Core PE32+ metadata, bytecode, JIT, & GCStress gates (check-metadata, verify-bytecode, check-jit, check-gcstress)
+      - name: Core PE32+ metadata, bytecode, JIT, Wasm, regression, & GCStress gates (check-metadata, verify-bytecode, check-jit, check-gcstress, check-fulljit, check-wasm, check-regression)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
@@ -265,9 +266,10 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $false
           }
           $icuFlags = @("-Dicu-include=$env:ICU_INCLUDE_DIR", "-Dicu-libdir=$env:ICU_LIB_DIR")
-          foreach ($step in @("check-metadata", "verify-bytecode", "check-jit", "check-gcstress")) {
+          foreach ($step in @("check-metadata", "verify-bytecode", "check-jit", "check-gcstress", "check-fulljit", "check-wasm", "check-regression")) {
             Write-Host "=== zig build $step ==="
-            zig build @icuFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
+            $stepFlags = if ($step -eq "check-regression") { @("-Dallow-unpinned-regression=true") } else { @() }
+            zig build @icuFlags @stepFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
             if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
           }
       - name: Node-API stack, Windows smoke, & package gate (libChakraNodeApi, ch-nodeapi, check-nodeapi, check-smoke, check-package)
@@ -303,7 +305,16 @@ jobs:
           if (-not (Select-String -Path ci-evidence/check-package.log -Pattern 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' -SimpleMatch -Quiet)) {
             throw "Missing 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' in ci-evidence/check-package.log"
           }
-          $line = "windows-test: build=PASS smoke=PASS metadata=PASS bytecode=PASS jit=PASS gcstress=PASS nodeapi=PASS package=PASS"
+          if (-not (Select-String -Path ci-evidence/check-fulljit.log -Pattern 'check_fulljit: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_fulljit: PASS' in ci-evidence/check-fulljit.log"
+          }
+          if (-not (Select-String -Path ci-evidence/check-wasm.log -Pattern 'check_wasm_p1: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_wasm_p1: PASS' in ci-evidence/check-wasm.log"
+          }
+          if (-not (Select-String -Path ci-evidence/check-regression.log -Pattern 'check_regression_windows: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_regression_windows: PASS' in ci-evidence/check-regression.log"
+          }
+          $line = "windows-test: build=PASS smoke=PASS metadata=PASS bytecode=PASS jit=PASS fulljit=PASS wasm=PASS regression=PASS gcstress=PASS nodeapi=PASS package=PASS"
           $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
           "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "- $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -324,13 +335,13 @@ jobs:
         include:
           - name: nojit
             flags: "-Djit=false"
-            checks: "check-smoke check-metadata verify-bytecode check-gcstress"
+            checks: "check-smoke check-metadata verify-bytecode check-gcstress check-regression"
           - name: release-shared
             flags: "-Dprofile=release-shared"
-            checks: "check-metadata check-jit libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package"
+            checks: "check-metadata check-jit check-gcstress libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package"
           - name: debug-static
             flags: "-Dprofile=debug-static"
-            checks: "check-smoke check-metadata verify-bytecode check-gcstress"
+            checks: "check-smoke check-metadata verify-bytecode check-gcstress check-regression"
     outputs:
       tally: ${{ steps.tally.outputs.tally }}
     steps:
@@ -365,7 +376,8 @@ jobs:
           $checkList = @('${{ matrix.checks }}' -split '\s+' | Where-Object { $_ })
           foreach ($step in $checkList) {
             Write-Host "=== zig build ${{ matrix.flags }} $step ==="
-            zig build @flagList @icuFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/checks.log -Append
+            $stepFlags = if ($step -eq "check-regression") { @("-Dallow-unpinned-regression=true") } else { @() }
+            zig build @flagList @icuFlags @stepFlags $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/checks.log -Append
             if ($LASTEXITCODE -ne 0) { throw "zig build ${{ matrix.flags }} $step failed ($LASTEXITCODE)" }
           }
       - name: Tally gate outputs
@@ -373,6 +385,24 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not (Select-String -Path ci-evidence/checks.log -Pattern 'check_gcstress: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_gcstress: PASS' in ci-evidence/checks.log"
+          }
+          if ('${{ matrix.name }}' -eq 'release-shared') {
+            if (-not (Select-String -Path ci-evidence/checks.log -Pattern 'check_jit: PASS' -SimpleMatch -Quiet)) {
+              throw "Missing 'check_jit: PASS' in ci-evidence/checks.log"
+            }
+            if (-not (Select-String -Path ci-evidence/checks.log -Pattern 'check_nodeapi: PASS' -SimpleMatch -Quiet)) {
+              throw "Missing 'check_nodeapi: PASS' in ci-evidence/checks.log"
+            }
+            if (-not (Select-String -Path ci-evidence/checks.log -Pattern 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' -SimpleMatch -Quiet)) {
+              throw "Missing 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' in ci-evidence/checks.log"
+            }
+          } else {
+            if (-not (Select-String -Path ci-evidence/checks.log -Pattern 'check_regression_windows: PASS' -SimpleMatch -Quiet)) {
+              throw "Missing 'check_regression_windows: PASS' in ci-evidence/checks.log"
+            }
+          }
           $line = "windows-${{ matrix.name }}: build=PASS checks=PASS"
           $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
           "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -433,3 +463,9 @@ jobs:
         with:
           name: windows-evidence
           path: windows-evidence/
+      - name: Fail if any upstream job failed or was cancelled
+        if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+        shell: pwsh
+        run: |
+          Write-Host "::error::One or more upstream jobs failed or was cancelled."
+          exit 1

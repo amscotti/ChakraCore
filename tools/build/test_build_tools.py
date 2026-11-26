@@ -423,7 +423,10 @@ class NativeVerdictTests(unittest.TestCase):
         self.assertTrue(check_native.check_output_static(
             static + "\n" + check_native.SHARED_IGNORE))
 
-    @unittest.skipUnless(shutil.which("make"), "native harness requires make")
+    @unittest.skipUnless(
+        sys.platform != "win32" and shutil.which("make") and shutil.which("bash"),
+        "native POSIX test harness requires bash and make",
+    )
     def test_native_sample_success_text_does_not_hide_nonzero_exit(self):
         with tempfile.TemporaryDirectory(prefix="native-status-test-") as tmp:
             root = Path(tmp)
@@ -1892,6 +1895,10 @@ class Tier1GateAndSanitizerTests(unittest.TestCase):
         self.assertIn("-off:ConcurrentCollect", legs[0][1])
         self.assertEqual(legs[1][0], "concurrent")
         self.assertNotIn("-off:ConcurrentCollect", legs[1][1])
+        forced_rel_legs = check_gcstress.build_legs("out/test/bin/GCStress", release=True)
+        self.assertEqual(len(forced_rel_legs), 1)
+        self.assertEqual(forced_rel_legs[0][0], "concurrent")
+        self.assertNotIn("-off:ConcurrentCollect", forced_rel_legs[0][1])
         self.assertEqual(check_gcstress.self_test(), 0)
 
     def test_check_fulljit_self_test_and_command_shape(self):
@@ -2340,14 +2347,14 @@ class GateIntegrityWave2Tests(unittest.TestCase):
                 ch.write_bytes(magic + b"\x00" * 60)
 
                 def fake_nojit(cmd, **_kw):
-                    if os.path.basename(cmd[0]) == "nm":
+                    if os.path.splitext(os.path.basename(cmd[0]))[0] == "nm":
                         return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
                     if "-?" in cmd:
                         return 0, "Usage: ch [flaglist]\n", ""
                     return 0, "no trace\n", ""
 
                 def fake_jit(cmd, **_kw):
-                    if os.path.basename(cmd[0]) == "nm":
+                    if os.path.splitext(os.path.basename(cmd[0]))[0] == "nm":
                         return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
                     if "-?" in cmd:
                         return 0, "Usage: ch [flaglist]\n", ""
@@ -2491,6 +2498,298 @@ class GateIntegrityWave2Tests(unittest.TestCase):
                 timeout=check_sanitize.DEFAULT_TIMEOUT,
                 profile="jit", expect_wasm=True, expect_legs=None,
             )
+
+
+class CheckJitIsPeTargetTests(unittest.TestCase):
+    @staticmethod
+    def _write_pe(path: Path, machine: int = 0x8664) -> Path:
+        import struct
+
+        e_lfanew = 0x80
+        buf = bytearray(0x100)
+        buf[0:2] = b"MZ"
+        struct.pack_into("<I", buf, 0x3C, e_lfanew)
+        buf[e_lfanew : e_lfanew + 4] = b"PE\x00\x00"
+        struct.pack_into("<H", buf, e_lfanew + 4, machine)
+        path.write_bytes(bytes(buf))
+        return path
+
+    def test_pe32_and_pe32_plus_detected_on_all_platforms(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(prefix="chkjit-pe-") as tmp:
+            pe64 = self._write_pe(Path(tmp) / "ch64.exe", 0x8664)
+            pe32 = self._write_pe(Path(tmp) / "ch32.exe", 0x014C)
+            for plat in ("win32", "linux", "darwin"):
+                with mock.patch.object(check_jit.sys, "platform", plat):
+                    self.assertTrue(check_jit.is_pe_target(pe64), plat)
+                    self.assertTrue(check_jit.is_pe_target(pe32), plat)
+
+    def test_elf_and_macho_rejected_even_on_win32(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(prefix="chkjit-nonpe-") as tmp:
+            elf = Path(tmp) / "ch.elf"
+            elf.write_bytes(b"\x7fELF" + b"\x00" * 64)
+            macho = Path(tmp) / "ch.macho"
+            macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 64)
+            corrupt_mz = Path(tmp) / "bad.exe"
+            corrupt_mz.write_bytes(b"MZ" + b"\x00" * 128)
+            with mock.patch.object(check_jit.sys, "platform", "win32"):
+                self.assertFalse(check_jit.is_pe_target(elf))
+                self.assertFalse(check_jit.is_pe_target(macho))
+                self.assertFalse(check_jit.is_pe_target(corrupt_mz))
+
+    def test_wrapper_script_uses_sibling_library_magic(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(prefix="chkjit-wrap-pe-") as tmp:
+            wrap = Path(tmp) / "ch.cmd"
+            wrap.write_text("@echo off\n", encoding="utf-8")
+            with mock.patch.object(check_jit.sys, "platform", "win32"):
+                self.assertFalse(check_jit.is_pe_target(wrap))
+                self._write_pe(Path(tmp) / "ChakraCore.dll")
+                self.assertTrue(check_jit.is_pe_target(wrap))
+
+        with tempfile.TemporaryDirectory(prefix="chkjit-wrap-elf-") as tmp:
+            wrap = Path(tmp) / "ch"
+            wrap.write_text("#!/bin/sh\n", encoding="utf-8")
+            (Path(tmp) / "libChakraCore.so").write_bytes(b"\x7fELF" + b"\x00" * 64)
+            with mock.patch.object(check_jit.sys, "platform", "win32"):
+                self.assertFalse(check_jit.is_pe_target(wrap))
+
+
+class CheckGcStressReleaseTests(unittest.TestCase):
+    def test_is_release_binary_profile_marker(self):
+        with tempfile.TemporaryDirectory(prefix="gcstress-prof-") as tmp:
+            prefix = Path(tmp) / "out" / "custom"
+            bin_dir = prefix / "bin"
+            bin_dir.mkdir(parents=True)
+            gc = bin_dir / "GCStress"
+            gc.write_bytes(b"#!/bin/sh\n")
+            (prefix / ".profile").write_text("release-shared\n", encoding="utf-8")
+            self.assertTrue(check_gcstress.is_release_binary(gc))
+            (prefix / ".profile").write_text("test\n", encoding="utf-8")
+            self.assertFalse(check_gcstress.is_release_binary(gc))
+
+    def test_is_release_binary_native_magic_fallback(self):
+        marker = "ForceBlockingConcurrentCollect".encode("utf-16-le")
+        with tempfile.TemporaryDirectory(prefix="gcstress-native-") as tmp:
+            rel_macho = Path(tmp) / "GCStress.rel.macho"
+            rel_macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 128)
+            self.assertTrue(check_gcstress.is_release_binary(rel_macho))
+
+            dbg_macho = Path(tmp) / "GCStress.dbg.macho"
+            dbg_macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 32 + marker + b"\x00" * 32)
+            self.assertFalse(check_gcstress.is_release_binary(dbg_macho))
+
+            rel_elf = Path(tmp) / "GCStress.rel.elf"
+            rel_elf.write_bytes(b"\x7fELF" + b"\x00" * 128)
+            self.assertTrue(check_gcstress.is_release_binary(rel_elf))
+
+            script = Path(tmp) / "GCStress.sh"
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertFalse(check_gcstress.is_release_binary(script))
+
+    def test_main_release_runs_concurrent_leg_only_and_checks_invalid_flag(self):
+        from unittest import mock
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory(prefix="gcstress-main-") as tmp:
+            prefix = Path(tmp) / "rel"
+            (prefix / "bin").mkdir(parents=True)
+            (prefix / ".profile").write_text("release-shared\n", encoding="utf-8")
+            gc = prefix / "bin" / "GCStress"
+            gc.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 64)
+
+            seen_legs = []
+
+            def fake_ok(label, cmd, **_kw):
+                seen_legs.append((label, list(cmd)))
+                return True, f"[{label}] bounded ok", ["ok"]
+
+            buf = io.StringIO()
+            with mock.patch.object(check_gcstress, "run_gcstress_leg", side_effect=fake_ok), \
+                    contextlib.redirect_stdout(buf):
+                rc = check_gcstress.main(["check_gcstress.py", str(gc)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(seen_legs), 1)
+            self.assertEqual(seen_legs[0][0], "concurrent")
+            self.assertNotIn("-off:ConcurrentCollect", seen_legs[0][1])
+            self.assertIn("check_gcstress: PASS", buf.getvalue())
+
+            self.assertEqual(
+                check_gcstress.find_error_marker(["Invalid Flag : -bogus"]),
+                "Invalid Flag (Invalid Flag : -bogus)",
+            )
+
+            def fake_invflag(label, cmd, **_kw):
+                return False, f"[{label}] error marker observed: Invalid Flag", ["Invalid Flag : -bogus"]
+
+            err_buf = io.StringIO()
+            with mock.patch.object(check_gcstress, "run_gcstress_leg", side_effect=fake_invflag), \
+                    contextlib.redirect_stderr(err_buf):
+                rc_bad = check_gcstress.main(["check_gcstress.py", str(gc)])
+            self.assertEqual(rc_bad, 1)
+            self.assertIn("Invalid Flag", err_buf.getvalue())
+
+
+class CheckRegressionLinuxCleanupTests(unittest.TestCase):
+    def test_cleanup_profile_dpl_runs_on_failure(self):
+        from unittest import mock
+        import check_regression_linux
+
+        with tempfile.TemporaryDirectory(prefix="reg-linux-dpl-") as tmp:
+            runtests = Path(tmp) / "runtests.py"
+            runtests.write_text("# stub\n", encoding="utf-8")
+            ch = Path(tmp) / "ch"
+            ch.write_bytes(b"\x7fELF")
+            suite = Path(tmp) / "Basics"
+            suite.mkdir()
+            dpl = suite / "profile.dpl.42"
+            dpl.write_text("stale\n", encoding="utf-8")
+            with mock.patch.object(
+                check_regression_linux.common,
+                "run_tee",
+                return_value=(1, ["Total: passed 0, failed 1"]),
+            ):
+                rc = check_regression_linux.main(
+                    ["check_regression_linux.py", str(runtests), str(ch)]
+                )
+            self.assertEqual(rc, 1)
+            self.assertFalse(dpl.exists())
+
+
+class WorkflowHardeningTests(unittest.TestCase):
+    def test_ci_workflow_invariants(self):
+        import re
+
+        repo = Path(__file__).resolve().parents[2]
+        workflows = repo / ".github" / "workflows"
+        macos = (workflows / "zig-macos.yml").read_text(encoding="utf-8")
+        linux = (workflows / "zig-linux.yml").read_text(encoding="utf-8")
+        win = (workflows / "zig-windows.yml").read_text(encoding="utf-8")
+
+        for name, text in (("zig-macos.yml", macos), ("zig-linux.yml", linux), ("zig-windows.yml", win)):
+            self.assertRegex(
+                text,
+                r"record:[\s\S]*?if:\s*\$\{\{\s*!cancelled\(\)\s*\}\}",
+                f"{name}: record job must run unless record itself is cancelled so final step handles upstream cancel/failure",
+            )
+            self.assertNotRegex(
+                text,
+                r"record:[\s\S]*?!contains\(needs\.\*\.result,\s*'cancelled'\)",
+                f"{name}: record job if: must not skip on cancelled upstream deps",
+            )
+            self.assertIn(
+                "contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')",
+                text,
+                f"{name}: record job must fail on upstream failure/cancellation",
+            )
+            self.assertIn("test_package_tools.py", text, f"{name}: missing test_package_tools.py")
+            self.assertIn("tools/test262/test_run.py", text, f"{name}: missing tools/test262/test_run.py")
+
+        for name, text in (("zig-macos.yml", macos), ("zig-linux.yml", linux)):
+            self.assertIn("mkdir -p evidence-in", text, f"{name}: must create evidence-in before iterating")
+            self.assertIn('[ -d "$d" ] || continue', text, f"{name}: must guard empty evidence-in glob")
+            self.assertIn(
+                "refresh_baseline.py self-test: OK",
+                text,
+                f"{name}: tally must verify refresh_baseline.py --self-test output",
+            )
+
+        self.assertIn("Test-Path evidence-in", win)
+        self.assertNotRegex(
+            linux,
+            r"probe_count=\$\(\(probe_count \+ 1\)\)[\s\S]{0,80}?done\s+2>&1\s*\|\s*tee",
+            "zig-linux.yml: nodeapi probe loop must not increment probe_count in a pipeline subshell",
+        )
+        self.assertRegex(linux, r"name:\s*nojit[\s\S]{0,200}?check-regression")
+        self.assertRegex(linux, r"name:\s*debug-static[\s\S]{0,200}?check-regression")
+        self.assertIn("check_regression_linux: PASS", linux)
+        self.assertIn("check_regression: PASS:", linux)
+        self.assertIn("-Dallow-unpinned-regression=true", win)
+        self.assertIn("check-fulljit", win)
+        self.assertIn("check-wasm", win)
+
+    def test_linux_regression_tally_scripts_execute_against_repo_pins(self):
+        import json
+        import re
+        import subprocess
+        import textwrap
+        import check_regression_linux
+
+        repo = Path(__file__).resolve().parents[2]
+        linux = (repo / ".github" / "workflows" / "zig-linux.yml").read_text(encoding="utf-8")
+        heredocs = [
+            textwrap.dedent(m.group(1))
+            for m in re.finditer(r"python3 -[^\n]*<<'PY'\n(.*?)\n\s*PY", linux, re.S)
+        ]
+        zig_matches = [h for h in heredocs if "check_regression_linux" in h]
+        variant_matches = [h for h in heredocs if "gate_counts.json" in h]
+        self.assertEqual(len(zig_matches), 1)
+        self.assertEqual(len(variant_matches), 1)
+        zig_tally_py = zig_matches[0]
+        variant_tally_py = variant_matches[0]
+
+        gate_counts = json.loads((repo / "tools" / "build" / "gate_counts.json").read_text(encoding="utf-8"))
+
+        with tempfile.TemporaryDirectory(prefix="linux-tally-exec-") as tmp:
+            tmp_path = Path(tmp)
+            shutil.copytree(repo / "tools" / "build", tmp_path / "tools" / "build")
+            ev = tmp_path / "ci-evidence"
+            ev.mkdir()
+
+            # 1) zig job tally script against RECORDED_BASELINE (positive + negative)
+            ok_lines = [
+                f"check_regression_linux: [{v}] PASS: passed {p} / failed {f}"
+                for v, (p, f) in check_regression_linux.RECORDED_BASELINE.items()
+            ]
+            (ev / "check.log").write_text("\n".join(ok_lines) + "\n", encoding="utf-8")
+            res_ok = subprocess.run(
+                [sys.executable, "-c", zig_tally_py],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res_ok.returncode, 0, res_ok.stderr)
+
+            (ev / "check.log").write_text("check_regression_linux: [interpreted] PASS: passed 1 / failed 0\n", encoding="utf-8")
+            res_bad = subprocess.run(
+                [sys.executable, "-c", zig_tally_py],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(res_bad.returncode, 0)
+
+            # 2) zig-variants tally script against tools/build/gate_counts.json (positive + negative)
+            for matrix_name, key in (("nojit", "test"), ("debug-static", "debug")):
+                c = gate_counts[key]
+                (ev / "checks.log").write_text(
+                    f"check_regression: PASS: passed {c['passed']} / failed {c['failed']}\n",
+                    encoding="utf-8",
+                )
+                v_ok = subprocess.run(
+                    [sys.executable, "-c", variant_tally_py, matrix_name],
+                    cwd=tmp_path,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(v_ok.returncode, 0, v_ok.stderr)
+
+                (ev / "checks.log").write_text(
+                    f"check_regression: PASS: passed {c['passed'] - 1} / failed 0\n",
+                    encoding="utf-8",
+                )
+                v_bad = subprocess.run(
+                    [sys.executable, "-c", variant_tally_py, matrix_name],
+                    cwd=tmp_path,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(v_bad.returncode, 0)
 
 
 if __name__ == "__main__":

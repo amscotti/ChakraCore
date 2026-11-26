@@ -233,10 +233,26 @@ jobs:
         run: |
           set -euo pipefail
           mise exec -- zig build -Dprofile=release-shared check-package 2>&1 | tee ci-evidence/package.log
+      - name: package tooling unit tests
+        if: matrix.profile == 'release-shared'
+        run: |
+          set -euo pipefail
+          python3 tools/package/test_package_tools.py 2>&1 | tee ci-evidence/package-tools.log
+      - name: test262 tooling unit checks
+        if: matrix.profile == 'test'
+        run: |
+          set -euo pipefail
+          python3 tools/test262/test_run.py 2>&1 | tee ci-evidence/test262-tools.log
+          python3 tools/test262/test_edition_policy.py 2>&1 | tee -a ci-evidence/test262-tools.log
+          python3 tools/test262/refresh_baseline.py --self-test 2>&1 | tee -a ci-evidence/test262-tools.log
       - name: Tally gate outputs
         id: tally
         run: |
           set -euo pipefail
+          if [ "${{ matrix.profile }}" = "test" ]; then
+            test "$(grep -cE '^OK$' ci-evidence/test262-tools.log)" = '2'
+            grep -F 'refresh_baseline.py self-test: OK' ci-evidence/test262-tools.log
+          fi
           grep -F 'check_gcstress: PASS' ci-evidence/gcstress.log
           case '${{ matrix.profile }}' in
             test)
@@ -259,6 +275,7 @@ jobs:
               grep -F 'check_smoke: PASS: version + silent invalid-flag + snippet + hello.js outputs match' ci-evidence/check.log
               grep -E 'test-shared-basic : PASS' ci-evidence/check.log
               grep -F 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' ci-evidence/package.log
+              grep -E '^OK$' ci-evidence/package-tools.log
               line="release-shared: hello=PASS native=shared-PASS gcstress=PASS package=PASS"
               ;;
           esac
@@ -669,7 +686,9 @@ jobs:
             echo "## Tallies"
             echo
           } > b3-evidence/SUMMARY.md
+          mkdir -p evidence-in
           for d in evidence-in/*/; do
+            [ -d "$d" ] || continue
             leg="$(basename "$d")"
             echo "### $leg" >> b3-evidence/SUMMARY.md
             if [ -f "$d/tally.txt" ]; then cat "$d/tally.txt" >> b3-evidence/SUMMARY.md; cp "$d/tally.txt" "b3-evidence/tallies/$leg.txt"; else echo "(no tally.txt)" >> b3-evidence/SUMMARY.md; fi
@@ -686,3 +705,8 @@ jobs:
         with:
           name: b3-evidence
           path: b3-evidence/
+      - name: Fail if any upstream job failed or was cancelled
+        if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+        run: |
+          echo "::error::One or more upstream jobs failed or was cancelled."
+          exit 1

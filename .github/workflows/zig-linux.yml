@@ -110,6 +110,10 @@ jobs:
           python3 tools/build/check_regression_linux.py --self-test 2>&1 | tee ci-evidence/regression-selftest.log
           mise exec -- zig test tools/linux-gate-tests.zig 2>&1 | tee ci-evidence/linux-gate-tests.log
           mise exec -- zig build check-build-tools 2>&1 | tee ci-evidence/build-tools.log
+          python3 tools/package/test_package_tools.py 2>&1 | tee ci-evidence/package-tools.log
+          python3 tools/test262/test_run.py 2>&1 | tee ci-evidence/test262-tools.log
+          python3 tools/test262/test_edition_policy.py 2>&1 | tee -a ci-evidence/test262-tools.log
+          python3 tools/test262/refresh_baseline.py --self-test 2>&1 | tee -a ci-evidence/test262-tools.log
       - name: zig build
         run: |
           set -euo pipefail
@@ -130,10 +134,24 @@ jobs:
           grep -F 'check_smoke_linux: PASS' ci-evidence/check.log
           grep -F 'check_jit: PASS' ci-evidence/check.log
           grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/check.log
+          grep -F 'check_regression_linux: PASS' ci-evidence/check.log
+          python3 - <<'PY'
+          import re, sys
+          sys.path.insert(0, "tools/build")
+          import check_regression_linux
+          log = open("ci-evidence/check.log", encoding="utf-8", errors="replace").read()
+          for variant, (exp_p, exp_f) in check_regression_linux.RECORDED_BASELINE.items():
+              pat = rf"check_regression_linux: \[{re.escape(variant)}\] PASS: passed {exp_p} / failed {exp_f}\b"
+              if not re.search(pat, log):
+                  raise SystemExit(f"Missing Linux regression tally for {variant} ({exp_p}/{exp_f})")
+          PY
+          grep -E '^OK$' ci-evidence/package-tools.log
+          test "$(grep -cE '^OK$' ci-evidence/test262-tools.log)" = '2'
+          grep -F 'refresh_baseline.py self-test: OK' ci-evidence/test262-tools.log
           grep -F 'check_fulljit: PASS' ci-evidence/jit-gates.log
           test "$(grep -cF 'check_wasm_p1: PASS' ci-evidence/jit-gates.log)" = '2'
           grep -F 'check_gcstress: PASS' ci-evidence/jit-gates.log
-          line="linux-test: build=PASS check=PASS fulljit=PASS wasm=PASS wasm-jit=PASS gcstress=PASS"
+          line="linux-test: build=PASS check=PASS regression=PASS fulljit=PASS wasm=PASS wasm-jit=PASS gcstress=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
@@ -154,13 +172,13 @@ jobs:
         include:
           - name: nojit
             flags: "-Djit=false"
-            checks: "check-smoke check-metadata verify-bytecode check-native check-gcstress"
+            checks: "check-smoke check-metadata verify-bytecode check-native check-regression check-gcstress"
           - name: release-shared
             flags: "-Dprofile=release-shared"
             checks: "check-smoke check-metadata check-jit check-native check-gcstress check-package"
           - name: debug-static
             flags: "-Dprofile=debug-static -Doptimize=debug"
-            checks: "check-smoke check-metadata verify-bytecode check-native check-gcstress"
+            checks: "check-smoke check-metadata verify-bytecode check-native check-regression check-gcstress"
     outputs:
       tally: ${{ steps.tally.outputs.tally }}
     steps:
@@ -195,6 +213,17 @@ jobs:
             grep -F 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' ci-evidence/checks.log
           else
             grep -F 'verify_bytecode_pure: source headers unchanged; regen exit 0' ci-evidence/checks.log
+            grep -F 'check_regression: PASS:' ci-evidence/checks.log
+            python3 - "${{ matrix.name }}" <<'PY'
+          import json, re, sys
+          name = sys.argv[1]
+          key = "debug" if name == "debug-static" else "test"
+          counts = json.load(open("tools/build/gate_counts.json", encoding="utf-8"))[key]
+          log = open("ci-evidence/checks.log", encoding="utf-8", errors="replace").read()
+          pat = rf"check_regression: PASS: passed {counts['passed']} / failed {counts['failed']}\b"
+          if not re.search(pat, log):
+              raise SystemExit(f"Missing {name} regression tally ({counts['passed']}/{counts['failed']})")
+          PY
           fi
           line="linux-${{ matrix.name }}: build=PASS checks=PASS gcstress=PASS"
           echo "$line" | tee ci-evidence/tally.txt
@@ -285,12 +314,13 @@ jobs:
           export CC_GATE_LOCK="$RUNNER_TEMP/ci-gate-exec.sh"
           export SKIP_BUILD=1
           bash tools/nodeapi/run_probe.sh 2>&1 | tee ci-evidence/nodeapi-run-probe.log
+          : > ci-evidence/nodeapi-probes.log
           probe_count=0
           for script in test/nodeapi/probes/run_*.sh; do
-            echo "=== $script ==="
-            bash "$script"
+            echo "=== $script ===" | tee -a ci-evidence/nodeapi-probes.log
+            bash "$script" 2>&1 | tee -a ci-evidence/nodeapi-probes.log
             probe_count=$((probe_count + 1))
-          done 2>&1 | tee ci-evidence/nodeapi-probes.log
+          done
           test "$probe_count" -eq 19
           echo "probes=${probe_count}/19" | tee -a ci-evidence/nodeapi-probes.log
       - name: Run Node-API and node-addon-api matrices
@@ -373,7 +403,9 @@ jobs:
             echo "## Tallies"
             echo
           } > linux-evidence/SUMMARY.md
+          mkdir -p evidence-in
           for d in evidence-in/*/; do
+            [ -d "$d" ] || continue
             leg="$(basename "$d")"
             echo "### $leg" >> linux-evidence/SUMMARY.md
             if [ -f "$d/tally.txt" ]; then
@@ -396,3 +428,8 @@ jobs:
         with:
           name: linux-evidence
           path: linux-evidence/
+      - name: Fail if any upstream job failed or was cancelled
+        if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+        run: |
+          echo "::error::One or more upstream jobs failed or was cancelled."
+          exit 1

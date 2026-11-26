@@ -31,6 +31,7 @@ Exit code: 0 iff every sub-check passes.
 
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,38 @@ WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28",
         "jit-class-new 7,true", "jit-class-derived true,true,Anon"]
 
 
+def _is_elf_or_macho_magic(path):
+    """True for ELF or Mach-O (32/64/fat) header magic."""
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return False
+    return magic in (
+        b"\x7fELF",
+        b"\xcf\xfa\xed\xfe",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xfe\xed\xfa\xce",
+        b"\xca\xfe\xba\xbe",
+    )
+
+
+def _has_pe_magic(path):
+    """True if path has DOS 'MZ' magic and a valid 'PE\\x00\\x00' header."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return False
+    if len(data) < 64 or data[:2] != b"MZ":
+        return False
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    if e_lfanew < 64 or e_lfanew + 4 > len(data):
+        return False
+    return data[e_lfanew:e_lfanew + 4] == b"PE\x00\x00"
+
+
 def _is_pe_binary(path):
     """True for a valid PE32+ image (MZ + PE\\x00\\x00 + magic 0x020B)."""
     try:
@@ -80,35 +113,22 @@ def _is_pe_binary(path):
 
 def _is_native_binary(path):
     """True for an ELF, Mach-O, or PE32+ binary; false for test stubs/scripts."""
-    try:
-        with open(path, "rb") as f:
-            magic = f.read(4)
-    except OSError:
-        return False
-    # ELF, Mach-O 32/64 little-endian, and universal/fat Mach-O.
-    if magic in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
-                 b"\xca\xfe\xba\xbe"):
+    if _is_elf_or_macho_magic(path):
         return True
-    if magic[:2] == b"MZ":
-        return _is_pe_binary(path)
-    return False
+    return _is_pe_binary(path)
 
 
 def is_pe_target(ch):
-    """Return True if ch targets Windows/PE32+ (win32 host or PE binary/DLL)."""
-    if sys.platform == "win32":
+    """Return True iff ch (or its sibling ChakraCore.dll) is a PE binary."""
+    if _is_elf_or_macho_magic(ch):
+        return False
+    if _has_pe_magic(ch) or _is_pe_binary(ch):
         return True
     ch_dir = os.path.dirname(os.path.abspath(ch))
     win_dll = os.path.join(ch_dir, "ChakraCore.dll")
-    if os.path.isfile(win_dll) and _is_pe_binary(win_dll):
+    if os.path.isfile(win_dll) and (_has_pe_magic(win_dll) or _is_pe_binary(win_dll)):
         return True
-    if _is_pe_binary(ch):
-        return True
-    try:
-        with open(ch, "rb") as f:
-            return f.read(2) == b"MZ"
-    except OSError:
-        return False
+    return False
 
 
 def check_symbols(ch):
@@ -252,6 +272,17 @@ def self_test():
                       and not _is_pe_binary(corrupt_mz)
                       and not _is_native_binary(corrupt_mz))
 
+        with mock.patch.object(sys, "platform", "win32"):
+            bad += report(
+                "is_pe_target inspects magic on win32 (PE vs ELF/Mach-O/corrupt)",
+                is_pe_target(pe_exe)
+                and is_pe_target(pe32_exe)
+                and not is_pe_target(elf_bin)
+                and not is_pe_target(macho_bin)
+                and not is_pe_target(corrupt_mz)
+                and not is_pe_target(script_stub),
+            )
+
         # Static PE validation vs sibling ChakraCore.dll PE validation.
         static_dir = os.path.join(tmp, "static_win")
         os.makedirs(static_dir)
@@ -364,28 +395,31 @@ def self_test():
                           main(["check_jit.py", shared_ch]) == 0)
 
         # Non-PE (Mach-O / ELF) controls: check_symbols and BackEnd trace (B-8).
+        def is_nm(cmd):
+            return os.path.splitext(os.path.basename(cmd[0]))[0] == "nm"
+
         def fake_nm_with_jit(cmd, **_kw):
-            if os.path.basename(cmd[0]) == "nm":
+            if is_nm(cmd):
                 return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
             return fake_debug_jit(cmd)
 
         def fake_nm_no_symbol(cmd, **_kw):
-            if os.path.basename(cmd[0]) == "nm":
+            if is_nm(cmd):
                 return 0, "0000000000001000 T _main\n", ""
             return fake_debug_jit(cmd)
 
         def fake_nm_fake_nojit(cmd, **_kw):
-            if os.path.basename(cmd[0]) == "nm":
+            if is_nm(cmd):
                 return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
             return fake_disable_jit(cmd)
 
         def fake_nm_release_jit(cmd, **_kw):
-            if os.path.basename(cmd[0]) == "nm":
+            if is_nm(cmd):
                 return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
             return fake_release_jit(cmd)
 
         def fake_nm_bad_help_release(cmd, **_kw):
-            if os.path.basename(cmd[0]) == "nm":
+            if is_nm(cmd):
                 return 0, "0000000000001000 T __ZN2Js19NativeCodeGeneratorC1Ev\n", ""
             if "-?" in cmd:
                 return 1, "Note: [flaglist] is not supported in Release builds.\n", ""

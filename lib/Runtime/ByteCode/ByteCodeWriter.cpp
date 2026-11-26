@@ -3399,6 +3399,9 @@ StoreCommon:
         Assert(OpCodeUtil::EncodedSize((Js::OpCode)op, layoutSize) == (currentOffset - offset));
     }
 
+    template void ByteCodeWriter::Data::EncodeOpCode<MediumLayout>(uint16 op, ByteCodeWriter* writer);
+    template void ByteCodeWriter::Data::EncodeOpCode<LargeLayout>(uint16 op, ByteCodeWriter* writer);
+
     template <LayoutSize layoutSize>
     uint ByteCodeWriter::Data::EncodeT(OpCode op, ByteCodeWriter* writer)
     {

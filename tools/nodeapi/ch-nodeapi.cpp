@@ -99,6 +99,12 @@
 //   - dlopen handles: provider is dlopen'd RTLD_GLOBAL|RTLD_NOW before any
 //     addon (plan section 1.3: addons import napi_* as undefined symbols
 //     resolved from the provider). Addons are dlopen'd RTLD_LOCAL|RTLD_NOW.
+//     Host calls into the provider (including napi_open_handle_scope,
+//     napi_close_handle_scope, and napi_create_object) are resolved via
+//     dlsym/GetProcAddress on the loaded provider handle rather than direct
+//     compile-time symbol links so provider/stub isolation works without
+//     DT_NEEDED shadowing; those function pointers remain valid until
+//     shutdown_all dlcloses provider after all envs are destroyed.
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -571,11 +577,9 @@ struct AddonRegistry {
   SetModuleApiVersionFn set_ver_fn = nullptr;
   PendingModuleCountFn pending_count_fn = nullptr;
   GetPendingModuleFn get_pending_fn = nullptr;
-#ifdef _WIN32
   OpenHandleScopeFn open_scope_fn = nullptr;
   CloseHandleScopeFn close_scope_fn = nullptr;
   CreateObjectFn create_object_fn = nullptr;
-#endif
 
   std::vector<std::unique_ptr<AddonRecord>> addon_order;
   std::map<std::string, AddonRecord*> registry_by_path;
@@ -719,25 +723,13 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
   }
 
   auto open_scope = [&](napi_env e, napi_handle_scope* s) -> napi_status {
-#ifdef _WIN32
     return reg->open_scope_fn(e, s);
-#else
-    return napi_open_handle_scope(e, s);
-#endif
   };
   auto close_scope = [&](napi_env e, napi_handle_scope s) -> napi_status {
-#ifdef _WIN32
     return reg->close_scope_fn(e, s);
-#else
-    return napi_close_handle_scope(e, s);
-#endif
   };
   auto create_obj = [&](napi_env e, napi_value* v) -> napi_status {
-#ifdef _WIN32
     return reg->create_object_fn(e, v);
-#else
-    return napi_create_object(e, v);
-#endif
   };
 
   napi_handle_scope scope = nullptr;
@@ -1748,7 +1740,6 @@ int main(int argc, char** argv) {
       host_dlsym(provider, "chakra_nodeapi_pending_module_count", nullptr));
   auto get_pending_fn = reinterpret_cast<GetPendingModuleFn>(
       host_dlsym(provider, "chakra_nodeapi_get_pending_module", nullptr));
-#ifdef _WIN32
   auto open_scope_fn = reinterpret_cast<OpenHandleScopeFn>(
       host_dlsym(provider, "napi_open_handle_scope", &sym_err));
   auto close_scope_fn = reinterpret_cast<CloseHandleScopeFn>(
@@ -1764,7 +1755,6 @@ int main(int argc, char** argv) {
     dispose_runtime();
     return 1;
   }
-#endif
 
   HostLoopState* host_loop = new (std::nothrow) HostLoopState();
   if (!host_loop) {
@@ -1799,11 +1789,9 @@ int main(int argc, char** argv) {
   registry.set_ver_fn = set_ver_fn;
   registry.pending_count_fn = pending_count_fn;
   registry.get_pending_fn = get_pending_fn;
-#ifdef _WIN32
   registry.open_scope_fn = open_scope_fn;
   registry.close_scope_fn = close_scope_fn;
   registry.create_object_fn = create_object_fn;
-#endif
   registry.has_cli_addon = !cfg.addon_paths.empty();
 
   RequireState req_state;
@@ -2079,19 +2067,11 @@ int main(int argc, char** argv) {
         if (!addon_env) continue;
         napi_handle_scope drain_scope = nullptr;
         napi_value tmp = nullptr;
-#ifdef _WIN32
         if (registry.open_scope_fn(addon_env, &drain_scope) == napi_ok &&
             registry.create_object_fn(addon_env, &tmp) == napi_ok) {
           (void)tmp;
         }
         if (drain_scope) registry.close_scope_fn(addon_env, drain_scope);
-#else
-        if (napi_open_handle_scope(addon_env, &drain_scope) == napi_ok &&
-            napi_create_object(addon_env, &tmp) == napi_ok) {
-          (void)tmp;
-        }
-        if (drain_scope) napi_close_handle_scope(addon_env, drain_scope);
-#endif
         bool has = false;
         if (JsHasException(&has) == JsNoError && has) {
           clear_exception("drain threw");

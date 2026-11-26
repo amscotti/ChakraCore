@@ -21,8 +21,8 @@ crash/signal, failure marker, or timeout before the required output is
 observed fails loudly.
 
 Usage: check_gcstress.py <GCStress> [--timeout SECS] [--min-walks N]
-       [--self-test]
-Exit code: 0 iff both legs observe initialization + repeated heap walks.
+       [--release] [--self-test]
+Exit code: 0 iff all active legs observe initialization + repeated heap walks.
 """
 
 import errno
@@ -45,6 +45,17 @@ _KILL_SIG = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 DEFAULT_TIMEOUT = 15.0
 DEFAULT_MIN_WALKS = 2
+# Non-release flag present in ConfigFlagsList.h iff ENABLE_DEBUG_CONFIG_OPTIONS
+# is compiled in (encoded as UTF-16LE _u(...) in ConfigFlagsTable.cpp).
+_DEBUG_CONFIG_MARKER_UTF16LE = "ForceBlockingConcurrentCollect".encode("utf-16-le")
+_NATIVE_MAGICS = (
+    b"\x7fELF",
+    b"\xcf\xfa\xed\xfe",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xfe\xed\xfa\xce",
+    b"\xca\xfe\xba\xbe",
+)
 
 ERROR_MARKERS = (
     "==== FAILURE:",
@@ -402,9 +413,53 @@ def run_gcstress_leg(label, cmd, timeout=DEFAULT_TIMEOUT,
                     pass
 
 
-def build_legs(gcstress_path):
-    """Return [(label, argv), ...] for both GCStress configurations."""
+def is_release_binary(gcstress_path):
+    """Return True iff gcstress_path is a Release binary lacking debug flags.
+
+    Checks the sibling install prefix `.profile` marker first (`release-*`),
+    then falls back to checking compiled native executables (ELF/Mach-O/PE)
+    for the UTF-16LE `ENABLE_DEBUG_CONFIG_OPTIONS` flag table marker.
+    """
     abs_bin = os.path.abspath(gcstress_path)
+    bin_dir = os.path.dirname(abs_bin)
+    prefix_dir = (os.path.dirname(bin_dir)
+                  if os.path.basename(bin_dir) == "bin" else bin_dir)
+    profile_marker = os.path.join(prefix_dir, ".profile")
+    if os.path.isfile(profile_marker):
+        try:
+            with open(profile_marker, "r", encoding="utf-8",
+                      errors="replace") as f:
+                profile = f.read().strip()
+            if profile:
+                return profile.startswith("release")
+        except OSError:
+            pass
+
+    if not os.path.isfile(abs_bin):
+        return False
+    try:
+        with open(abs_bin, "rb") as f:
+            head = f.read(4)
+            is_native = (head in _NATIVE_MAGICS) or (head[:2] == b"MZ")
+            if not is_native:
+                return False
+            data = head + f.read()
+    except OSError:
+        return False
+    return _DEBUG_CONFIG_MARKER_UTF16LE not in data
+
+
+def build_legs(gcstress_path, release=None):
+    """Return [(label, argv), ...] for GCStress configurations.
+
+    Release builds omit ENABLE_DEBUG_CONFIG_OPTIONS so `-off:ConcurrentCollect`
+    is an Invalid Flag; run only the default concurrent mode there.
+    """
+    abs_bin = os.path.abspath(gcstress_path)
+    if release is None:
+        release = is_release_binary(abs_bin)
+    if release:
+        return [("concurrent", [abs_bin, "-js"])]
     return [
         ("in-thread", [abs_bin, "-js", "-off:ConcurrentCollect"]),
         ("concurrent", [abs_bin, "-js"]),
@@ -547,6 +602,46 @@ def self_test():
             ],
         )
 
+        # Release-binary controls: .profile release-* or native binary without
+        # debug flag table skips -off:ConcurrentCollect cleanly.
+        rel_pfx = os.path.join(tmp, "rel_pfx")
+        os.makedirs(os.path.join(rel_pfx, "bin"))
+        rel_bin = os.path.join(rel_pfx, "bin", "GCStress")
+        with open(rel_bin, "wb") as f:
+            f.write(b"\xcf\xfa\xed\xfe" + b"\x00" * 64)
+        with open(os.path.join(rel_pfx, ".profile"), "w", encoding="utf-8") as f:
+            f.write("release-shared\n")
+        bad += report(
+            "release .profile skips -off:ConcurrentCollect",
+            is_release_binary(rel_bin)
+            and build_legs(rel_bin) == [("concurrent", [os.path.abspath(rel_bin), "-js"])],
+        )
+
+        dbg_pfx = os.path.join(tmp, "dbg_pfx")
+        os.makedirs(os.path.join(dbg_pfx, "bin"))
+        dbg_bin = os.path.join(dbg_pfx, "bin", "GCStress")
+        with open(dbg_bin, "wb") as f:
+            f.write(b"\x7fELF" + _DEBUG_CONFIG_MARKER_UTF16LE)
+        with open(os.path.join(dbg_pfx, ".profile"), "w", encoding="utf-8") as f:
+            f.write("test\n")
+        bad += report(
+            "non-release .profile keeps both GCStress legs",
+            (not is_release_binary(dbg_bin))
+            and len(build_legs(dbg_bin)) == 2,
+        )
+
+        standalone_rel = os.path.join(tmp, "standalone_rel")
+        with open(standalone_rel, "wb") as f:
+            f.write(b"\x7fELF" + b"\x00" * 64)
+        standalone_dbg = os.path.join(tmp, "standalone_dbg")
+        with open(standalone_dbg, "wb") as f:
+            f.write(b"\x7fELF" + _DEBUG_CONFIG_MARKER_UTF16LE)
+        bad += report(
+            "native binary without .profile detects debug vs release",
+            is_release_binary(standalone_rel)
+            and not is_release_binary(standalone_dbg),
+        )
+
     print("check_gcstress self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
              else "%d CONTROL(S) MISBEHAVE" % bad))
@@ -560,6 +655,7 @@ def main(argv):
 
     timeout = DEFAULT_TIMEOUT
     min_walks = DEFAULT_MIN_WALKS
+    force_release = None
     rest = []
     i = 0
     while i < len(args):
@@ -575,13 +671,16 @@ def main(argv):
                 return 2
             min_walks = int(args[i + 1])
             i += 2
+        elif args[i] == "--release":
+            force_release = True
+            i += 1
         else:
             rest.append(args[i])
             i += 1
 
     if len(rest) != 1:
         print("usage: check_gcstress.py <GCStress> [--timeout SECS] "
-              "[--min-walks N] [--self-test]", file=sys.stderr)
+              "[--min-walks N] [--release] [--self-test]", file=sys.stderr)
         return 2
 
     gcstress = rest[0]
@@ -589,7 +688,8 @@ def main(argv):
         print("check_gcstress: missing binary: %s" % gcstress, file=sys.stderr)
         return 2
 
-    for label, cmd in build_legs(gcstress):
+    legs = build_legs(gcstress, release=force_release)
+    for label, cmd in legs:
         print("check_gcstress: running [%s] %s (timeout=%.1fs min_walks=%d)"
               % (label, " ".join(cmd), timeout, min_walks))
         sys.stdout.flush()
@@ -604,7 +704,11 @@ def main(argv):
             return 1
         print("check_gcstress: %s" % detail)
 
-    print("check_gcstress: PASS (in-thread + concurrent bounded heap walks)")
+    if len(legs) == 1:
+        print("check_gcstress: PASS (concurrent bounded heap walks; "
+              "release build skips -off:ConcurrentCollect)")
+    else:
+        print("check_gcstress: PASS (in-thread + concurrent bounded heap walks)")
     return 0
 
 

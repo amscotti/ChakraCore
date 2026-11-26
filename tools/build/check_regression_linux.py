@@ -47,6 +47,7 @@ Options:
 Exit code: 0 iff every variant ran green with its recorded counts.
 """
 
+import glob
 import os
 import subprocess
 import sys
@@ -172,6 +173,21 @@ def grade_variant(variant, rc, lines, allow_higher=False):
                     % (passed, failed))
 
 
+def cleanup_profile_dpl(runtests):
+    """Remove any leftover profile.dpl.* files under test/ defensively."""
+    test_root = os.path.dirname(os.path.abspath(runtests))
+    removed = []
+    for path in glob.glob(os.path.join(test_root, "*", "profile.dpl.*")):
+        try:
+            os.remove(path)
+            print("check_regression_linux: removed leftover %s" % path)
+            removed.append(path)
+        except OSError as e:
+            print("check_regression_linux: WARNING: cannot remove %s: %s"
+                  % (path, e))
+    return removed
+
+
 def main(argv):
     args = list(argv[1:])
     if "--self-test" in args:
@@ -219,6 +235,8 @@ def main(argv):
                 "FAIL", "suite exceeded the %ds ceiling"
                         % common.REGRESSION_TIMEOUT)
             continue
+        finally:
+            cleanup_profile_dpl(runtests)
         print("check_regression_linux: runtests.py [%s] exited %d"
               % (variant, rc))
         verdict, detail = grade_variant(variant, rc, lines, allow_higher=allow_higher)

@@ -13,6 +13,7 @@
 #include "ChakraCore.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -80,7 +81,7 @@ static int RunUtf8(const char* code)
     JsValueRef fname = JS_INVALID_REFERENCE;
     JsValueRef src = JS_INVALID_REFERENCE;
     CHECK_EC(JsCreateString("test_timer_cancel.js", 20, &fname));
-    CHECK_EC(JsCreateString(code, strlen(code), &src));
+    CHECK_EC(JsCreateString(code, std::strlen(code), &src));
     CHECK_EC(JsRun(src, JS_SOURCE_CONTEXT_NONE, fname, JsParseScriptAttributeNone, nullptr));
     return 0;
 }
