@@ -181,16 +181,29 @@ void CompleteSlowWork(napi_env env, napi_status, void* raw) {
   delete d;
 }
 
-napi_value SlowWorkTimeout(napi_env env, napi_callback_info) {
-  auto* d = new SlowWorkData();
-  napi_value name = nullptr;
-  napi_create_string_utf8(env, "SlowWorkTimeout", NAPI_AUTO_LENGTH, &name);
-  if (napi_create_async_work(env, nullptr, name, ExecuteSlowWork,
-                             CompleteSlowWork, d, &d->work) != napi_ok ||
-      napi_queue_async_work(env, d->work) != napi_ok) {
-    if (d->work != nullptr) napi_delete_async_work(env, d->work);
-    delete d;
-    return nullptr;
+napi_value SlowWorkTimeout(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1] = {nullptr};
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+  int32_t count = 1;
+  if (argc >= 1 && argv[0] != nullptr) {
+    int32_t argCount = 1;
+    if (napi_get_value_int32(env, argv[0], &argCount) == napi_ok &&
+        argCount >= 1 && argCount <= 32) {
+      count = argCount;
+    }
+  }
+  for (int32_t i = 0; i < count; ++i) {
+    auto* d = new SlowWorkData();
+    napi_value name = nullptr;
+    napi_create_string_utf8(env, "SlowWorkTimeout", NAPI_AUTO_LENGTH, &name);
+    if (napi_create_async_work(env, nullptr, name, ExecuteSlowWork,
+                               CompleteSlowWork, d, &d->work) != napi_ok ||
+        napi_queue_async_work(env, d->work) != napi_ok) {
+      if (d->work != nullptr) napi_delete_async_work(env, d->work);
+      delete d;
+      return nullptr;
+    }
   }
   napi_value undef = nullptr;
   napi_get_undefined(env, &undef);

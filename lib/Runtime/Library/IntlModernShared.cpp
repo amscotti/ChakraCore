@@ -223,7 +223,10 @@ namespace Js
                 Subtag AppendSliceLower(const char* s, size_t n)
                 {
                     size_t start = len;
-                    AppendLower(s, n);
+                    if (!AppendLower(s, n))
+                    {
+                        return Subtag{ 0, 0 };
+                    }
                     return Subtag{ start, n };
                 }
 
@@ -231,21 +234,30 @@ namespace Js
                 {
                     size_t start = len;
                     size_t n = s != nullptr ? strlen(s) : 0;
-                    Append(s, n);
+                    if (!Append(s, n))
+                    {
+                        return Subtag{ 0, 0 };
+                    }
                     return Subtag{ start, n };
                 }
 
                 Subtag AppendSliceUpper(const char* s, size_t n)
                 {
                     size_t start = len;
-                    AppendUpper(s, n);
+                    if (!AppendUpper(s, n))
+                    {
+                        return Subtag{ 0, 0 };
+                    }
                     return Subtag{ start, n };
                 }
 
                 Subtag AppendSliceTitle(const char* s, size_t n)
                 {
                     size_t start = len;
-                    AppendTitle(s, n);
+                    if (!AppendTitle(s, n))
+                    {
+                        return Subtag{ 0, 0 };
+                    }
                     return Subtag{ start, n };
                 }
 
@@ -1016,12 +1028,12 @@ namespace Js
                                 UErrorCode err = U_ZERO_ERROR;
                                 char maxLoc[ULOC_FULLNAME_CAPACITY] = { 0 };
                                 int32_t mlen = uloc_addLikelySubtags(baseIcu, maxLoc, static_cast<int32_t>(sizeof(maxLoc)), &err);
-                                if (U_SUCCESS(err) && mlen > 0)
+                                if (!ICU_FAILURE(err) && mlen > 0 && static_cast<size_t>(mlen) < sizeof(maxLoc))
                                 {
                                     char country[16] = { 0 };
                                     UErrorCode cErr = U_ZERO_ERROR;
                                     int32_t clen = uloc_getCountry(maxLoc, country, static_cast<int32_t>(sizeof(country)), &cErr);
-                                    if (U_SUCCESS(cErr) && clen > 0 &&
+                                    if (!ICU_FAILURE(cErr) && clen > 0 && static_cast<size_t>(clen) < sizeof(country) &&
                                         SpaceListContainsToken(repBuf.Data(), repBuf.Length(), country, static_cast<size_t>(clen)))
                                     {
                                         js_memcpy_s(chosen, sizeof(chosen), country, static_cast<size_t>(clen) + 1);
@@ -1515,14 +1527,15 @@ namespace Js
                 int32_t tlen = maximize
                     ? uloc_addLikelySubtags(icuBase.Data(), transformedIcu, static_cast<int32_t>(sizeof(transformedIcu)), &err)
                     : uloc_minimizeSubtags(icuBase.Data(), transformedIcu, static_cast<int32_t>(sizeof(transformedIcu)), &err);
-                if (U_FAILURE(err) || tlen <= 0 || static_cast<size_t>(tlen) >= sizeof(transformedIcu))
+                if (ICU_FAILURE(err) || tlen <= 0 || static_cast<size_t>(tlen) >= sizeof(transformedIcu))
                 {
                     return CreateAsciiString(canonicalTag, len, scriptContext);
                 }
 
+                err = U_ZERO_ERROR;
                 char bcpBase[ULOC_FULLNAME_CAPACITY] = { 0 };
                 int32_t blen = uloc_toLanguageTag(transformedIcu, bcpBase, static_cast<int32_t>(sizeof(bcpBase)), FALSE, &err);
-                if (U_FAILURE(err) || blen <= 0 || static_cast<size_t>(blen) >= sizeof(bcpBase))
+                if (ICU_FAILURE(err) || blen <= 0 || static_cast<size_t>(blen) >= sizeof(bcpBase))
                 {
                     return CreateAsciiString(canonicalTag, len, scriptContext);
                 }
@@ -1778,7 +1791,14 @@ namespace Js
             if (!obj->GetInternalProperty(obj, InternalPropertyIds::HiddenObject, &hidden, nullptr, obj->GetScriptContext()) ||
                 hidden == nullptr ||
                 TaggedInt::Is(hidden) ||
-                JavascriptNumber::Is_NoTaggedIntCheck(hidden))
+#if FLOATVAR
+                JavascriptNumber::Is_NoTaggedIntCheck(hidden) ||
+#endif
+                VirtualTableInfo<DynamicObject>::HasVirtualTable(hidden)
+#if !defined(USED_IN_STATIC_LIB)
+                || VirtualTableInfo<CrossSiteObject<DynamicObject>>::HasVirtualTable(hidden)
+#endif
+                )
             {
                 return nullptr;
             }

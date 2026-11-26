@@ -185,9 +185,8 @@ namespace Js
                         *exceptionVar = this->errorObject;
                     }
 
-                    // Cleanup in case of error.
-                    this->ReleaseParserResourcesForHierarchy();
-                    return E_FAIL;
+                    // Fall through to unified error cleanup (parser deletion, dynamic promise rejection, parent notification).
+                    hr = E_FAIL;
                 }
             }
         }

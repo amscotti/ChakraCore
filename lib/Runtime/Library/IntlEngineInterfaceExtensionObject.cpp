@@ -325,9 +325,11 @@ namespace Js
 
         void Dispose(bool isShutdown) override
         {
-            if (!isShutdown)
+            UNREFERENCED_PARAMETER(isShutdown);
+            if (resource != nullptr)
             {
                 CloseFunction(resource);
+                resource = nullptr;
             }
         }
 
@@ -2699,20 +2701,41 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             fracLen = (uint32)minFrac;
         }
 
+        UChar digitSyms[10][16];
+        int32_t digitSymLens[10];
+        int32_t maxDigitSymLen = 1;
+        static const UNumberFormatSymbol digitSymbolIds[10] = {
+            UNUM_ZERO_DIGIT_SYMBOL,
+            UNUM_ONE_DIGIT_SYMBOL,
+            UNUM_TWO_DIGIT_SYMBOL,
+            UNUM_THREE_DIGIT_SYMBOL,
+            UNUM_FOUR_DIGIT_SYMBOL,
+            UNUM_FIVE_DIGIT_SYMBOL,
+            UNUM_SIX_DIGIT_SYMBOL,
+            UNUM_SEVEN_DIGIT_SYMBOL,
+            UNUM_EIGHT_DIGIT_SYMBOL,
+            UNUM_NINE_DIGIT_SYMBOL
+        };
+        for (int d = 0; d < 10; d++)
+        {
+            UErrorCode symStatus = U_ZERO_ERROR;
+            digitSymLens[d] = unum_getSymbol(fmt, digitSymbolIds[d], digitSyms[d], 16, &symStatus);
+            ICU_ASSERT(symStatus, true);
+            AssertOrFailFastMsg(digitSymLens[d] >= 1 && digitSymLens[d] <= 16, "FormatBigIntWithNumberFormat: invalid decimal digit symbol");
+            if (digitSymLens[d] > maxDigitSymLen)
+            {
+                maxDigitSymLen = digitSymLens[d];
+            }
+        }
         UErrorCode symStatus = U_ZERO_ERROR;
-        UChar zeroSym[16];
         UChar groupSym[16];
         UChar decimalSym[16];
-        int32_t zeroSymLen = unum_getSymbol(fmt, UNUM_ZERO_DIGIT_SYMBOL, zeroSym, 16, &symStatus);
-        ICU_ASSERT(symStatus, true);
         int32_t groupSymLen = unum_getSymbol(fmt, UNUM_GROUPING_SEPARATOR_SYMBOL, groupSym, 16, &symStatus);
         ICU_ASSERT(symStatus, true);
+        symStatus = U_ZERO_ERROR;
         int32_t decimalSymLen = unum_getSymbol(fmt, UNUM_DECIMAL_SEPARATOR_SYMBOL, decimalSym, 16, &symStatus);
         ICU_ASSERT(symStatus, true);
-        // Digit mapping requires a single zero character (true of every ICU decimal numbering system).
-        AssertOrFailFastMsg(zeroSymLen == 1, "FormatBigIntWithNumberFormat: non-decimal numbering system");
         AssertOrFailFast(groupSymLen >= 1 && decimalSymLen >= 1);
-        char16 zeroDigit = (char16)zeroSym[0];
 
         // Reference value of the same sign: its affix runs are reused verbatim, its numeric
         // middle is discarded and rebuilt exactly below.
@@ -2754,7 +2777,7 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
         if (secondarySize <= 0) secondarySize = primarySize;
 
         // Numeric middle: grouped integer digits, then the decimal separator and fraction zeros.
-        uint32 midCap = intLen * ((uint32)groupSymLen + 1) + (uint32)decimalSymLen + fracLen + 1;
+        uint32 midCap = intLen * ((uint32)groupSymLen + (uint32)maxDigitSymLen) + (uint32)decimalSymLen + fracLen * (uint32)digitSymLens[0] + 1;
         char16 *mid = RecyclerNewArrayLeaf(recycler, char16, midCap);
         BigIntNumberFormatField *midRuns = RecyclerNewArrayLeaf(recycler, BigIntNumberFormatField, intLen * 2 + 4);
         uint32 midRunCount = 0;
@@ -2775,11 +2798,13 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
                     midRunCount++;
                 }
             }
+            int digit = (int)(intBuf[i] - _u('0'));
+            int32_t dLen = digitSymLens[digit];
             midRuns[midRunCount].kind = UNUM_INTEGER_FIELD;
             midRuns[midRunCount].start = (int)midPos;
-            midRuns[midRunCount].end = (int)(midPos + 1);
+            for (int32_t k = 0; k < dLen; k++) mid[midPos++] = (char16)digitSyms[digit][k];
+            midRuns[midRunCount].end = (int)midPos;
             midRunCount++;
-            mid[midPos++] = (char16)(zeroDigit + (intBuf[i] - _u('0')));
         }
         if (fracLen > 0)
         {
@@ -2790,7 +2815,11 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             midRuns[midRunCount].end = (int)midPos;
             midRunCount++;
             uint32 fracStart = midPos;
-            for (uint32 f = 0; f < fracLen; f++) mid[midPos++] = zeroDigit;
+            int32_t zeroLen = digitSymLens[0];
+            for (uint32 f = 0; f < fracLen; f++)
+            {
+                for (int32_t k = 0; k < zeroLen; k++) mid[midPos++] = (char16)digitSyms[0][k];
+            }
             midRuns[midRunCount].kind = UNUM_FRACTION_FIELD;
             midRuns[midRunCount].start = (int)fracStart;
             midRuns[midRunCount].end = (int)midPos;

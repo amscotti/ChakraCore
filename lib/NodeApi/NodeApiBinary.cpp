@@ -636,6 +636,15 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
       // Non-fatal: GC trampoline still finds `rec` by token id.
     }
   }
+  // Publish before any synchronous detach/drain so a RootAndPublish failure
+  // leaves *result untouched and never fires finalize_cb prematurely.
+  // Transfer point for rec ownership is inside JsCreateExternalArrayBuffer
+  // (callbackState); if publish fails, the buffer stays unrooted and GC's
+  // finalizer trampoline will enqueue/delete rec later.
+  napi_status rs = RootAndPublish(env, buf, result);
+  if (rs != napi_ok) {
+    return rs;
+  }
   // Node semantics: external ArrayBuffer created with NULL pointer (and
   // byte_length == 0) is immediately detached, while still running any
   // supplied finalize_cb once safely via the detach claim path.
@@ -665,16 +674,6 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
         DrainExternalFinalizers(env);
       }
     }
-  }
-  // Transfer point for rec ownership is inside JsCreateExternalArrayBuffer
-  // (callbackState). After this point, rec is owned by the JS object;
-  // never delete inline here.
-  napi_status rs = RootAndPublish(env, buf, result);
-  if (rs != napi_ok) {
-    // Publish failed (root OOM): the buffer stays unrooted and will be
-    // collected; its finalizer trampoline will enqueue and drain will
-    // delete. Do not delete inline.
-    return rs;
   }
   nodeapi::ClearLastError(env);
   return napi_ok;

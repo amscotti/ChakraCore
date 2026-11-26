@@ -378,6 +378,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     JsRuntimeHandle runtime = JS_INVALID_RUNTIME_HANDLE;
     void *callbackArg = (finalizeCallback != nullptr ? (void*)fileContent : nullptr);
     bool fileContentOwnedByExternalBuffer = false;
+    bool restoreContext = false;
 
     char fullPath[_MAX_PATH];
 
@@ -404,6 +405,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         IfJsrtErrorSetGo(ChakraRTInterface::JsGetContextOfObject(callee, &calleeContext));
 
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(calleeContext));
+        restoreContext = true;
 
         JsValueRef scriptSource;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContent,
@@ -431,6 +433,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
             errorCode = ChakraRTInterface::JsGetGlobalObject(&returnValue);
         }
 
+        restoreContext = false;
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(currentContext));
     }
     else if (strcmp(scriptInjectType, "samethread") == 0)
@@ -444,6 +447,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
 #endif
 
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(newContext));
+        restoreContext = true;
 
         IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)GetThreadMessageQueue()));
         IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)GetThreadMessageQueue()));
@@ -478,6 +482,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         }
 
         ChakraRTInterface::JsSetCurrentContext(currentContext);
+        restoreContext = false;
     }
     else if (strcmp(scriptInjectType, "crossthread") == 0)
     {
@@ -521,6 +526,12 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     }
 
 Error:
+    if (restoreContext && currentContext != JS_INVALID_REFERENCE)
+    {
+        ChakraRTInterface::JsSetCurrentContext(currentContext);
+        restoreContext = false;
+    }
+
     if (!fileContentOwnedByExternalBuffer && finalizeCallback != nullptr && fileContent != nullptr)
     {
         finalizeCallback((void*)fileContent);
@@ -1670,6 +1681,16 @@ void WScriptJsrt::TimerContinuationCancelCallback(JsValueRef task, void *callbac
     targetQueue->RemoveTimerTask(task);
 }
 
+static void ClearPendingPromiseTrackerException()
+{
+    bool hasException = false;
+    if (ChakraRTInterface::JsHasException(&hasException) == JsNoError && hasException)
+    {
+        JsValueRef exception = JS_INVALID_REFERENCE;
+        ChakraRTInterface::JsGetAndClearException(&exception);
+    }
+}
+
 void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef reason, bool handled, void *callbackState)
 {
     Assert(promise != JS_INVALID_REFERENCE);
@@ -1697,8 +1718,19 @@ void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef
             if (error == JsNoError)
             {
                 AutoString str(stackStrValue);
-                wprintf(_u("%ls\n"), str.GetWideString());
+                if (str.GetError() == JsNoError && str.GetWideString() != nullptr)
+                {
+                    wprintf(_u("%ls\n"), str.GetWideString());
+                }
             }
+            else
+            {
+                ClearPendingPromiseTrackerException();
+            }
+        }
+        else
+        {
+            ClearPendingPromiseTrackerException();
         }
     }
 
@@ -1709,7 +1741,14 @@ void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef
         if (error == JsNoError)
         {
             AutoString str(strValue);
-            wprintf(_u("%ls\n"), str.GetWideString());
+            if (str.GetError() == JsNoError && str.GetWideString() != nullptr)
+            {
+                wprintf(_u("%ls\n"), str.GetWideString());
+            }
+        }
+        else
+        {
+            ClearPendingPromiseTrackerException();
         }
     }
 

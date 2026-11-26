@@ -91,6 +91,7 @@ DWORD RuntimeThreadData::ThreadProc()
     const char* fullPath = "agent source";
     HRESULT hr = S_OK;
     MessageQueue* agentQueue = nullptr;
+    bool wscriptInitialized = false;
 
     threadLocalData.Initialize(this);
 
@@ -117,6 +118,7 @@ DWORD RuntimeThreadData::ThreadProc()
     {
         IfFailGo(E_FAIL);
     }
+    wscriptInitialized = true;
 
     // Per-child job/timer queue (S6e). The same callbacks the main host loop
     // installs, but on a queue owned by this thread: promise reactions and
@@ -136,7 +138,7 @@ DWORD RuntimeThreadData::ThreadProc()
         (unsigned int)this->initialSource.size(), nullptr, nullptr, &scriptSource));
 
 
-    ChakraRTInterface::JsCreateString(fullPath, strlen(fullPath), &fname);
+    IfJsErrorFailLog(ChakraRTInterface::JsCreateString(fullPath, strlen(fullPath), &fname));
 
     ChakraRTInterface::JsRun(scriptSource, WScriptJsrt::GetNextSourceContext(), fname, JsParseScriptAttributeNone, nullptr);
 
@@ -240,7 +242,11 @@ DWORD RuntimeThreadData::ThreadProc()
             // waiting BroadcastCallback.
             this->DrainBroadcastQueue(true);
 
-            WScriptJsrt::Uninitialize();
+            if (wscriptInitialized)
+            {
+                WScriptJsrt::Uninitialize();
+                wscriptInitialized = false;
+            }
 
             // Tear the queue down BEFORE disposing the runtime: its messages
             // own JsRefs (task functions) that must be released while the
@@ -257,6 +263,7 @@ DWORD RuntimeThreadData::ThreadProc()
             if (this->receiveBroadcastCallbackFunc)
             {
                 ChakraRTInterface::JsRelease(this->receiveBroadcastCallbackFunc, nullptr);
+                this->receiveBroadcastCallbackFunc = nullptr;
             }
             ChakraRTInterface::JsSetCurrentContext(nullptr);
             ChakraRTInterface::JsDisposeRuntime(runtime);
@@ -293,14 +300,35 @@ Error:
         this->DrainBroadcastQueue(true);
     }
 
+    if (wscriptInitialized)
+    {
+        WScriptJsrt::Uninitialize();
+        wscriptInitialized = false;
+    }
+
     if (agentQueue != nullptr)
     {
         agentQueue->RemoveAll();
         delete agentQueue;
         this->messageQueue = nullptr;
     }
-    ChakraRTInterface::JsSetCurrentContext(nullptr);
-    ChakraRTInterface::JsDisposeRuntime(runtime);
+
+    if (this->receiveBroadcastCallbackFunc != nullptr)
+    {
+        ChakraRTInterface::JsRelease(this->receiveBroadcastCallbackFunc, nullptr);
+        this->receiveBroadcastCallbackFunc = nullptr;
+    }
+
+    if (this->context != nullptr)
+    {
+        ChakraRTInterface::JsSetCurrentContext(nullptr);
+        this->context = nullptr;
+    }
+    if (runtime != nullptr)
+    {
+        ChakraRTInterface::JsDisposeRuntime(runtime);
+        this->runtime = nullptr;
+    }
     threadLocalData.Uninitialize();
     return 0;
 }

@@ -13,9 +13,26 @@ if (mode === '1' || mode === 'ref') {
   addon.holdLoopRefForever();
 } else if (mode === 'work') {
   addon.slowWorkTimeout();
+} else if (mode === 'queued_work') {
+  // Exceed ch-nodeapi kMaxWorkers=4 so unstarted works stay in work_queue on timeout.
+  addon.slowWorkTimeout(8);
 } else if (mode === 'limit') {
   Promise.resolve().then(() => Promise.resolve().then(() => 1));
 } else {
+  const nestedReq = (typeof process !== 'undefined' && process.env)
+    ? process.env.HOST_ASYNC_NESTED_REQ : '';
+  if (nestedReq) {
+    const origMod = module;
+    const origExp = exports;
+    const origFn = __filename;
+    const origDn = __dirname;
+    const loaded = require(nestedReq);
+    assert.strictEqual(loaded.ok, true);
+    assert.strictEqual(module, origMod);
+    assert.strictEqual(exports, origExp);
+    assert.strictEqual(__filename, origFn);
+    assert.strictEqual(__dirname, origDn);
+  }
   let completed = false;
   const seen = [];
 

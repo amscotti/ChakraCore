@@ -454,9 +454,10 @@ namespace Js
             return 0;
         }
 
-        // Opens the formatter with an explicit decimal UNumberFormat (adopted by ICU) carrying the
-        // locale's minimum grouping digits. The UNumberFormat is owned by the formatter once
-        // ureldatefmt_open is called, even when it fails.
+        // Opens the formatter with an explicit decimal UNumberFormat carrying the locale's
+        // minimum grouping digits. Once status is validated non-error, ICU's
+        // RelativeDateTimeFormatter::init deletes nfToAdopt on internal failures while
+        // early wrapper OOM does not, so caller-side unum_close would double-free.
         URelativeDateTimeFormatter* OpenFormatter(
             const char* icuLocale,
             UDateRelativeDateTimeFormatterStyle style,
@@ -471,6 +472,7 @@ namespace Js
                 }
                 return nullptr;
             }
+            *status = U_ZERO_ERROR;
             int32_t minGrouping = ProbeMinimumGroupingDigits(icuLocale);
             if (minGrouping > 1)
             {

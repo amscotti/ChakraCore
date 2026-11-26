@@ -63,8 +63,20 @@ run_zig c++ $CXXFLAGS \
 NODE_PATH="$REPO/test/nodeapi/shims"
 export NODE_PATH
 
-echo "===== case 1: async_work + TSFN FIFO + promise completion ====="
-OUT=$("$HOST" --provider "$PROVIDER" --addon "$ADDON" \
+echo "===== case 1: async_work + TSFN FIFO + promise completion + require GC rooting ====="
+NESTED_MOD="$WORK/nested_gc_helper.js"
+cat > "$NESTED_MOD" <<'EOF'
+globalThis.__nodeapi_module__ = { corrupted: true };
+globalThis.__nodeapi_exports__ = { corrupted: true };
+globalThis.__filename__ = "corrupted-filename";
+globalThis.__dirname__ = "corrupted-dirname";
+if (typeof global.gc === "function") {
+  global.gc();
+  global.gc();
+}
+exports.ok = true;
+EOF
+OUT=$(HOST_ASYNC_NESTED_REQ="$NESTED_MOD" "$HOST" --provider "$PROVIDER" --addon "$ADDON" \
   --driver "$REPO/test/nodeapi/probes/host_async_driver.js" \
   --pump-timeout-ms 5000)
 echo "$OUT"
@@ -112,5 +124,20 @@ if [ "$RC" -eq 0 ]; then
   exit 1
 fi
 printf '%s\n' "$LIM_OUT" | grep -q "exceeded limit"
+
+echo "===== case 5: --pump-timeout-ms flushes queued work_queue entries without leak ====="
+set +e
+QWORK_OUT=$(HOST_ASYNC_EXPECT_TIMEOUT=queued_work "$HOST" --provider "$PROVIDER" \
+  --addon "$ADDON" --driver "$REPO/test/nodeapi/probes/host_async_driver.js" \
+  --pump-timeout-ms 80 2>&1)
+RC=$?
+set -e
+echo "$QWORK_OUT"
+if [ "$RC" -eq 0 ]; then
+  echo "run_host_async_probe: expected non-zero exit on queued ExecuteWork timeout" >&2
+  exit 1
+fi
+printf '%s\n' "$QWORK_OUT" | grep -q "timed out"
+printf '%s\n' "$QWORK_OUT" | grep -q "active_works=8"
 
 echo "run_host_async_probe: ALL PASS"

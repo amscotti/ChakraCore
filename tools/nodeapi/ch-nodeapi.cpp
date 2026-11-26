@@ -905,6 +905,23 @@ JsValueRef load_commonjs_module(RequireState* rs,
                  abs_path.c_str());
     return JS_INVALID_REFERENCE;
   }
+  struct ScopedJsRoot {
+    JsValueRef ref = JS_INVALID_REFERENCE;
+    bool rooted = false;
+    explicit ScopedJsRoot(JsValueRef v) : ref(v) {
+      if (ref != JS_INVALID_REFERENCE && JsAddRef(ref, nullptr) == JsNoError) {
+        rooted = true;
+      }
+    }
+    ~ScopedJsRoot() {
+      if (rooted && ref != JS_INVALID_REFERENCE) {
+        JsRelease(ref, nullptr);
+      }
+    }
+    ScopedJsRoot(const ScopedJsRoot&) = delete;
+    ScopedJsRoot& operator=(const ScopedJsRoot&) = delete;
+  };
+
   JsValueRef module_obj = JS_INVALID_REFERENCE;
   JsValueRef exports_obj = JS_INVALID_REFERENCE;
   if (JsCreateObject(&module_obj) != JsNoError ||
@@ -912,6 +929,12 @@ JsValueRef load_commonjs_module(RequireState* rs,
     std::fprintf(stderr, "ch-nodeapi: require: cannot create module\n");
     return JS_INVALID_REFERENCE;
   }
+  // Root module_obj, exports_obj, and the saved host globals across JsRun:
+  // executed user code can mutate globalThis.__nodeapi_* / __filename__ /
+  // __dirname__ and trigger GC before this frame restores or caches them
+  // (doc/memory-management.md sec 3: RAII JsAddRef/JsRelease scope).
+  ScopedJsRoot module_root(module_obj);
+  ScopedJsRoot exports_root(exports_obj);
   {
     JsPropertyIdRef pid = JS_INVALID_REFERENCE;
     JsCreatePropertyId("exports", 7, &pid);
@@ -923,6 +946,10 @@ JsValueRef load_commonjs_module(RequireState* rs,
   JsValueRef prev_exp = host_get_global("__nodeapi_exports__");
   JsValueRef prev_fn = host_get_global("__filename__");
   JsValueRef prev_dn = host_get_global("__dirname__");
+  ScopedJsRoot prev_mod_root(prev_mod);
+  ScopedJsRoot prev_exp_root(prev_exp);
+  ScopedJsRoot prev_fn_root(prev_fn);
+  ScopedJsRoot prev_dn_root(prev_dn);
   host_set_global("__nodeapi_module__", module_obj);
   host_set_global("__nodeapi_exports__", exports_obj);
   {
@@ -1311,15 +1338,27 @@ void host_unref_loop(void* host_ctx) {
   if (st->loop_refs == 0) st->cv.notify_all();
 }
 
+// Ownership record (doc/memory-management.md sec 3):
+// - Unstarted `WorkItem`s in `work_queue` and pending `PendingTask`s in
+//   `task_queue` own libChakraNodeApi heap state (e.g., `AsyncWork*`,
+//   `TsfnTaskArg*`) until their `complete`/`fn` trampoline runs once.
+// - `shutdown_all` calls `destroy_env` on every addon env before calling
+//   `shutdown_host_loop`. When exiting via `--pump-timeout-ms` or error while
+//   workers are still busy, flush swapped `task_queue` / `work_queue`
+//   trampolines outside `st->mutex` so queued records drop refs cleanly
+//   (post-destroy `WorkCompleteTramp` skips user JS and calls `DropWorkRef`).
 bool shutdown_host_loop(HostLoopState* st, bool wait_for_active) {
   if (st == nullptr) return true;
   std::vector<std::thread> to_join;
+  std::deque<WorkItem> unstarted_work;
+  std::deque<PendingTask> remaining_tasks;
   bool has_active = false;
   {
     std::lock_guard<std::mutex> lk(st->mutex);
     st->shutting_down = true;
-    const size_t dropped = st->work_queue.size();
-    st->work_queue.clear();
+    unstarted_work.swap(st->work_queue);
+    remaining_tasks.swap(st->task_queue);
+    const size_t dropped = unstarted_work.size();
     st->active_works =
         (st->active_works > dropped) ? (st->active_works - dropped) : 0;
     has_active = (st->active_works > 0);
@@ -1330,15 +1369,38 @@ bool shutdown_host_loop(HostLoopState* st, bool wait_for_active) {
     for (auto& w : to_join) {
       if (w.joinable()) w.join();
     }
-    return true;
+    {
+      std::lock_guard<std::mutex> lk(st->mutex);
+      while (!st->task_queue.empty()) {
+        remaining_tasks.push_back(st->task_queue.front());
+        st->task_queue.pop_front();
+      }
+    }
+  } else {
+    // Timeout/error exit while an uncancellable worker ExecuteWork is still
+    // running: detach workers so process exit honors --pump-timeout-ms
+    // promptly; caller skips dlclose so addon text stays mapped until exit.
+    for (auto& w : to_join) {
+      if (w.joinable()) w.detach();
+    }
   }
-  // Timeout/error exit while an uncancellable worker ExecuteWork is still
-  // running: detach workers so process exit honors --pump-timeout-ms
-  // promptly; caller skips dlclose so addon text stays mapped until exit.
-  for (auto& w : to_join) {
-    if (w.joinable()) w.detach();
+  for (const PendingTask& t : remaining_tasks) {
+    if (t.fn != nullptr) {
+      try {
+        t.fn(t.arg);
+      } catch (...) {
+      }
+    }
   }
-  return false;
+  for (const WorkItem& w : unstarted_work) {
+    if (w.complete != nullptr) {
+      try {
+        w.complete(w.arg);
+      } catch (...) {
+      }
+    }
+  }
+  return !has_active || wait_for_active;
 }
 
 void promise_continuation(JsValueRef task, void* state) {

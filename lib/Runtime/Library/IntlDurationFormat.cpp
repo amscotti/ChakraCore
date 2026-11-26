@@ -499,13 +499,12 @@ namespace Js
                 }
                 UErrorCode pStatus = U_ZERO_ERROR;
                 char parent[ULOC_FULLNAME_CAPACITY] = { 0 };
-                uloc_getParent(cur, parent, static_cast<int32_t>(sizeof(parent)), &pStatus);
-                if (U_FAILURE(pStatus) || strcmp(parent, cur) == 0)
+                int32_t plen = uloc_getParent(cur, parent, static_cast<int32_t>(sizeof(parent)), &pStatus);
+                if (ICU_FAILURE(pStatus) || plen < 0 || static_cast<size_t>(plen) >= sizeof(parent) || strcmp(parent, cur) == 0)
                 {
                     break;
                 }
-                size_t plen = strlen(parent);
-                js_memcpy_s(cur, sizeof(cur), parent, plen + 1);
+                js_memcpy_s(cur, sizeof(cur), parent, static_cast<size_t>(plen) + 1);
             }
             return false;
         }

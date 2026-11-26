@@ -376,8 +376,34 @@ int main() {
     expect_status(napi_is_detached_arraybuffer(env, nullExt, &nullExtDet),
                   napi_ok, "is_detached null/0 ok");
     expect(nullExtDet == true, "null/0 external AB is detached");
+    // External AB with NULL/0 and a finalizer runs finalizer once after publish,
+    // leaves live/queued counts at baseline, and does not double-fire on GC.
+    {
+      size_t liveNull0 = NodeApiBinary_ExternalLiveCount();
+      size_t queuedNull0 = NodeApiBinary_ExternalQueuedCount();
+      int callsNull0 = g_ext_finalizer_calls;
+      void* nullHint = reinterpret_cast<void*>(0xBEEF0);
+      napi_value nullExtCb = nullptr;
+      expect_status(napi_create_external_arraybuffer(env, nullptr, 0, ExtFinalize,
+                                                     nullHint, &nullExtCb),
+                    napi_ok, "create external null/0 with cb ok");
+      expect(nullExtCb != nullptr, "null/0 external AB with cb non-null");
+      bool detCb = false;
+      expect_status(napi_is_detached_arraybuffer(env, nullExtCb, &detCb),
+                    napi_ok, "is_detached null/0 cb ok");
+      expect(detCb == true, "null/0 external AB with cb is detached");
+      expect(g_ext_finalizer_calls == callsNull0 + 1,
+             "null/0 external AB finalizer ran once after publish");
+      expect(g_ext_finalizer_last_data == nullptr, "null/0 cb data is nullptr");
+      expect(g_ext_finalizer_last_hint == nullHint, "null/0 cb hint matches");
+      expect(NodeApiBinary_ExternalLiveCount() == liveNull0,
+             "null/0 cb live count back at baseline");
+      expect(NodeApiBinary_ExternalQueuedCount() == queuedNull0,
+             "null/0 cb queue count back at baseline");
+    }
     CloseScope(s);
     expect(RootCount() == Baseline(), "zero at baseline");
+    force_gc(rt);
   }
 
   {

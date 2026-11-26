@@ -40,7 +40,7 @@ UINT32 snapHistoryLength = MAXUINT32;
 LPCWSTR connectionUuidString = NULL;
 UINT32 startEventCount = 1;
 
-HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileName);
+HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileName, JsFinalizeCallback finalizeCallback = nullptr, bool* ownershipTransferred = nullptr);
 
 extern "C"
 HRESULT __stdcall OnChakraCoreLoadedEntry(TestHooks& testHooks)
@@ -402,10 +402,15 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, 
         }
         else if (parserStateCache != nullptr)
         {
+            if (fileLength > UINT_MAX)
+            {
+                hr = E_FAIL;
+                goto ErrorRunFinalize;
+            }
             JsValueRef scriptSource;
-            IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
+            IfJsErrorFailLogLabel(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
                 (unsigned int)fileLength,
-                fileContentsFinalizeCallback, (void*)fileContents, &scriptSource));
+                fileContentsFinalizeCallback, (void*)fileContents, &scriptSource), ErrorRunFinalize);
 
             // TODO: Support TTD
             runScript = ChakraRTInterface::JsRunScriptWithParserState(
@@ -422,15 +427,31 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, 
         }
         else if (HostConfigFlags::flags.ExecuteWithBgParse && !HostConfigFlags::flags.DebugLaunch)
         {
+            if (fileLength > UINT_MAX)
+            {
+                hr = E_FAIL;
+                goto ErrorRunFinalize;
+            }
             unsigned int lengthBytes = (unsigned int) fileLength;
-            runScript = (JsErrorCode)RunBgParseSync(fileContents, lengthBytes, fileName);
+            bool ownershipTransferred = false;
+            runScript = (JsErrorCode)RunBgParseSync(fileContents, lengthBytes, fileName, fileContentsFinalizeCallback, &ownershipTransferred);
+            if (!ownershipTransferred && runScript != JsNoError)
+            {
+                hr = E_FAIL;
+                goto ErrorRunFinalize;
+            }
         }
         else // bufferValue == nullptr && parserStateCache == nullptr
         {
+            if (fileLength > UINT_MAX)
+            {
+                hr = E_FAIL;
+                goto ErrorRunFinalize;
+            }
             JsValueRef scriptSource;
-            IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
+            IfJsErrorFailLogLabel(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
                 (unsigned int)fileLength,
-                fileContentsFinalizeCallback, (void*)fileContents, &scriptSource));
+                fileContentsFinalizeCallback, (void*)fileContents, &scriptSource), ErrorRunFinalize);
 
 #if ENABLE_TTD
             if (doTTRecord)
@@ -739,19 +760,31 @@ Error:
 }
 
 // Use the asynchronous BGParse JSRT APIs in a synchronous call
-HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileName)
+HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileName, JsFinalizeCallback finalizeCallback, bool* ownershipTransferred)
 {
-    JsValueRef scriptSource;
-    JsErrorCode e = (ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
-        (unsigned int)lengthBytes,
-        nullptr, (void*)fileContents, &scriptSource));
-
-    // What's the preferred way of doing this?
-    WCHAR fileNameWide[MAX_PATH] = { 0 };
-    size_t fileNameLength = strlen(fileName);
-    for (size_t i = 0; i < fileNameLength; i++)
+    if (ownershipTransferred != nullptr)
     {
-        fileNameWide[i] = fileName[i];
+        *ownershipTransferred = false;
+    }
+
+    WCHAR *fileNameWide = nullptr;
+    if (FAILED(NarrowStringToWideDynamic(fileName != nullptr ? fileName : "", &fileNameWide)) || fileNameWide == nullptr)
+    {
+        return JsErrorOutOfMemory;
+    }
+
+    JsValueRef scriptSource = JS_INVALID_REFERENCE;
+    JsErrorCode e = ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
+        (unsigned int)lengthBytes,
+        finalizeCallback, (void*)fileContents, &scriptSource);
+    if (e != JsNoError)
+    {
+        free(fileNameWide);
+        return e;
+    }
+    if (ownershipTransferred != nullptr)
+    {
+        *ownershipTransferred = true;
     }
 
     JsScriptContents scriptContents = { 0 };
@@ -763,7 +796,11 @@ HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileNa
 
     DWORD cookie = 0;
     e = ChakraRTInterface::JsQueueBackgroundParse_Experimental(&scriptContents, &cookie);
-    Assert(e == JsErrorCode::JsNoError);
+    if (e != JsNoError)
+    {
+        free(fileNameWide);
+        return e;
+    }
 
     JsValueRef bgResult = nullptr;
     e = ChakraRTInterface::JsExecuteBackgroundParse_Experimental(
@@ -776,6 +813,7 @@ HRESULT RunBgParseSync(LPCSTR fileContents, UINT lengthBytes, const char* fileNa
         &bgResult
     );
 
+    free(fileNameWide);
     return e;
 }
 
