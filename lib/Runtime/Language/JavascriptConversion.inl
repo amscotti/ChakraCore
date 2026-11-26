@@ -146,8 +146,8 @@ namespace Js {
            return UINT8_MAX;
        }
 
-       // This will also cover negative infinity, and anything less than INT_MIN
-       if (dval < 0)
+       // Catch NaN, -Infinity, negative values, -0, and +0 before any (uint8) cast or SSE2 intrinsic
+       if (!(dval > 0.0))
        {
            return 0;
        }

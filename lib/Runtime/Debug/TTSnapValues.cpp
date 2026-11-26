@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
@@ -312,6 +313,95 @@ namespace TTD
 
         //////////////////
 
+        // Serialize a primitive BigInt into canonical hex ("0", "0x<hex>", or "-0x<hex>")
+        // using a stack buffer for <= 64-bit magnitudes and O(N) base-16 formatting above.
+        static void ExtractBigIntToTTString(Js::JavascriptBigInt* bi, TTString& into, SlabAllocator& alloc)
+        {
+            if(bi->IsZeroValue())
+            {
+                alloc.CopyStringIntoWLength(_u("0"), 1, into);
+                return;
+            }
+
+            if((!bi->isNegative() && bi->CompareToUInt64(false, UINT64_MAX) <= 0)
+                || (bi->isNegative() && bi->CompareToUInt64(true, UINT64_MAX) >= 0))
+            {
+                uint64 mag = bi->ToUInt64Low();
+                if(bi->isNegative())
+                {
+                    mag = static_cast<uint64>(0) - mag;
+                }
+
+                char16 buf[24];
+                char16* dst = buf;
+                if(bi->isNegative())
+                {
+                    *dst++ = _u('-');
+                }
+                *dst++ = _u('0');
+                *dst++ = _u('x');
+
+                static const char16 hexDigits[] = _u("0123456789abcdef");
+                int shift = 60;
+                while(shift > 0 && ((mag >> shift) & 0xF) == 0)
+                {
+                    shift -= 4;
+                }
+                for(; shift >= 0; shift -= 4)
+                {
+                    *dst++ = hexDigits[(mag >> shift) & 0xF];
+                }
+                *dst = _u('\0');
+
+                alloc.CopyStringIntoWLength(buf, static_cast<uint32>(dst - buf), into);
+                return;
+            }
+
+            Js::JavascriptString* hexStr = bi->ToString(16, bi->GetScriptContext());
+            const char16* raw = hexStr->GetString();
+            uint32 rawLen = hexStr->GetLength();
+            bool isNeg = (rawLen > 0 && raw[0] == _u('-'));
+            const char16* digits = isNeg ? (raw + 1) : raw;
+            uint32 digitsLen = isNeg ? (rawLen - 1) : rawLen;
+            TTDAssert(digitsLen > 0 && digits[0] != _u('0'), "Non-zero BigInt hex should not have leading zero.");
+
+            uint32 outLen = (isNeg ? 1u : 0u) + 2u + digitsLen;
+            alloc.InitializeAndAllocateWLength(outLen, into);
+            char16* out = into.Contents;
+            if(isNeg)
+            {
+                *out++ = _u('-');
+            }
+            *out++ = _u('0');
+            *out++ = _u('x');
+            js_memcpy_s(out, digitsLen * sizeof(char16), digits, digitsLen * sizeof(char16));
+            out[digitsLen] = _u('\0');
+        }
+
+        // Inflate a primitive BigInt from canonical hex ("0", "0x<hex>", or "-0x<hex>").
+        static Js::JavascriptBigInt* InflateBigIntFromTTString(const TTString* hexStr, Js::ScriptContext* ctx)
+        {
+            TTDAssert(hexStr != nullptr && hexStr->Contents != nullptr && hexStr->Length > 0, "Invalid TTD BigInt string.");
+
+            if(hexStr->Length == 1 && hexStr->Contents[0] == _u('0'))
+            {
+                return Js::JavascriptBigInt::CreateZero(ctx);
+            }
+
+            if(hexStr->Contents[0] == _u('-'))
+            {
+                TTDAssert(hexStr->Length > 3, "Invalid negative TTD BigInt hex string.");
+                Js::JavascriptBigInt* posVal = Js::JavascriptBigInt::CreateFromString(hexStr->Contents + 1, hexStr->Length - 1, ctx);
+                TTDAssert(posVal != nullptr, "Failed to inflate negative TTD BigInt.");
+                return Js::VarTo<Js::JavascriptBigInt>(Js::JavascriptBigInt::Negate(static_cast<Js::Var>(posVal)));
+            }
+
+            TTDAssert(hexStr->Length > 2, "Invalid TTD BigInt hex string.");
+            Js::JavascriptBigInt* val = Js::JavascriptBigInt::CreateFromString(hexStr->Contents, hexStr->Length, ctx);
+            TTDAssert(val != nullptr, "Failed to inflate TTD BigInt.");
+            return val;
+        }
+
         void ExtractSnapPrimitiveValue(SnapPrimitiveValue* snapValue, Js::RecyclableObject* jsValue, bool isWellKnown, const TTDIdentifierDictionary<TTD_PTR_ID, NSSnapType::SnapType*>& idToTypeMap, SlabAllocator& alloc)
         {
             snapValue->PrimitiveValueId = TTD_CONVERT_VAR_TO_PTR_ID(jsValue);
@@ -349,6 +439,10 @@ namespace TTD
                     break;
                 case Js::TypeIds_Symbol:
                     snapValue->u_propertyIdValue = jslib->ExtractPrimitveSymbolId_TTD(jsValue);
+                    break;
+                case Js::TypeIds_BigInt:
+                    snapValue->u_stringValue = alloc.SlabAllocateStruct<TTString>();
+                    ExtractBigIntToTTString(Js::VarTo<Js::JavascriptBigInt>(jsValue), *(snapValue->u_stringValue), alloc);
                     break;
                 default:
                     TTDAssert(false, "These are supposed to be primitive values on the heap e.g., no pointers or properties.");
@@ -402,6 +496,9 @@ namespace TTD
                     case Js::TypeIds_Symbol:
                         res = jslib->CreatePrimitveSymbol_TTD(snapValue->u_propertyIdValue);
                         break;
+                    case Js::TypeIds_BigInt:
+                        res = InflateBigIntFromTTString(snapValue->u_stringValue, ctx);
+                        break;
                     default:
                         TTDAssert(false, "These are supposed to be primitive values e.g., no pointers or properties.");
                         res = nullptr;
@@ -443,6 +540,7 @@ namespace TTD
                     writer->WriteUInt64(NSTokens::Key::u64Val, snapValue->u_uint64Value, NSTokens::Separator::CommaSeparator);
                     break;
                 case Js::TypeIds_String:
+                case Js::TypeIds_BigInt:
                     writer->WriteString(NSTokens::Key::stringVal, *(snapValue->u_stringValue), NSTokens::Separator::CommaSeparator);
                     break;
                 case Js::TypeIds_Symbol:
@@ -494,6 +592,7 @@ namespace TTD
                     snapValue->u_uint64Value = reader->ReadUInt64(NSTokens::Key::u64Val, true);
                     break;
                 case Js::TypeIds_String:
+                case Js::TypeIds_BigInt:
                     snapValue->u_stringValue = alloc.SlabAllocateStruct<TTString>();
                     reader->ReadString(NSTokens::Key::stringVal, alloc, *(snapValue->u_stringValue), true);
                     break;
@@ -541,6 +640,7 @@ namespace TTD
                     compareMap.DiagnosticAssert(v1->u_uint64Value == v2->u_uint64Value);
                     break;
                 case Js::TypeIds_String:
+                case Js::TypeIds_BigInt:
                     compareMap.DiagnosticAssert(TTStringEQForDiagnostics(*(v1->u_stringValue), *(v2->u_stringValue)));
                     break;
                 case Js::TypeIds_Symbol:
