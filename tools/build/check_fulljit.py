@@ -595,12 +595,12 @@ def self_test():
 
     # 2c. Gate counts & default expected count selection (B-6).
     bad += report(
-        "gate_counts.json fulljit test pin is 643/0",
-        FULLJIT_PINS.get("test") == (643, 0)
-        and default_expected_counts(DEFAULT_SUITES, "test", plat="darwin") == (643, 0)
-        and default_expected_counts(DEFAULT_SUITES, "test", plat="linux") == (643, 0)
-        and default_expected_counts(DEFAULT_SUITES, "debug", plat="darwin") == (662, 0)
-        and default_expected_counts(DEFAULT_SUITES, "test", plat="win32") == (642, 0)
+        "gate_counts.json fulljit test pin is 644/0",
+        FULLJIT_PINS.get("test") == (644, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="darwin") == (644, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="linux") == (644, 0)
+        and default_expected_counts(DEFAULT_SUITES, "debug", plat="darwin") == (663, 0)
+        and default_expected_counts(DEFAULT_SUITES, "test", plat="win32") == (643, 0)
         and default_expected_counts(("S1",), "test") == (None, 0),
         repr(FULLJIT_PINS),
     )

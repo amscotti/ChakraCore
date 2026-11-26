@@ -651,4 +651,15 @@
       <files>arm64OverflowFormalsBailout.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>arm64-math-round-half-ulp.js</files>
+      <compile-flags>-mic:1 -off:simplejit -bgjit-</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>labeled-break-finally-nested-try.js</files>
+    </default>
+  </test>
 </regress-exe>

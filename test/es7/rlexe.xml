@@ -829,4 +829,11 @@
       <timeout>180</timeout>
     </default>
   </test>
+  <test>
+    <default>
+      <files>promise-rejection-throwing-stack.js</files>
+      <compile-flags>-TrackRejectedPromises -args summary -endargs -nodeferparse</compile-flags>
+      <baseline>promise-rejection-throwing-stack.baseline</baseline>
+    </default>
+  </test>
 </regress-exe>

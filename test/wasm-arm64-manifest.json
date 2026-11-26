@@ -3193,6 +3193,17 @@
     },
     {
       "features": [
+        "mvp"
+      ],
+      "phase": "P1",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[76]"
+    },
+    {
+      "features": [
         "mvp",
         "simd"
       ],
@@ -3310,6 +3321,26 @@
       "runnerTags": [],
       "suite": "wasm.simd",
       "test-id": "wasm.simd[11]"
+    },
+    {
+      "features": [
+        "mvp",
+        "simd"
+      ],
+      "phase": "P3",
+      "runnerTags": [],
+      "suite": "wasm.simd",
+      "test-id": "wasm.simd[12]"
+    },
+    {
+      "features": [
+        "mvp",
+        "simd"
+      ],
+      "phase": "P3",
+      "runnerTags": [],
+      "suite": "wasm.simd",
+      "test-id": "wasm.simd[13]"
     },
     {
       "features": [
@@ -4879,7 +4910,7 @@
   "meta": {
     "counts": "rlexe entries (variants included), never files",
     "generator": "tools/build/gen_wasm_manifest.py",
-    "p1": 382,
+    "p1": 383,
     "plan": "doc/wasm-arm64-plan.md D7",
     "suites": {
       "ASMJSParser": {
@@ -4928,10 +4959,10 @@
         "rlexe": "test/WasmSpec.MultiValue/rlexe.xml"
       },
       "wasm": {
-        "entries": 76,
-        "p1": 47,
+        "entries": 77,
+        "p1": 48,
         "phases": {
-          "P1": 47,
+          "P1": 48,
           "P2": 1,
           "P2-pending": 8,
           "P3": 7,
@@ -4941,15 +4972,15 @@
         "rlexe": "test/wasm/rlexe.xml"
       },
       "wasm.simd": {
-        "entries": 12,
+        "entries": 14,
         "p1": 0,
         "phases": {
-          "P3": 12
+          "P3": 14
         },
         "rlexe": "test/wasm.simd/rlexe.xml"
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 484
+    "total": 487
   }
 }

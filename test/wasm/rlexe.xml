@@ -560,4 +560,11 @@
     <tags>require_backend</tags>
   </default>
 </test>
+<test>
+  <default>
+    <files>arm64-jit-debug-smoke.js</files>
+    <compile-flags>-wasm</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
 </regress-exe>

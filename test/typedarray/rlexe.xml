@@ -474,4 +474,10 @@ Below test fails with difference in space. Investigate the cause and re-enable t
       <tags>typedarray</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>uint8clamped_nan_ub.js</files>
+      <tags>typedarray</tags>
+    </default>
+  </test>
 </regress-exe>

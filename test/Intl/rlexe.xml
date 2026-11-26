@@ -167,6 +167,13 @@
       <tags>Intl,exclude_windows</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>IntlHardeningRegression.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
 
   <!-- Slow Tests -->
 

@@ -69,12 +69,14 @@ VARIANTS = ("interpreted", "dynapogo")
 # because the Linux selection runs the x64-eligible subset (include_slow
 # off, platform exclusions); the two counts are the authoritative Linux
 # baseline.
-# 2026-11-25 G0-phase4 integration: 2907/0 & 2370/0 observed natively on
-# Linux x64 at 17e043056 (fix/g0-phase4-followups) plus +18 non-SIMD rlexe.xml
-# tests added across Waves 1-5b (Array +1, Bugs +1, Intl +1, Optimizer +3,
-# Regex +1, es6 +1, es6module +1, es7 +7, typedarray +2); pending native
-# Linux CI re-confirmation.
-RECORDED_BASELINE = {"interpreted": (2925, 0), "dynapogo": (2388, 0)}
+# 2026-11-25 G0-phase4 + hardening-integrator: 2907/0 & 2370/0 observed
+# natively on Linux x64 at 17e043056 (fix/g0-phase4-followups) plus +18
+# non-SIMD rlexe.xml tests added across Waves 1-5b (Array +1, Bugs +1,
+# Intl +1, Optimizer +3, Regex +1, es6 +1, es6module +1, es7 +7, typedarray +2)
+# and +10 interpreted / +7 dynapogo hardening regressions (Bugs +2, Intl +1,
+# TTBasic +3 excl_dynapogo, es6module +1, es7 +1, typedarray +1, wasm +1);
+# pending native Linux CI re-confirmation.
+RECORDED_BASELINE = {"interpreted": (2935, 0), "dynapogo": (2395, 0)}
 
 
 def grade_variant(variant, rc, lines, allow_higher=False):

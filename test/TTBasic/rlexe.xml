@@ -1136,4 +1136,28 @@
       <tags>exclude_dynapogo,exclude_snap,exclude_serialized</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>bigint.js</files>
+      <compile-flags>-TTRecord=bigintTest -TTSnapInterval=0</compile-flags>
+      <baseline>bigintRecord.baseline</baseline>
+      <tags>exclude_dynapogo,exclude_snap,exclude_serialized</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>ttdSentinal.js</files>
+      <compile-flags>-TTReplay=bigintTest -TTDStartEvent=2</compile-flags>
+      <baseline>bigintReplay_1.baseline</baseline>
+      <tags>exclude_dynapogo,exclude_snap,exclude_serialized</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>ttdSentinal.js</files>
+      <compile-flags>-TTReplay=bigintTest -TTDStartEvent=3</compile-flags>
+      <baseline>bigintReplay_2.baseline</baseline>
+      <tags>exclude_dynapogo,exclude_snap,exclude_serialized</tags>
+    </default>
+  </test>
 </regress-exe>

@@ -44,7 +44,7 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 | `check-jit` | Runs `tools/build/check_jit.py` (PE32+ AMD64 `ChakraCore.dll`/`ch.exe` validation + `-trace:BackEnd` `BeginBackEnd`/`EndBackEnd` probe + `-mic:1` / `dynapogo` on `test`/`debug-static`, or PE32+ + default-flags runtime on `release-shared`; requires `-Djit=true`) |
 | `check-nodeapi` | Verifies `gen_nodeapi_exports.py --check` + pure-Python PE32+ export parser `check_nodeapi.py --dll <libChakraNodeApi.dll>` matches all `161` symbols (`155` `napi_*`/`node_api_*` + `6` host) |
 | `check-gcstress` | Runs bounded `GCStress.exe` in-thread and concurrent heap walks |
-| `check-wasm` | Runs `tools/build/check_wasm_p1.py` (`382` P1 entries; requires `-Djit=true` and non-release profile) |
+| `check-wasm` | Runs `tools/build/check_wasm_p1.py` (`383` P1 entries; requires `-Djit=true` and non-release profile) |
 | `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`) |
 | `check` | Aggregates `check-selftest`, `verify-bytecode` (non-release), `check-regression` (non-release), `check-smoke`, `check-jit` (when `-Djit=true`), `check-nodeapi` (shared profiles), `check-gcstress`, and `check-metadata` |
 | `package` | Builds deterministic `out/package/chakracore-<version>-windows-x64.tar.gz` + `MANIFEST.json` (shared profiles only) |
@@ -203,7 +203,7 @@ python runtests.py --x64 --debug --variants=interpreted -b ../out/debug-static/b
 Pop-Location
 ```
 
-Expected: `check-wasm` (`382/382` P1 or record any x64/Windows manifest deltas), `check-fulljit` `0` failures, `check-gcstress` completes in-thread and concurrent heap walks cleanly, and debug `wasm` triggers zero debug assertions.
+Expected: `check-wasm` (`383/383` P1 or record any x64/Windows manifest deltas), `check-fulljit` `0` failures, `check-gcstress` completes in-thread and concurrent heap walks cleanly, and debug `wasm` triggers zero debug assertions.
 
 ### Step 7 -- Node-API v10 Stack (`libChakraNodeApi.dll` + `ch-nodeapi.exe` + `check-nodeapi`)
 
