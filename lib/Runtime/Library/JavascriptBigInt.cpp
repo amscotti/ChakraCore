@@ -485,6 +485,9 @@ namespace Js
         }
 
         static const char16 digitChars[] = _u("0123456789abcdefghijklmnopqrstuvwxyz");
+        // Single char16[] allocations (including the NUL terminator) must stay
+        // below Recycler's 2 GiB MaxSingleAllocSizeInMB abort threshold.
+        const uint64 MaxStringBufferChars = 1ull << 30;
 
         uint32 bitsPerDigit = 0;
         if (IsPowerOfTwoRadix(radix, &bitsPerDigit))
@@ -496,7 +499,9 @@ namespace Js
 
             uint64 digitCount64 = (bitLength + bitsPerDigit - 1) / bitsPerDigit;
             uint64 resultLength64 = digitCount64 + (m_isNegative ? 1 : 0);
-            if (resultLength64 > SIZE_MAX || !IsValidCharCount(static_cast<size_t>(resultLength64)))
+            if (resultLength64 >= MaxStringBufferChars - 1 ||
+                resultLength64 > SIZE_MAX ||
+                !IsValidCharCount(static_cast<size_t>(resultLength64)))
             {
                 JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
             }
@@ -553,10 +558,13 @@ namespace Js
         }
 
         // Base 2 is the longest representation: one character per bit. Check
-        // the representation size before allocating (a string past the engine
-        // limit cannot be produced anyway).
+        // the representation and scratch char16 buffer size before allocating
+        // so oversized BigInts throw RangeError instead of aborting in LargeAlloc.
         uint64 maxDigitsSize = static_cast<uint64>(m_length) * (sizeof(digit_t) * 8) + 2;
-        if (maxDigitsSize > SIZE_MAX || !IsValidCharCount(static_cast<size_t>(maxDigitsSize)))
+        if (static_cast<uint64>(m_length) >= (1ull << 31) / sizeof(digit_t) ||
+            maxDigitsSize >= MaxStringBufferChars ||
+            maxDigitsSize > SIZE_MAX ||
+            !IsValidCharCount(static_cast<size_t>(maxDigitsSize)))
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
         }
@@ -595,8 +603,15 @@ namespace Js
         }
         Assert(digitCount <= maxDigits);
 
-        charcount_t resultLength = digitCount + (m_isNegative ? 1 : 0);
-        char16 * result = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, resultLength);
+        uint64 resultLength64 = static_cast<uint64>(digitCount) + (m_isNegative ? 1 : 0);
+        if (resultLength64 >= MaxStringBufferChars - 1 ||
+            !IsValidCharCount(static_cast<size_t>(resultLength64)))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
+        }
+        charcount_t resultLength = static_cast<charcount_t>(resultLength64);
+        BufferStringBuilder builder(resultLength, scriptContext);
+        char16 * result = builder.DangerousGetWritableBuffer();
 
         charcount_t index = 0;
         if (m_isNegative)
@@ -608,7 +623,7 @@ namespace Js
             result[index++] = reversedDigits[digitCount - 1 - i];
         }
 
-        return JavascriptString::NewCopyBuffer(result, resultLength, scriptContext);
+        return builder.ToString();
     }
 
     JavascriptString* JavascriptBigInt::ToString(ScriptContext * scriptContext)

@@ -617,6 +617,7 @@ using namespace Js;
         FastEvalMapString key(argString, sourceString, sourceLen, moduleID, strictMode, isLibraryCode);
 
 
+        bool mayContainSuper = wcsstr(sourceString, _u("super")) != nullptr;
         // Eval called from a class field initializer or a derived constructor
         // with instance fields must be parsed with that context; do not reuse a
         // cached FunctionBody compiled under a different context.
@@ -631,36 +632,32 @@ using namespace Js;
         bool evalCallerParameterArguments = false;
         if (args.IsDirectEvalCall() && !isIndirect)
         {
-            JavascriptFunction * pfuncCaller = nullptr;
-            if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) &&
-                pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
-            {
-                FunctionBody * callerBody = pfuncCaller->GetFunctionBody();
-                FunctionInfo * callerInfo = callerBody->GetFunctionInfo();
-                evalInClassFieldInitializer = callerInfo->IsClassFieldInitializer();
-                // PerformEval inMethod comes from the caller's lexical
-                // [[HomeObject]] context. Methods/constructors/field helpers
-                // carry it in FunctionInfo; arrows and nested direct-eval
-                // bodies carry the marker propagated at code generation.
-                // Never infer it from other active stack frames: an arrow
-                // created in a plain function has no home object even when
-                // invoked while a method frame is below it.
-                evalInMethod = callerInfo->HasHomeObj() ||
-                    evalInClassFieldInitializer ||
-                    callerBody->HasHomeObjectContext();
-            }
-
             // An eval inside an arrow in a constructor has the arrow as its
-            // immediate caller. Walk out to the constructor so super() in that
-            // eval is rejected instead of silently skipping field init.
+            // immediate caller. Only walk out to an enclosing constructor when
+            // the eval contains "super" and the immediate caller can actually
+            // delegate direct super (arrow/eval inside a derived constructor).
             JavascriptStackWalker walker(scriptContext);
-            bool firstCaller = true;
-            while (walker.GetCaller(&pfuncCaller))
+            JavascriptFunction * pfuncCaller = nullptr;
+            if (walker.GetCaller(&pfuncCaller))
             {
-                if (firstCaller)
+                bool shouldWalkToConstructor = mayContainSuper;
+                if (pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
                 {
-                    firstCaller = false;
-                    if (pfuncCaller != nullptr && pfuncCaller->IsScriptFunction() && walker.IsJavascriptFrame())
+                    FunctionBody * callerBody = pfuncCaller->GetFunctionBody();
+                    FunctionInfo * callerInfo = callerBody->GetFunctionInfo();
+                    evalInClassFieldInitializer = callerInfo->IsClassFieldInitializer();
+                    // PerformEval inMethod comes from the caller's lexical
+                    // [[HomeObject]] context. Methods/constructors/field helpers
+                    // carry it in FunctionInfo; arrows and nested direct-eval
+                    // bodies carry the marker propagated at code generation.
+                    // Never infer it from other active stack frames: an arrow
+                    // created in a plain function has no home object even when
+                    // invoked while a method frame is below it.
+                    evalInMethod = callerInfo->HasHomeObj() ||
+                        evalInClassFieldInitializer ||
+                        callerBody->HasHomeObjectContext();
+
+                    if (walker.IsJavascriptFrame())
                     {
                         InterpreterStackFrame *callerFrame = walker.GetCurrentInterpreterFrame();
                         // Direct eval in a parameter initializer: baseline S14
@@ -686,23 +683,40 @@ using namespace Js;
                             callerFrame != nullptr &&
                             !callerFrame->TestFlags(InterpreterStackFrameFlags_FromBailOut);
                         evalInParamScope = callerFrameTracksParamScope && !callerFrame->IsParamScopeDone();
-                        FunctionBody *callerBody = pfuncCaller->GetFunctionBody();
-                        FunctionInfo *callerInfo = callerBody->GetFunctionInfo();
                         evalInArrowParamScope = evalInParamScope && callerBody->IsLambda();
                         evalCallerParameterArguments = callerInfo->HasParameterNamedArguments();
                     }
+
+                    if (callerInfo->IsClassConstructor())
+                    {
+                        evalInDerivedFieldConstructor =
+                            callerInfo->IsClassConstructorWithFields() &&
+                            (callerInfo->GetAttributes() & FunctionInfo::Attributes::BaseConstructorKind) == 0;
+                        shouldWalkToConstructor = false;
+                    }
+                    else if (!callerInfo->GetAllowDirectSuper())
+                    {
+                        shouldWalkToConstructor = false;
+                    }
                 }
-                if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
+
+                if (shouldWalkToConstructor)
                 {
-                    continue;
-                }
-                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
-                if (callerInfo->IsClassConstructor())
-                {
-                    evalInDerivedFieldConstructor =
-                        callerInfo->IsClassConstructorWithFields() &&
-                        (callerInfo->GetAttributes() & FunctionInfo::Attributes::BaseConstructorKind) == 0;
-                    break;
+                    while (walker.GetCaller(&pfuncCaller))
+                    {
+                        if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
+                        {
+                            continue;
+                        }
+                        FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                        if (callerInfo->IsClassConstructor())
+                        {
+                            evalInDerivedFieldConstructor =
+                                callerInfo->IsClassConstructorWithFields() &&
+                                (callerInfo->GetAttributes() & FunctionInfo::Attributes::BaseConstructorKind) == 0;
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -713,7 +727,6 @@ using namespace Js;
         // method / base vs derived / fields present). Do not reuse a FunctionBody
         // across such callers; the substring test intentionally over-approximates
         // (a false positive only disables caching).
-        bool mayContainSuper = wcsstr(sourceString, _u("super")) != nullptr;
         // A '#' may introduce a private name resolved against the caller's
         // private environment. The eval-entry validation needs references
         // from nested bodies too, so parse those eagerly below. (The

@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //----------------------------------------------------------------------------
@@ -9,36 +10,39 @@
 // Template for Doubly Linked List
 //----------------------------------------------------------------------------
 
-template <typename TData, typename TCount = DefaultCount> class DListBase;
-template <typename TData> class DListNode;
-template <typename TData>
+template <typename TPolicy>
+struct DListBarrierAllocatorFromPolicy
+{
+    typedef ArenaAllocator Type;
+};
+
+template <>
+struct DListBarrierAllocatorFromPolicy<_write_barrier_policy>
+{
+    typedef Recycler Type;
+};
+
+template <typename TAllocator>
+using DListBarrierAllocator = typename DListBarrierAllocatorFromPolicy<
+    typename AllocatorWriteBarrierPolicy<TAllocator, void*>::Policy>::Type;
+
+template <typename TData, typename TCount = DefaultCount, typename TBarrierAlloc = ArenaAllocator> class DListBase;
+template <typename TData, typename TBarrierAlloc = ArenaAllocator> class DListNode;
+template <typename TData, typename TBarrierAlloc = ArenaAllocator>
 class DListNodeBase
 {
 public:
-    DListNodeBase<TData> * Next() const { return next.base; }
-    DListNodeBase<TData> *& Next() { return next.base; }
-    DListNodeBase<TData> * Prev() const { return prev.base; }
-    DListNodeBase<TData> *& Prev() { return prev.base; }
+    DListNodeBase<TData, TBarrierAlloc> * Next() const { return next; }
+    Field(DListNodeBase<TData, TBarrierAlloc>*, TBarrierAlloc)& Next() { return next; }
+    DListNodeBase<TData, TBarrierAlloc> * Prev() const { return prev; }
+    Field(DListNodeBase<TData, TBarrierAlloc>*, TBarrierAlloc)& Prev() { return prev; }
 private:
-    // The next node can be a real node with data, or  it point back to the start of the list
-    // Use a union to show it in the debugger (instead of casting everywhere)
-    union
-    {
-        DListNodeBase<TData> * base;
-        DListNode<TData> * node;
-        DListBase<TData>  * list;
-    } next;
-
-    union
-    {
-        DListNodeBase<TData> * base;
-        DListNode<TData> * node;
-        DListBase<TData>  * list;
-    } prev;
+    Field(DListNodeBase<TData, TBarrierAlloc>*, TBarrierAlloc) next;
+    Field(DListNodeBase<TData, TBarrierAlloc>*, TBarrierAlloc) prev;
 };
 
-template <typename TData>
-class DListNode : public DListNodeBase<TData>
+template <typename TData, typename TBarrierAlloc>
+class DListNode : public DListNodeBase<TData, TBarrierAlloc>
 {
 public:
     DListNode() : data() {}
@@ -65,16 +69,16 @@ public:
 
     // Constructing using copy constructor
     DListNode(TData const& data) : data(data) {};
-    TData data;
+    Field(TData, TBarrierAlloc) data;
 };
 
 
-template<typename TData, typename TCount>
-class DListBase : protected DListNodeBase<TData>, public TCount
+template<typename TData, typename TCount, typename TBarrierAlloc>
+class DListBase : protected DListNodeBase<TData, TBarrierAlloc>, public TCount
 {
 private:
-    typedef DListNodeBase<TData> NodeBase;
-    typedef DListNode<TData> Node;
+    typedef DListNodeBase<TData, TBarrierAlloc> NodeBase;
+    typedef DListNode<TData, TBarrierAlloc> Node;
     bool IsHead(NodeBase const * node) const
     {
         return (node == this);
@@ -126,7 +130,7 @@ public:
             Assert(this->IsValid());
             return ((Node *)current)->data;
         }
-        TData& Data()
+        Field(TData, TBarrierAlloc)& Data()
         {
             Assert(this->IsValid());
             return ((Node *)current)->data;
@@ -157,7 +161,7 @@ public:
         }
 
         template <typename TAllocator>
-        TData * InsertNodeBefore(TAllocator * allocator)
+        Field(TData, TBarrierAlloc) * InsertNodeBefore(TAllocator * allocator)
         {
             Node * newNode = AllocatorNew(TAllocator, allocator, Node);
             if (newNode)
@@ -165,8 +169,9 @@ public:
                 NodeBase * node = const_cast<NodeBase *>(this->current);
                 DListBase::InsertNodeBefore(node, newNode);
                 const_cast<DListBase *>(this->list)->IncrementCount();
-                return newNode->data;
+                return &newNode->data;
             }
+            return nullptr;
         }
 
         template <typename TAllocator>
@@ -230,9 +235,9 @@ public:
     bool Empty() const { return this->IsHead(this->Next()); }
     bool HasOne() const { return !Empty() && this->IsHead(this->Next()->Next()); }
     TData const& Head() const { Assert(!Empty()); return ((Node *)this->Next())->data; }
-    TData& Head() { Assert(!Empty()); return ((Node *)this->Next())->data; }
+    Field(TData, TBarrierAlloc)& Head() { Assert(!Empty()); return ((Node *)PointerValue(this->Next()))->data; }
     TData const& Tail() const { Assert(!Empty()); return ((Node *)this->Prev())->data; }
-    TData & Tail()  { Assert(!Empty()); return ((Node *)this->Prev())->data; }
+    Field(TData, TBarrierAlloc)& Tail() { Assert(!Empty()); return ((Node *)PointerValue(this->Prev()))->data; }
 
     template <typename TAllocator>
     bool Append(TAllocator * allocator, TData const& data)
@@ -261,7 +266,7 @@ public:
     }
 
     template <typename TAllocator>
-    TData * PrependNode(TAllocator * allocator)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node);
         if (newNode)
@@ -274,7 +279,7 @@ public:
     }
 
     template <typename TAllocator, typename TParam1>
-    TData * PrependNode(TAllocator * allocator, TParam1 param1)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator, TParam1 param1)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node, param1);
         if (newNode)
@@ -287,7 +292,7 @@ public:
     }
 
     template <typename TAllocator, typename TParam1, typename TParam2>
-    TData * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node, param1, param2);
         if (newNode)
@@ -300,7 +305,7 @@ public:
     }
 
     template <typename TAllocator, typename TParam1, typename TParam2, typename TParam3>
-    TData * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node, param1, param2, param3);
         if (newNode)
@@ -313,7 +318,7 @@ public:
     }
 
     template <typename TAllocator, typename TParam1, typename TParam2, typename TParam3, typename TParam4>
-    TData * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node, param1, param2, param3, param4);
         if (newNode)
@@ -326,7 +331,7 @@ public:
     }
 
     template <typename TAllocator, typename TParam1, typename TParam2, typename TParam3, typename TParam4, typename TParam5>
-    TData * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4, TParam5 param5)
+    Field(TData, TBarrierAlloc) * PrependNode(TAllocator * allocator, TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4, TParam5 param5)
     {
         Node * newNode = AllocatorNew(TAllocator, allocator, Node, param1, param2, param3, param4, param5);
         if (newNode)
@@ -366,7 +371,7 @@ public:
     }
 
     template <typename TAllocator>
-    void RemoveElement(TAllocator * allocator, TData * element)
+    void RemoveElement(TAllocator * allocator, Field(TData, TBarrierAlloc) * element)
     {
         Node * node = CONTAINING_RECORD(element, Node, data);
 #if DBG_DUMP
@@ -418,7 +423,7 @@ public:
         list->IncrementCount();
     }
 
-    void MoveElementTo(TData * element, DListBase * list)
+    void MoveElementTo(Field(TData, TBarrierAlloc) * element, DListBase * list)
     {
         Node * node = CONTAINING_RECORD(element, Node, data);
 #if DBG_DUMP
@@ -431,7 +436,7 @@ public:
     }
 
 #if DBG_DUMP
-    bool HasElement(TData const * element) const
+    bool HasElement(Field(TData, TBarrierAlloc) const * element) const
     {
         Node * node = CONTAINING_RECORD(element, Node, data);
         return HasNode(node);
@@ -502,19 +507,22 @@ private:
     }
 
 template <typename TData, typename TAllocator, typename TCount = DefaultCount>
-class DList : public DListBase<TData, TCount>
+class DList : public DListBase<TData, TCount, DListBarrierAllocator<TAllocator>>
 {
+private:
+    typedef DListBarrierAllocator<TAllocator> TBarrierAlloc;
+    typedef DListBase<TData, TCount, TBarrierAlloc> Base;
 public:
-    class EditingIterator : public DListBase<TData, TCount>::EditingIterator
+    class EditingIterator : public Base::EditingIterator
     {
     public:
-        EditingIterator() : DListBase<TData, TCount>::EditingIterator() {}
-        EditingIterator(DList * list) : DListBase<TData, TCount>::EditingIterator(list) {}
+        EditingIterator() : Base::EditingIterator() {}
+        EditingIterator(DList * list) : Base::EditingIterator(list) {}
         void RemoveCurrent()
         {
             __super::RemoveCurrent(Allocator());
         }
-        TData& InsertNodeBefore()
+        Field(TData, TBarrierAlloc) * InsertNodeBefore()
         {
             return __super::InsertNodeBefore(Allocator());
         }
@@ -547,27 +555,27 @@ public:
     {
         return __super::Prepend(allocator, data);
     }
-    TData * PrependNode()
+    Field(TData, TBarrierAlloc) * PrependNode()
     {
         return __super::PrependNode(allocator);
     }
     template <typename TParam1>
-    TData * PrependNode(TParam1 param1)
+    Field(TData, TBarrierAlloc) * PrependNode(TParam1 param1)
     {
         return __super::PrependNode(allocator, param1);
     }
     template <typename TParam1, typename TParam2>
-    TData * PrependNode(TParam1 param1, TParam2 param2)
+    Field(TData, TBarrierAlloc) * PrependNode(TParam1 param1, TParam2 param2)
     {
         return __super::PrependNode(allocator, param1, param2);
     }
     template <typename TParam1, typename TParam2, typename TParam3>
-    TData * PrependNode(TParam1 param1, TParam2 param2, TParam3 param3)
+    Field(TData, TBarrierAlloc) * PrependNode(TParam1 param1, TParam2 param2, TParam3 param3)
     {
         return __super::PrependNode(allocator, param1, param2, param3);
     }
     template <typename TParam1, typename TParam2, typename TParam3, typename TParam4>
-    TData * PrependNode(TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4)
+    Field(TData, TBarrierAlloc) * PrependNode(TParam1 param1, TParam2 param2, TParam3 param3, TParam4 param4)
     {
         return __super::PrependNode(allocator, param1, param2, param3, param4);
     }
@@ -580,13 +588,13 @@ public:
         return __super::Remove(allocator, data);
     }
 
-    void RemoveElement(TData * data)
+    void RemoveElement(Field(TData, TBarrierAlloc) * data)
     {
         return __super::RemoveElement(allocator, data);
     }
 
 private:
-    TAllocator * allocator;
+    FieldNoBarrier(TAllocator *) allocator;
 };
 
 template <typename TData, typename TAllocator = ArenaAllocator>

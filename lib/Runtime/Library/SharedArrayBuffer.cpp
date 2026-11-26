@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "Math/JavascriptMath.h"
 #ifndef _WIN32
 #include <cmath>
 #include <errno.h>
@@ -1117,6 +1118,10 @@ namespace Js
             return false;
         }
 
+        // Reserve waiter storage before creating OS wait objects or locking
+        // state.mutex so OOM cannot leak handles or unwind with a locked mutex.
+        m_waiters->EnsureArray();
+
 #ifdef _WIN32
         DWORD winTimeout = INFINITE;
         if (!infiniteTimeout)
@@ -1134,15 +1139,16 @@ namespace Js
         return result == WAIT_OBJECT_0;
 #else
         SyncWaiterState state;
-        int rc = pthread_mutex_lock(&state.mutex);
-        AssertOrFailFast(rc == 0);
-
         AgentOfBuffer agent(waiter, &state);
         m_waiters->Add(agent);
 
-        // Lock ordering: csForAccess -> state.mutex. Leaving csForAccess while
-        // state.mutex is held prevents any concurrent notify from signaling
+        // Lock ordering: csForAccess -> state.mutex. Acquiring state.mutex
+        // after m_waiters->Add (still under csForAccess) keeps mutex lock/unlock
+        // out of any throwing allocation path and prevents notify from signaling
         // before pthread_cond_*wait releases state.mutex atomically.
+        int rc = pthread_mutex_lock(&state.mutex);
+        AssertOrFailFast(rc == 0);
+
         csForAccess.Leave();
 
         if (infiniteTimeout)

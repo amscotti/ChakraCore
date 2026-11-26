@@ -36,6 +36,19 @@ JavascriptAsyncGenerator* JavascriptAsyncGenerator::New(
         scriptFunction,
         requestQueue);
 
+#if GLOBAL_ENABLE_WRITE_BARRIER
+    if (CONFIG_FLAG(ForceSoftwareWriteBarrier) && generator->GetArguments().Values != nullptr)
+    {
+        recycler->RegisterPendingWriteBarrierBlock(
+            generator->GetArguments().Values,
+            generator->GetArguments().Info.Count * sizeof(Var));
+
+        recycler->RegisterPendingWriteBarrierBlock(
+            const_cast<Var**>(&generator->GetArguments().Values),
+            sizeof(Var*));
+    }
+#endif
+
     auto* library = scriptFunction->GetLibrary();
     generator->onFulfilled = library->CreateAsyncGeneratorCallbackFunction(
         EntryAwaitFulfilledCallback,
@@ -138,6 +151,7 @@ Var JavascriptAsyncGenerator::EntryAwaitFulfilledCallback(
             generator->ResumeCoroutine(value, ResumeYieldKind::Return);
             break;
         case PendingState::Yield:
+        case PendingState::CompletedReturn:
             generator->ResolveNext(value);
             break;
         default:
@@ -170,9 +184,10 @@ Var JavascriptAsyncGenerator::EntryAwaitRejectedCallback(
     {
         case PendingState::Await:
         case PendingState::AwaitReturn:
+        case PendingState::Yield:
             generator->ResumeCoroutine(value, ResumeYieldKind::Throw);
             break;
-        case PendingState::Yield:
+        case PendingState::CompletedReturn:
             generator->RejectNext(value);
             break;
         default:
@@ -240,7 +255,7 @@ void JavascriptAsyncGenerator::ResumeNext()
 
         if (next->kind == ResumeYieldKind::Return)
         {
-            if (IsCompleted()) UnwrapValue(next->data, PendingState::Yield);
+            if (IsCompleted()) UnwrapValue(next->data, PendingState::CompletedReturn);
             else UnwrapValue(next->data, PendingState::AwaitReturn);
         }
         else
@@ -328,7 +343,7 @@ void JavascriptAsyncGenerator::UnwrapValue(Var value, PendingState pendingState)
     {
         Var reason = err.GetAndClear()->GetThrownObject(nullptr);
         this->pendingState = PendingState::None;
-        if (pendingState == PendingState::Yield)
+        if (pendingState == PendingState::CompletedReturn)
         {
             RejectNext(reason);
         }
