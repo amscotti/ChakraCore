@@ -334,9 +334,17 @@ JsVarSerializerWriteValue(
     PARAM_NOT_NULL(rootObject);
     return ContextAPINoScriptWrapper_NoRecord([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
         ChakraCoreStreamWriter* streamWriter = reinterpret_cast<ChakraCoreStreamWriter*>(serializerHandle);
-        streamWriter->WriteValue(rootObject);
-        return JsNoError;
-    });
+        try
+        {
+            streamWriter->WriteValue(rootObject);
+            return JsNoError;
+        }
+        catch (const Js::JavascriptException& err)
+        {
+            scriptContext->GetThreadContext()->SetRecordedException(err.GetAndClear());
+            return JsErrorScriptException;
+        }
+    }, /*allowInObjectBeforeCollectCallback*/ false, /*scriptExceptionAllowed*/ true);
 }
 
 CHAKRA_API
@@ -455,9 +463,17 @@ JsVarDeserializerReadValue(_In_ JsVarDeserializerHandle deserializerHandle, _Out
     PARAM_NOT_NULL(value);
     return ContextAPINoScriptWrapper_NoRecord([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
         ChakraHostDeserializerHandle* deserializer = reinterpret_cast<ChakraHostDeserializerHandle*>(deserializerHandle);
-        *value = deserializer->ReadValue();
-        return JsNoError;
-    });
+        try
+        {
+            *value = deserializer->ReadValue();
+            return JsNoError;
+        }
+        catch (const Js::JavascriptException& err)
+        {
+            scriptContext->GetThreadContext()->SetRecordedException(err.GetAndClear());
+            return JsErrorScriptException;
+        }
+    }, /*allowInObjectBeforeCollectCallback*/ false, /*scriptExceptionAllowed*/ true);
 }
 
 CHAKRA_API

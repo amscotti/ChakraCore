@@ -117,8 +117,11 @@ void expect_status(napi_status got, napi_status want, const char* name) {
 JsRuntimeHandle g_rt = JS_INVALID_REFERENCE;
 napi_env g_env = nullptr;
 
-inline void ClearStack() {
-  volatile char buf[1024];
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void ClearStack() {
+  volatile char buf[16384];
   for (size_t i = 0; i < sizeof(buf); i++) buf[i] = 0;
 }
 
@@ -1105,6 +1108,106 @@ int main() {
     expect(JsSetCurrentContext(ctx) == JsNoError, "destroy-drain: restore ctx");
     JsDisposeRuntime(rt2);
     expect(RootCount() == Baseline(), "destroy-drain at baseline");
+  }
+
+  // ---- GR-NA3 / GR-NA4 / GR-NA8 / GR-NA10: SAB views, detached views, tampered prototypes ----
+  {
+    std::fprintf(stdout, "-- case sab-detached-tamper --\n");
+    napi_handle_scope s = OpenScope();
+    auto evalJs = [](const char* src, JsValueRef* out) -> bool {
+      JsValueRef sref = JS_INVALID_REFERENCE;
+      JsValueRef uref = JS_INVALID_REFERENCE;
+      if (JsCreateString(src, std::strlen(src), &sref) != JsNoError) return false;
+      if (JsCreateString("sab-probe.js", 12, &uref) != JsNoError) return false;
+      return JsRun(sref, JS_SOURCE_CONTEXT_NONE, uref, JsParseScriptAttributeNone, out) == JsNoError;
+    };
+
+    JsValueRef sabJs = JS_INVALID_REFERENCE;
+    expect(evalJs("new SharedArrayBuffer(16)", &sabJs), "sab: create via JS");
+    napi_value sab = reinterpret_cast<napi_value>(sabJs);
+    void* sabPtr = nullptr;
+    size_t sabLen = 0;
+    expect_status(napi_get_arraybuffer_info(env, sab, &sabPtr, &sabLen), napi_ok,
+                  "sab: get_arraybuffer_info ok");
+    expect(sabPtr != nullptr && sabLen == 16, "sab: get_arraybuffer_info storage/len");
+
+    napi_value sabTa = nullptr;
+    expect_status(napi_create_typedarray(env, napi_int32_array, 4, sab, 0, &sabTa),
+                  napi_ok, "sab: create_typedarray ok");
+    napi_typedarray_type stt = napi_int8_array;
+    size_t stl = 0, stOff = 99;
+    void* stdPtr = nullptr;
+    napi_value stAb = nullptr;
+    expect_status(napi_get_typedarray_info(env, sabTa, &stt, &stl, &stdPtr, &stAb, &stOff),
+                  napi_ok, "sab: get_typedarray_info ok");
+    expect(stt == napi_int32_array && stl == 4 && stdPtr == sabPtr && stOff == 0 && stAb == sab,
+           "sab: typedarray info matches SharedArrayBuffer");
+
+    napi_value sabDv = nullptr;
+    expect_status(napi_create_dataview(env, 8, sab, 4, &sabDv), napi_ok,
+                  "sab: create_dataview ok");
+    size_t sdl = 0, sdoff = 0;
+    void* sdPtr = nullptr;
+    napi_value sdAb = nullptr;
+    expect_status(napi_get_dataview_info(env, sabDv, &sdl, &sdPtr, &sdAb, &sdoff),
+                  napi_ok, "sab: get_dataview_info ok");
+    expect(sdl == 8 && sdoff == 4 && sdPtr == static_cast<unsigned char*>(sabPtr) + 4 && sdAb == sab,
+           "sab: dataview info matches SharedArrayBuffer");
+
+    // Detached TypedArray (byteOffset == 0) + detached DataView (no TypeError throw).
+    void* detBacking = nullptr;
+    napi_value detAb = nullptr;
+    expect_status(napi_create_arraybuffer(env, 16, &detBacking, &detAb), napi_ok,
+                  "detview: create AB");
+    napi_value detTa = nullptr;
+    expect_status(napi_create_typedarray(env, napi_uint8_array, 4, detAb, 8, &detTa),
+                  napi_ok, "detview: create TA off 8");
+    napi_value detDv = nullptr;
+    expect_status(napi_create_dataview(env, 8, detAb, 4, &detDv),
+                  napi_ok, "detview: create DV off 4");
+    expect_status(napi_detach_arraybuffer(env, detAb), napi_ok, "detview: detach AB");
+    size_t tl = 99, toff = 99;
+    void* td = reinterpret_cast<void*>(0x1);
+    expect_status(napi_get_typedarray_info(env, detTa, nullptr, &tl, &td, nullptr, &toff),
+                  napi_ok, "detview: get_typedarray_info ok after detach");
+    expect(tl == 0 && td == nullptr && toff == 0,
+           "detview: detached typedarray reports 0/null/0 (GR-NA10)");
+    size_t dl = 99, doff = 99;
+    void* dd = reinterpret_cast<void*>(0x1);
+    napi_value dab = nullptr;
+    expect_status(napi_get_dataview_info(env, detDv, &dl, &dd, &dab, &doff),
+                  napi_ok, "detview: get_dataview_info ok after detach (no throw)");
+    expect(dl == 0 && dd == nullptr && doff == 0 && dab == detAb,
+           "detview: detached dataview reports 0/null/0 + ab");
+
+    // Tampered prototype accessors must not hijack cached intrinsics (GR-NA4 / GR-NA8).
+    JsValueRef ignore = JS_INVALID_REFERENCE;
+    expect(evalJs("Object.defineProperty(ArrayBuffer.prototype, 'detached', { get: function() { return true; }, configurable: true });"
+                  "Object.defineProperty(DataView.prototype, 'buffer', { get: function() { return {}; }, configurable: true });"
+                  "Object.defineProperty(DataView.prototype, 'byteOffset', { get: function() { return 777; }, configurable: true });",
+                  &ignore),
+           "tamper: redefine prototype getters");
+    void* okBacking = nullptr;
+    napi_value okAb = nullptr;
+    expect_status(napi_create_arraybuffer(env, 16, &okBacking, &okAb), napi_ok,
+                  "tamper: create attached AB");
+    bool isDetTamper = true;
+    expect_status(napi_is_detached_arraybuffer(env, okAb, &isDetTamper), napi_ok,
+                  "tamper: is_detached ok");
+    expect(isDetTamper == false, "tamper: attached AB still reports false");
+    napi_value okDv = nullptr;
+    expect_status(napi_create_dataview(env, 8, okAb, 4, &okDv), napi_ok,
+                  "tamper: create DV");
+    size_t tdl = 0, tdoff = 0;
+    void* tdPtr = nullptr;
+    napi_value tdAb = nullptr;
+    expect_status(napi_get_dataview_info(env, okDv, &tdl, &tdPtr, &tdAb, &tdoff),
+                  napi_ok, "tamper: get_dataview_info ok despite tampered getters");
+    expect(tdl == 8 && tdoff == 4 && tdPtr == static_cast<unsigned char*>(okBacking) + 4 && tdAb == okAb,
+           "tamper: get_dataview_info returns true storage/ab/offset");
+
+    CloseScope(s);
+    expect(RootCount() == Baseline(), "sab-detached-tamper at baseline");
   }
 
   chakra_nodeapi_destroy_env(env);

@@ -498,11 +498,11 @@ napi_status DefineOnId(napi_env env, JsValueRef obj, JsPropertyIdRef id,
 }
 
 // Attach the external anchor to `fn` as a hidden symbol property.
-// The symbol is fresh per function (unique, unforgeable from JS
-// except by symbol enumeration, which only yields the opaque
-// external). Non-enumerable: invisible to for...in/Object.keys;
-// visible only via getOwnPropertySymbols (documented residual,
-// same class as the N4.2 buffer marker).
+// The symbol is fresh per function and defined non-configurable so JS code
+// cannot delete or redefine it (`configurable:false`), keeping the external
+// ThunkRecord anchored for `fn`'s whole GC lifetime. Non-enumerable:
+// invisible to for...in/Object.keys; visible only via getOwnPropertySymbols
+// (documented residual, same class as the N4.2 buffer marker).
 napi_status AttachAnchor(napi_env env, JsValueRef fn, JsValueRef external) {
   JsValueRef descStr = JS_INVALID_REFERENCE;
   JsErrorCode e = JsCreateString("__chakraNodeApiThunk", 21, &descStr);
@@ -515,7 +515,7 @@ napi_status AttachAnchor(napi_env env, JsValueRef fn, JsValueRef external) {
   JsValueRef desc = JS_INVALID_REFERENCE;
   napi_status s = CreateDescriptor(env, external, /*writable=*/false,
                                    /*enumerable=*/false,
-                                   /*configurable=*/true, &desc);
+                                   /*configurable=*/false, &desc);
   if (s != napi_ok) return s;
   // CreateDescriptor transferred one extra AddRef to us; hold it
   // until the define completes, then release exactly once.

@@ -7136,6 +7136,16 @@ Case0:
         uint32 len = static_cast<uint32>(len64);
 
         Recycler* recycler = scriptContext->GetRecycler();
+#if ENABLE_DEBUG_CONFIG_OPTIONS
+        const size_t maxSingleAllocBytes = static_cast<size_t>(recycler->GetRecyclerFlagsTable().MaxSingleAllocSizeInMB) * 1024 * 1024;
+#else
+        const size_t maxSingleAllocBytes = static_cast<size_t>(CONFIG_FLAG(MaxSingleAllocSizeInMB)) * 1024 * 1024;
+#endif
+        const size_t listAllocBytes = AllocSizeMath::Mul(static_cast<size_t>(len), sizeof(T));
+        if (listAllocBytes == static_cast<size_t>(-1) || listAllocBytes >= maxSingleAllocBytes)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthAssignIncorrect);
+        }
 
         // Spec mandates that we copy the array into a 'list' before sorting.
         // Back list (and MergeSort's scratch buffer) with zero-initialized Recycler
@@ -10202,6 +10212,22 @@ Case0:
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
             }
             uint32 u32k = static_cast<uint32>(k);
+
+            if (typedArrayBase &&
+                u32k < end &&
+                (isTypedArrayEntryPoint || !JavascriptOperators::IsObject(fillValue)) &&
+                !typedArrayBase->IsCrossSiteObject() &&
+                !typedArrayBase->IsDetachedBuffer() &&
+                !typedArrayBase->IsOutOfBounds() &&
+                end <= static_cast<int64>(typedArrayBase->GetLength()))
+            {
+                BOOL filled = FALSE;
+                JS_REENTRANT(jsReentLock, filled = typedArrayBase->DirectFillRange(u32k, static_cast<uint32>(end - u32k), fillValue));
+                if (filled)
+                {
+                    u32k = static_cast<uint32>(end);
+                }
+            }
 
             while (u32k < end)
             {

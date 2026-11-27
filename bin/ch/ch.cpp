@@ -19,7 +19,7 @@
 #include <sys/sysctl.h>
 #endif
 
-unsigned int MessageBase::s_messageCount = 0;
+std::atomic<unsigned int> MessageBase::s_messageCount{ 0 };
 Debugger* Debugger::debugger = nullptr;
 
 #ifdef _WIN32

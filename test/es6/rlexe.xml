@@ -1570,4 +1570,9 @@
     <timeout>180</timeout>
   </default>
 </test>
+<test>
+  <default>
+    <files>gr_parser_regressions.js</files>
+  </default>
+</test>
 </regress-exe>

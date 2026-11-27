@@ -1039,6 +1039,18 @@ int main() {
       JsCollectGarbage(g_rt);
     }
     expect(true, "misc: GC churn no crash");
+    // GR-NA1: thunk anchor symbol property must be non-configurable so JS
+    // cannot delete it and allow early GC of the external ThunkRecord.
+    napi_value anchorFn = nullptr;
+    expect_status(napi_create_function(g_env, "anchorTest", NAPI_AUTO_LENGTH,
+                                       DummyCb, g_sentinel_ptr, &anchorFn),
+                  napi_ok, "anchor: create");
+    StoreGlobal("__anchorFn", anchorFn);
+    expect(RunBool("(function(){ var syms = Object.getOwnPropertySymbols(__anchorFn); if (syms.length !== 1) return false; var d = Object.getOwnPropertyDescriptor(__anchorFn, syms[0]); return d && d.configurable === false && d.writable === false && d.enumerable === false && (delete __anchorFn[syms[0]]) === false; })()"),
+           "anchor: non-configurable and undeletable");
+    JsCollectGarbage(g_rt);
+    expect(RunBool("__anchorFn() === undefined"),
+           "anchor: still callable after attempted delete + GC");
   }
   AtBaseline("misc: ends at baseline");
 

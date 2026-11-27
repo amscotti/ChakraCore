@@ -1103,15 +1103,17 @@ namespace Js
     uint32 TypedArrayBase::GetSourceLength(RecyclableObject* arraySource, uint32 targetLength, uint32 offset)
     {
         ScriptContext* scriptContext = GetScriptContext();
-        uint32 sourceLength = JavascriptConversion::ToUInt32(JavascriptOperators::OP_GetProperty(arraySource, PropertyIds::length, scriptContext), scriptContext);
-        uint32 totalLength;
-        if (UInt32Math::Add(offset, sourceLength, &totalLength) ||
-            (totalLength > targetLength))
+        int64 sourceLength64 = JavascriptConversion::ToLength(
+            JavascriptOperators::OP_GetProperty(arraySource, PropertyIds::length, scriptContext),
+            scriptContext);
+        if (sourceLength64 < 0 ||
+            static_cast<uint64>(sourceLength64) > static_cast<uint64>(targetLength) ||
+            static_cast<uint64>(offset) > static_cast<uint64>(targetLength) - static_cast<uint64>(sourceLength64))
         {
             JavascriptError::ThrowRangeError(
                 scriptContext, JSERR_InvalidTypedArrayLength);
         }
-        return sourceLength;
+        return static_cast<uint32>(sourceLength64);
     }
 
     void TypedArrayBase::SetObjectNoDetachCheck(RecyclableObject* source, uint32 targetLength, uint32 offset)
@@ -1124,7 +1126,7 @@ namespace Js
         Var undefinedValue = scriptContext->GetLibrary()->GetUndefined();
         for (uint32 i = 0; i < sourceLength; i++)
         {
-            if (!source->GetItem(source, i, &itemValue, scriptContext))
+            if (!JavascriptOperators::GetItem(source, i, &itemValue, scriptContext))
             {
                 itemValue = undefinedValue;
             }
@@ -1149,7 +1151,7 @@ namespace Js
         Var undefinedValue = scriptContext->GetLibrary()->GetUndefined();
         for (uint32 i = 0; i < sourceLength; i ++)
         {
-            if (!source->GetItem(source, i, &itemValue, scriptContext))
+            if (!JavascriptOperators::GetItem(source, i, &itemValue, scriptContext))
             {
                 itemValue = undefinedValue;
             }
@@ -3898,6 +3900,37 @@ namespace Js
     DIRECT_SET_NO_DETACH_CHECK(Float16Array, ToFloat16Element);
     DIRECT_SET_NO_DETACH_CHECK(Int64Array, ToBigInt64Element);
     DIRECT_SET_NO_DETACH_CHECK(Uint64Array, ToBigUint64Element);
+
+#define DIRECT_FILL_RANGE(TypedArrayName, convertFn) \
+    template<> \
+    inline BOOL TypedArrayName##::DirectFillRange(_In_ uint32 start, _In_ uint32 count, _In_ Js::Var value) \
+    { \
+        return BaseTypedDirectFillRange(start, count, value, convertFn); \
+    }
+
+    DIRECT_FILL_RANGE(Int8Array, JavascriptConversion::ToInt8);
+    DIRECT_FILL_RANGE(Int8VirtualArray, JavascriptConversion::ToInt8);
+    DIRECT_FILL_RANGE(Uint8Array, JavascriptConversion::ToUInt8);
+    DIRECT_FILL_RANGE(Uint8VirtualArray, JavascriptConversion::ToUInt8);
+    DIRECT_FILL_RANGE(Uint8ClampedArray, JavascriptConversion::ToUInt8Clamped);
+    DIRECT_FILL_RANGE(Uint8ClampedVirtualArray, JavascriptConversion::ToUInt8Clamped);
+    DIRECT_FILL_RANGE(Int16Array, JavascriptConversion::ToInt16);
+    DIRECT_FILL_RANGE(Int16VirtualArray, JavascriptConversion::ToInt16);
+    DIRECT_FILL_RANGE(Uint16Array, JavascriptConversion::ToUInt16);
+    DIRECT_FILL_RANGE(Uint16VirtualArray, JavascriptConversion::ToUInt16);
+    DIRECT_FILL_RANGE(Int32Array, JavascriptConversion::ToInt32);
+    DIRECT_FILL_RANGE(Int32VirtualArray, JavascriptConversion::ToInt32);
+    DIRECT_FILL_RANGE(Uint32Array, JavascriptConversion::ToUInt32);
+    DIRECT_FILL_RANGE(Uint32VirtualArray, JavascriptConversion::ToUInt32);
+    DIRECT_FILL_RANGE(Float32Array, JavascriptConversion::ToFloat);
+    DIRECT_FILL_RANGE(Float32VirtualArray, JavascriptConversion::ToFloat);
+    DIRECT_FILL_RANGE(Float64Array, JavascriptConversion::ToNumber);
+    DIRECT_FILL_RANGE(Float64VirtualArray, JavascriptConversion::ToNumber);
+    DIRECT_FILL_RANGE(Float16Array, ToFloat16Element);
+    DIRECT_FILL_RANGE(Int64Array, ToBigInt64Element);
+    DIRECT_FILL_RANGE(Uint64Array, ToBigUint64Element);
+    DIRECT_FILL_RANGE(BoolArray, JavascriptConversion::ToBool);
+#undef DIRECT_FILL_RANGE
     DIRECT_SET_NO_DETACH_CHECK(Uint8ClampedArray, JavascriptConversion::ToUInt8Clamped);
     DIRECT_SET_NO_DETACH_CHECK(Uint8ClampedVirtualArray, JavascriptConversion::ToUInt8Clamped);
     DIRECT_SET_NO_DETACH_CHECK(BoolArray, JavascriptConversion::ToBool);

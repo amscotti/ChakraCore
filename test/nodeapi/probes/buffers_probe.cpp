@@ -130,8 +130,11 @@ void expect_status(napi_status got, napi_status want, const char* name) {
 JsRuntimeHandle g_rt = JS_INVALID_REFERENCE;
 napi_env g_env = nullptr;
 
-inline void ClearStack() {
-  volatile char buf[1024];
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void ClearStack() {
+  volatile char buf[16384];
   for (size_t i = 0; i < sizeof(buf); i++) buf[i] = 0;
 }
 
@@ -551,9 +554,9 @@ int main() {
                   napi_ok, "detach: create_external_buffer ok");
     expect(buf != nullptr, "detach: buf non-null");
     // Extract the backing ArrayBuffer via the view, then detach it.
-    // The user finalizer lives on the view (napi_add_finalizer), not on
-    // the ArrayBuffer, so detaching must not drop it (covers the claim
-    // at NodeApiBuffers.cpp:67-72).
+    // The user finalizer lives on the backing ArrayBuffer via
+    // napi_add_finalizer (GR-NA2), not JsCreateExternalArrayBuffer's
+    // finalizeCallback, so detaching must not drop it.
     napi_value ab = nullptr;
     napi_typedarray_type t2 = napi_int8_array;
     size_t l2 = 0;
@@ -568,16 +571,19 @@ int main() {
                   "detach: is_detached ok");
     expect(isDet == true, "detach: backing AB detached");
     // Fresh borrow after detach is invalidated (NULL/0 via the N3.1
-    // composition documented in NodeApiBuffers.cpp R4) -- but the view
-    // finalizer is unaffected.
+    // composition documented in NodeApiBuffers.cpp R4) -- but the
+    // finalizer on the ArrayBuffer is unaffected.
     void* infoData = reinterpret_cast<void*>(0xdeadbeef);
     size_t infoLen = 12345;
     expect_status(napi_get_buffer_info(env, buf, &infoData, &infoLen), napi_ok,
                   "detach: get_buffer_info after detach ok");
     expect(infoLen == 0, "detach: get_buffer_info len 0 after detach");
     expect(infoData == nullptr, "detach: get_buffer_info data nullptr after detach");
-    CloseScope(s);  // Release scope root; view now only held by GC/heap.
-    buf = nullptr;
+    CloseScope(s);  // Release scope root; view and AB now only held by GC/heap.
+    volatile napi_value* vbuf = &buf;
+    volatile napi_value* vab = &ab;
+    *vbuf = nullptr;
+    *vab = nullptr;
     ClearStack();
     force_gc(rt);
     expect(g_ext_finalizer_calls == 0, "detach: finalizer not run during GC (enqueue only)");
@@ -600,6 +606,75 @@ int main() {
     CloseScope(s3);
     expect(g_ext_finalizer_calls == 1, "detach: finalizer still once after second GC");
     expect(RootCount() == Baseline(), "detach at baseline");
+  }
+
+  // ---- GR-NA2: external buffer finalizer follows ArrayBuffer lifetime ----
+  {
+    std::fprintf(stdout, "-- case external-buffer-keep-ab --\n");
+    char* extData = new char[64];
+    std::memcpy(extData, "keep-ab!", 8);
+    void* hint = reinterpret_cast<void*>(0x9ABC);
+    g_ext_finalizer_calls = 0;
+    g_ext_finalizer_last_data = nullptr;
+    g_ext_finalizer_last_hint = nullptr;
+    napi_ref abRef = nullptr;
+    {
+      napi_handle_scope s = OpenScope();
+      napi_value buf = nullptr;
+      expect_status(napi_create_external_buffer(env, 64, extData, ExtFinalize, hint, &buf),
+                    napi_ok, "keep-ab: create_external_buffer ok");
+      napi_value ab = nullptr;
+      expect_status(napi_get_typedarray_info(env, buf, nullptr, nullptr, nullptr, &ab, nullptr),
+                    napi_ok, "keep-ab: get_typedarray_info ok");
+      expect(ab != nullptr, "keep-ab: AB non-null");
+      expect_status(napi_create_reference(env, ab, 1, &abRef), napi_ok,
+                    "keep-ab: ref AB ok");
+      CloseScope(s);
+      volatile napi_value* vbuf = &buf;
+      volatile napi_value* vab = &ab;
+      *vbuf = nullptr;
+      *vab = nullptr;
+    }
+    ClearStack();
+    force_gc(rt);
+    {
+      napi_handle_scope sDrain = OpenScope();
+      napi_value dummy = nullptr;
+      void* dd = nullptr;
+      napi_create_buffer(env, 1, &dd, &dummy);
+      CloseScope(sDrain);
+    }
+    expect(g_ext_finalizer_calls == 0,
+           "keep-ab: finalizer deferred while buf.buffer is alive after view GC");
+    {
+      napi_handle_scope sCheck = OpenScope();
+      napi_value liveAb = nullptr;
+      expect_status(napi_get_reference_value(env, abRef, &liveAb), napi_ok,
+                    "keep-ab: get AB ref ok");
+      void* abData = nullptr;
+      size_t abLen = 0;
+      expect_status(napi_get_arraybuffer_info(env, liveAb, &abData, &abLen), napi_ok,
+                    "keep-ab: get_arraybuffer_info ok");
+      expect(abData == extData && abLen == 64, "keep-ab: backing storage intact");
+      CloseScope(sCheck);
+      volatile napi_value* vlive = &liveAb;
+      *vlive = nullptr;
+    }
+    expect_status(napi_delete_reference(env, abRef), napi_ok, "keep-ab: delete ref ok");
+    abRef = nullptr;
+    ClearStack();
+    force_gc(rt);
+    {
+      napi_handle_scope sDrain2 = OpenScope();
+      napi_value dummy = nullptr;
+      void* dd = nullptr;
+      napi_create_buffer(env, 1, &dd, &dummy);
+      CloseScope(sDrain2);
+    }
+    expect(g_ext_finalizer_calls == 1, "keep-ab: finalizer fires once after AB collected");
+    expect(g_ext_finalizer_last_data == extData, "keep-ab: data matches");
+    expect(g_ext_finalizer_last_hint == hint, "keep-ab: hint matches");
+    expect(RootCount() == Baseline(), "keep-ab at baseline");
   }
 
   // ---- Plain Uint8Array is NOT a Buffer ----

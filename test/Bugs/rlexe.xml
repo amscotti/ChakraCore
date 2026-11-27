@@ -662,4 +662,10 @@
       <files>labeled-break-finally-nested-try.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>gr_wscript_regressions.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

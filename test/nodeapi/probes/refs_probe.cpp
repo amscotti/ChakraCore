@@ -25,6 +25,7 @@
 // then "REFS_PROBE: PASS (n/n)" exit 0, or "REFS_PROBE: FAIL (k/n)"
 // exit 1.
 
+#include "NodeApiHostApi.h"
 #include "NodeApiRefs.h"
 #include "NodeApiScopes.h" /* unified total + open/close handle scope (HIGH-4) */
 
@@ -953,6 +954,43 @@ int main() {
   /* ---- 12/13. HIGH-4: scope-close collection + nested ref-get roots ---- */
   Probe_ScopeCloseCollect(env, rt, baseline);
   Probe_NestedScopeGets(env, rt, baseline);
+
+  /* ---- 14. GR-NA5: Node-API v10 allows references to primitives ---- */
+  {
+    std::fprintf(stdout, "-- case v10-primitive-refs --\n");
+    napi_env env10 = nodeapi_refs_test_create_env(rt, ctx);
+    expect(env10 != nullptr, "v10: env created");
+    if (env10 != nullptr) {
+      expect_status(chakra_nodeapi_set_module_api_version(env10, 10), napi_ok,
+                    "v10: set module_api_version=10");
+      const size_t base10 = chakra_nodeapi_test_root_count(env10);
+      JsValueRef vals[5] = {JS_INVALID_REFERENCE};
+      JsGetUndefinedValue(&vals[0]);
+      JsGetNullValue(&vals[1]);
+      JsDoubleToNumber(123.5, &vals[2]);
+      JsCreateString("hello", 5, &vals[3]);
+      JsBoolToBoolean(false, &vals[4]);
+      for (int i = 0; i < 5; ++i) {
+        napi_ref r = nullptr;
+        expect_status(napi_create_reference(env10, reinterpret_cast<napi_value>(vals[i]), 1, &r),
+                      napi_ok, "v10: allow primitive create_reference");
+        napi_handle_scope sc = nullptr;
+        expect_status(napi_open_handle_scope(env10, &sc), napi_ok, "v10: open scope");
+        napi_value got = nullptr;
+        expect_status(napi_get_reference_value(env10, r, &got), napi_ok, "v10: get primitive ref");
+        bool eq = false;
+        expect(got != nullptr &&
+                   JsStrictEquals(reinterpret_cast<JsValueRef>(got), vals[i], &eq) == JsNoError &&
+                   eq,
+               "v10: primitive ref round-trips identically");
+        expect_status(napi_close_handle_scope(env10, sc), napi_ok, "v10: close scope");
+        expect_status(napi_delete_reference(env10, r), napi_ok, "v10: delete primitive ref");
+      }
+      expect(chakra_nodeapi_test_root_count(env10) == base10,
+             "v10: ends at baseline");
+      nodeapi_refs_test_destroy_env(env10);
+    }
+  }
 
   nodeapi_refs_test_destroy_env(env);
   expect(true, "teardown: env destroyed");

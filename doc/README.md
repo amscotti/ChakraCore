@@ -2,9 +2,10 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through **2026-11-22** (`modernize/phase4`,
+modernization decisions are updated through **2026-11-26** (`modernize/baseline`,
 including `G0` Linux baseline sync, `Q1.1`-`Q1.5`, `I1`/`I2`, `Q2`, `Q3`, `P1`,
-`C3.1`, `ARM64 WB`, `Pre-Q1.5`, and Windows x64 `B6` `zig build` prep). See
+`C3.1`, `ARM64 WB`, `Pre-Q1.5`, Windows x64 `B6` `zig build`, and Waves 1-5b +
+open-cards Sections 30-33 hardening/remediation waves). See
 [vision-and-roadmap.md](vision-and-roadmap.md) for strategic positioning and
 Phase-4 expansion tracks (`G0-phase4`, `Q1`, `I1`/`I2`, `P1`, `C3.1`, `Q3`, `H1`),
 [current-state.md](current-state.md) Section 7 for historical activity context,
@@ -25,7 +26,7 @@ primary receipts.
 | [windows-handoff.md](windows-handoff.md) | **B6 Windows x64 `zig build` bring-up and certification handoff**: VS 2022 / WinSDK / `vcpkg` ICU4C prerequisites, 10-step runbook, troubleshooting, and `b6-windows-run.md` receipt template |
 | [b4-linux-run.md](b4-linux-run.md) | Native Linux x64 behavior proofs and `G0` single-pass revalidation receipt (`8b447ac48..1bf42d1f6`) |
 | [perf-baseline.md](perf-baseline.md) | Darwin ARM64 quiet-machine benchmark receipts (`baseline` vs `HEAD` JIT/Interpreter across SunSpider, Kraken, Octane, JetStream) |
-| [node-api-receipt.md](node-api-receipt.md) | Node-API provider/host verification (`NAPI_VERSION=10` `161` exports in §14 on `modernize/phase4`; `NAPI_VERSION=8` `150` exports historical baseline in §§1-13) |
+| [node-api-receipt.md](node-api-receipt.md) / [node-api-kickoff.md](node-api-kickoff.md) / [node-api-status-mapping.md](node-api-status-mapping.md) | Node-API provider/host verification (`NAPI_VERSION=10` `161` exports in §14; `v8` `150` exports historical baseline in §§1-13), kickoff brief, and N0.6 status mapping |
 | [z1-u8a-codec.md](z1-u8a-codec.md) | `Z1` Zig 0.17.0 SIMD `Uint8Array` Base64/Hex C-ABI codec boundary contract and ownership record (`Q1.3`) |
 | [i1-modern-intl.md](i1-modern-intl.md) | Track `I1` modern ECMA-402 C++ wrappers over C ICU4C (`Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `getCanonicalLocales`) |
 | [i2-duration-enumeration.md](i2-duration-enumeration.md) | Track `I2` `Intl.supportedValuesOf` and `Intl.DurationFormat` C++ implementation over C ICU4C |
@@ -50,6 +51,8 @@ primary receipts.
 | [conformance-baseline.md](conformance-baseline.md) | Pinned upstream diagnostic baseline: configuration, executed/skip counts, feature debt and edition-gate limits |
 | [e12-testing-quality.md](e12-testing-quality.md) | Testing-quality lane: one-command certified-baseline refresh (`tools/test262/refresh_baseline.py`) with its validation run, the bounded GCStress campaign over the rlexe core, and flake-family hardening |
 | [memory-management.md](memory-management.md) | Coding-assistant ownership guide: TigerStyle/Ghostty/Bun lessons applied to allocators, GC/FFI, callbacks, async lifetime and focused tests |
+| [swarm-review-final-report.md](swarm-review-final-report.md) / [a2-serialization-homeobject.md](a2-serialization-homeobject.md) / [a6-smint-pair-test.md](a6-smint-pair-test.md) / [a7-link-validation.md](a7-link-validation.md) | A1-A12 + JITREG adversarial review report and lane receipts (`[[HomeObject]]` bytecode serialization, ARM64 `GenerateSmIntPairTest`, asm.js/SIMD link validation) |
+| [wasm-arm64-p2-jit.md](wasm-arm64-p2-jit.md) / [wasm-arm64-w4-differential.md](wasm-arm64-w4-differential.md) | ARM64 WebAssembly JIT receipts (P2 value-path fixes and W4 dynapogo vs interpreted differential) |
 
 Conventions:
 

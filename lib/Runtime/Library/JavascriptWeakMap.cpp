@@ -93,6 +93,12 @@ namespace Js
         }
         Assert(weakMapObject != nullptr);
 
+        if (isCtorSuperCall)
+        {
+            weakMapObject = VarTo<JavascriptWeakMap>(JavascriptOperators::OrdinaryCreateFromConstructor(
+                VarTo<RecyclableObject>(newTarget), weakMapObject, nullptr, scriptContext));
+        }
+
         Var iterable = (args.Info.Count > 1) ? args[1] : library->GetUndefined();
 
         RecyclableObject* iter = nullptr;
@@ -100,13 +106,13 @@ namespace Js
 
         if (JavascriptConversion::CheckObjectCoercible(iterable, scriptContext))
         {
-            iter = JavascriptOperators::GetIterator(iterable, scriptContext);
-            Var adderVar = JavascriptOperators::GetProperty(weakMapObject, PropertyIds::set, scriptContext);
+            Var adderVar = JavascriptOperators::GetPropertyNoCache(weakMapObject, PropertyIds::set, scriptContext);
             if (!JavascriptConversion::IsCallable(adderVar))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
             }
             adder = VarTo<RecyclableObject>(adderVar);
+            iter = JavascriptOperators::GetIterator(iterable, scriptContext);
         }
 
         if (iter != nullptr)
@@ -146,9 +152,7 @@ namespace Js
         //      may want to optimize this and use a notify here that we have a weak container -- also update post inflate and post snap
 #endif
 
-        return isCtorSuperCall ?
-            JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), weakMapObject, nullptr, scriptContext) :
-            weakMapObject;
+        return weakMapObject;
     }
 
     Var JavascriptWeakMap::EntryDelete(RecyclableObject* function, CallInfo callInfo, ...)

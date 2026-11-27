@@ -599,6 +599,186 @@ void TeardownRefs(NodeEnv* env) {
   EmitTeardownEvent(env, "refs_scopes_release");
 }
 
+namespace {
+
+class ScopedIntrinsicRoot {
+ public:
+  explicit ScopedIntrinsicRoot(JsValueRef v) : v_(v) {
+    if (v_ != JS_INVALID_REFERENCE && JsAddRef(v_, nullptr) == JsNoError) {
+      owned_ = true;
+    }
+  }
+  ~ScopedIntrinsicRoot() {
+    if (owned_) {
+      (void)JsRelease(v_, nullptr);
+    }
+  }
+  ScopedIntrinsicRoot(const ScopedIntrinsicRoot&) = delete;
+  ScopedIntrinsicRoot& operator=(const ScopedIntrinsicRoot&) = delete;
+
+ private:
+  JsValueRef v_ = JS_INVALID_REFERENCE;
+  bool owned_ = false;
+};
+
+void ClearAnyCaptureException() {
+  bool has = false;
+  if (JsHasException(&has) == JsNoError && has) {
+    JsValueRef ignored = JS_INVALID_REFERENCE;
+    (void)JsGetAndClearException(&ignored);
+  }
+}
+
+void ReleaseIntrinsicSlot(JsValueRef* slot) {
+  if (*slot != JS_INVALID_REFERENCE) {
+    (void)JsRelease(*slot, nullptr);
+    *slot = JS_INVALID_REFERENCE;
+  }
+}
+
+void CaptureGlobalMethod(JsValueRef global, const char* ctor_name,
+                         const char* method_name, JsValueRef* out_slot) {
+  JsPropertyIdRef pid_ctor = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId(ctor_name, std::strlen(ctor_name), &pid_ctor) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef ctor = JS_INVALID_REFERENCE;
+  if (JsGetProperty(global, pid_ctor, &ctor) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot ctor_root(ctor);
+  JsValueType ct = JsUndefined;
+  if (JsGetValueType(ctor, &ct) != JsNoError ||
+      (ct != JsObject && ct != JsFunction)) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsPropertyIdRef pid_method = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId(method_name, std::strlen(method_name), &pid_method) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef fn = JS_INVALID_REFERENCE;
+  if (JsGetProperty(ctor, pid_method, &fn) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueType ft = JsUndefined;
+  if (JsGetValueType(fn, &ft) == JsNoError && ft == JsFunction &&
+      JsAddRef(fn, nullptr) == JsNoError) {
+    *out_slot = fn;
+  }
+  ClearAnyCaptureException();
+}
+
+void CaptureProtoGetter(JsValueRef global, const char* ctor_name,
+                        const char* prop_name, JsValueRef* out_slot) {
+  JsPropertyIdRef pid_ctor = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId(ctor_name, std::strlen(ctor_name), &pid_ctor) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef ctor = JS_INVALID_REFERENCE;
+  if (JsGetProperty(global, pid_ctor, &ctor) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot ctor_root(ctor);
+  JsValueType ct = JsUndefined;
+  if (JsGetValueType(ctor, &ct) != JsNoError ||
+      (ct != JsObject && ct != JsFunction)) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsPropertyIdRef pid_proto = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId("prototype", 9, &pid_proto) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef proto = JS_INVALID_REFERENCE;
+  if (JsGetProperty(ctor, pid_proto, &proto) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot proto_root(proto);
+  JsValueType pt = JsUndefined;
+  if (JsGetValueType(proto, &pt) != JsNoError || pt != JsObject) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef key_str = JS_INVALID_REFERENCE;
+  if (JsCreateString(prop_name, std::strlen(prop_name), &key_str) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot key_root(key_str);
+  JsValueRef desc = JS_INVALID_REFERENCE;
+  if (JsObjectGetOwnPropertyDescriptor(proto, key_str, &desc) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot desc_root(desc);
+  JsValueType dt = JsUndefined;
+  if (JsGetValueType(desc, &dt) != JsNoError || dt != JsObject) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsPropertyIdRef pid_get = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId("get", 3, &pid_get) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueRef getter = JS_INVALID_REFERENCE;
+  if (JsGetProperty(desc, pid_get, &getter) != JsNoError) {
+    ClearAnyCaptureException();
+    return;
+  }
+  JsValueType gt = JsUndefined;
+  if (JsGetValueType(getter, &gt) == JsNoError && gt == JsFunction &&
+      JsAddRef(getter, nullptr) == JsNoError) {
+    *out_slot = getter;
+  }
+  ClearAnyCaptureException();
+}
+
+void CaptureIntrinsics(NodeEnv* env) {
+  if (env == nullptr) return;
+  ContextGuard guard(reinterpret_cast<napi_env>(env));
+  bool has_exc = false;
+  if (JsHasException(&has_exc) == JsNoError && has_exc) {
+    return;
+  }
+  JsValueRef global = JS_INVALID_REFERENCE;
+  if (JsGetGlobalObject(&global) != JsNoError || global == JS_INVALID_REFERENCE) {
+    ClearAnyCaptureException();
+    return;
+  }
+  ScopedIntrinsicRoot global_root(global);
+  CaptureGlobalMethod(global, "Object", "freeze",
+                      &env->cached_intrinsics.object_freeze);
+  CaptureGlobalMethod(global, "Object", "seal",
+                      &env->cached_intrinsics.object_seal);
+  CaptureProtoGetter(global, "ArrayBuffer", "detached",
+                     &env->cached_intrinsics.arraybuffer_detached_getter);
+  CaptureProtoGetter(global, "DataView", "buffer",
+                     &env->cached_intrinsics.dataview_buffer_getter);
+  CaptureProtoGetter(global, "DataView", "byteOffset",
+                     &env->cached_intrinsics.dataview_byte_offset_getter);
+}
+
+void ReleaseCachedIntrinsics(NodeEnv* env) {
+  if (env == nullptr) return;
+  ReleaseIntrinsicSlot(&env->cached_intrinsics.object_freeze);
+  ReleaseIntrinsicSlot(&env->cached_intrinsics.object_seal);
+  ReleaseIntrinsicSlot(&env->cached_intrinsics.arraybuffer_detached_getter);
+  ReleaseIntrinsicSlot(&env->cached_intrinsics.dataview_buffer_getter);
+  ReleaseIntrinsicSlot(&env->cached_intrinsics.dataview_byte_offset_getter);
+}
+
+} /* namespace */
+
 void TeardownPromiseScript(NodeEnv* env) {
   // Step 6 (N3.4/N3.5, real): deferred roots + queued tasks released
   // (NodeApiPromise_DestroyForEnv) and script state freed. Runs with
@@ -616,6 +796,7 @@ void TeardownPromiseScript(NodeEnv* env) {
   // Order vs promise/script is not load-bearing (no shared JS roots).
   if (env == nullptr) return;
   napi_env ev = reinterpret_cast<napi_env>(env);
+  ReleaseCachedIntrinsics(env);
   if (env->promise_state != nullptr) {
     NodeApiPromise_DestroyForEnv(ev);
     NodeApiPromise_FreeState(env->promise_state);
@@ -652,6 +833,54 @@ size_t DebugTotalEnvCount() noexcept {
 size_t DebugDeadEnvCount() noexcept {
   std::lock_guard<std::mutex> lk(g_registry_mutex);
   return g_dead_envs.size();
+}
+
+std::uint32_t GetModuleApiVersion(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return 8;
+  }
+  return env->module_api_version;
+}
+
+JsValueRef GetCachedObjectFreeze(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return JS_INVALID_REFERENCE;
+  }
+  return env->cached_intrinsics.object_freeze;
+}
+
+JsValueRef GetCachedObjectSeal(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return JS_INVALID_REFERENCE;
+  }
+  return env->cached_intrinsics.object_seal;
+}
+
+JsValueRef GetCachedArrayBufferDetachedGetter(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return JS_INVALID_REFERENCE;
+  }
+  return env->cached_intrinsics.arraybuffer_detached_getter;
+}
+
+JsValueRef GetCachedDataViewBufferGetter(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return JS_INVALID_REFERENCE;
+  }
+  return env->cached_intrinsics.dataview_buffer_getter;
+}
+
+JsValueRef GetCachedDataViewByteOffsetGetter(napi_env env_value) {
+  NodeEnv* env = nullptr;
+  if (!LookupLiveEnvForOwner(static_cast<void*>(env_value), &env) || !env) {
+    return JS_INVALID_REFERENCE;
+  }
+  return env->cached_intrinsics.dataview_byte_offset_getter;
 }
 
 } /* namespace nodeapi */
@@ -753,6 +982,7 @@ napi_env chakra_nodeapi_create_env(
    * not already installed a shared queue for that context. Best-effort:
    * never fails the create. */
   NodeApiPromise_EnsureContinuationInstalled(published);
+  nodeapi::CaptureIntrinsics(env);
   return published;
 }
 

@@ -49,6 +49,12 @@ Var JavascriptSet::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
     }
     Assert(setObject != nullptr);
 
+    if (isCtorSuperCall)
+    {
+        setObject = VarTo<JavascriptSet>(JavascriptOperators::OrdinaryCreateFromConstructor(
+            VarTo<RecyclableObject>(newTarget), setObject, nullptr, scriptContext));
+    }
+
     Var iterable = (args.Info.Count > 1) ? args[1] : library->GetUndefined();
 
     // REVIEW: This condition seems impossible?
@@ -63,13 +69,13 @@ Var JavascriptSet::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
 
     if (JavascriptConversion::CheckObjectCoercible(iterable, scriptContext))
     {
-        iter = JavascriptOperators::GetIterator(iterable, scriptContext);
         Var adderVar = JavascriptOperators::GetPropertyNoCache(setObject, PropertyIds::add, scriptContext);
         if (!JavascriptConversion::IsCallable(adderVar))
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
         }
         adder = VarTo<RecyclableObject>(adderVar);
+        iter = JavascriptOperators::GetIterator(iterable, scriptContext);
     }
 
     if (iter != nullptr)
@@ -83,9 +89,7 @@ Var JavascriptSet::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
         });
     }
 
-    return isCtorSuperCall ?
-        JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), setObject, nullptr, scriptContext) :
-        setObject;
+    return setObject;
 }
 
 Var JavascriptSet::EntryAdd(RecyclableObject* function, CallInfo callInfo, ...)

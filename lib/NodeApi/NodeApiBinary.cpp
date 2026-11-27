@@ -413,35 +413,60 @@ size_t NodeApiBinary_ExternalQueuedCount() {
 
 namespace {
 
-// Detached detection via ArrayBuffer.prototype.detached getter.
-// Evidence (verified at build time): the accessor "detached" is registered
-// on ArrayBuffer.prototype (JavascriptLibrary.cpp:2392) with
-// GetterDetached (ArrayBuffer.cpp:546-562) returning IsDetached() as a
-// Boolean. Reading the property on an ArrayBuffer instance invokes the
-// getter and observes the internal flag, including for zero-length
-// buffers where JsGetArrayBufferStorage alone (NULL/0) is ambiguous.
-// The storage path (JsGetArrayBufferStorage) returns NULL/0 both for a
-// detached buffer (ArrayBuffer::Detach nulls bufferContent/length) and
-// for a zero-length attached buffer (bufferContent==nullptr by
-// construction), so it cannot distinguish them. The getter is the only
-// reliable JsRT-observable signal without a dedicated JsIsDetached export.
-// Returns napi_ok + *out on success; maps JsRT errors otherwise.
-napi_status IsDetachedViaProperty(napi_env env, JsValueRef ab, bool* out) {
-  *out = false;
-  JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-  napi_status s = MakeIdMap(env, "detached", &pid, "is_detached: id");
-  if (s != napi_ok) return s;
-  JsValueRef val = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsGetProperty(ab, pid, &val);
-  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: get");
-  ScratchRoot valRoot(val);
-  // The getter returns a Boolean; convert generically so a tampered
-  // non-boolean (should not happen) is treated as generic_failure rather
-  // than crashing.
+napi_status CheckBackingBuffer(napi_env env, JsValueRef candidate,
+                                 bool* out_is_ab, bool* out_is_sab) {
+  *out_is_ab = false;
+  *out_is_sab = false;
   JsValueType t = JsUndefined;
-  ec = JsGetValueType(val, &t);
+  JsErrorCode ec = JsGetValueType(candidate, &t);
+  if (ec != JsNoError) return MapJsError(env, ec, "JsGetValueType");
+  if (t == JsArrayBuffer) {
+    *out_is_ab = true;
+    return napi_ok;
+  }
+  if (t == JsObject) {
+    // JsGetArrayBufferStorage validates VarIs<Js::ArrayBufferBase> with no JS
+    // execution. Because JsArrayBuffer was handled above, success identifies a
+    // SharedArrayBuffer cleanly without relying on prototype lookups.
+    BYTE* tmp_buf = nullptr;
+    unsigned int tmp_len = 0;
+    if (JsGetArrayBufferStorage(candidate, &tmp_buf, &tmp_len) == JsNoError) {
+      *out_is_sab = true;
+    }
+  }
+  return napi_ok;
+}
+
+}  // namespace
+
+napi_status NodeApiBinary_IsArrayBufferDetached(napi_env env, JsValueRef ab,
+                                                bool* out) {
+  *out = false;
+  JsValueType t = JsUndefined;
+  JsErrorCode ec = JsGetValueType(ab, &t);
+  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: value type");
+  if (t != JsArrayBuffer) {
+    // SharedArrayBuffer (and any non-ArrayBuffer) cannot be detached.
+    return napi_ok;
+  }
+  JsValueRef val = JS_INVALID_REFERENCE;
+  JsValueRef getter = nodeapi::GetCachedArrayBufferDetachedGetter(env);
+  if (getter != JS_INVALID_REFERENCE) {
+    JsValueRef args[1] = {ab};
+    ec = JsCallFunction(getter, args, 1, &val);
+    if (ec != JsNoError) return MapJsError(env, ec, "is_detached: getter");
+  } else {
+    JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+    napi_status s = MakeIdMap(env, "detached", &pid, "is_detached: id");
+    if (s != napi_ok) return s;
+    ec = JsGetProperty(ab, pid, &val);
+    if (ec != JsNoError) return MapJsError(env, ec, "is_detached: get");
+  }
+  ScratchRoot valRoot(val);
+  JsValueType vt = JsUndefined;
+  ec = JsGetValueType(val, &vt);
   if (ec != JsNoError) return MapJsError(env, ec, "is_detached: type");
-  if (t != JsBoolean) {
+  if (vt != JsBoolean) {
     nodeapi::SetLastError(env, napi_generic_failure,
                           "is_detached: detached not boolean");
     return napi_generic_failure;
@@ -452,6 +477,8 @@ napi_status IsDetachedViaProperty(napi_env env, JsValueRef ab, bool* out) {
   *out = b;
   return napi_ok;
 }
+
+namespace {
 
 // NAPI type <-> JsTypedArrayType enum maps (lib/Jsrt/ChakraCommon.h).
 bool NapiTypeToJs(napi_typedarray_type n, JsTypedArrayType* out) {
@@ -697,21 +724,22 @@ napi_status NAPI_CDECL napi_get_arraybuffer_info(napi_env env,
   if (!guard.ok()) return guard.status();
   DrainExternalFinalizers(env);
   JsValueRef ab = ToJs(arraybuffer);
-  JsValueType t = JsUndefined;
-  JsErrorCode ec = JsGetValueType(ab, &t);
-  if (ec != JsNoError) return MapJsError(env, ec, "JsGetValueType");
-  if (t != JsArrayBuffer) {
+  ScratchRoot abRoot(ab);
+  bool is_ab = false;
+  bool is_sab = false;
+  napi_status bks = CheckBackingBuffer(env, ab, &is_ab, &is_sab);
+  if (bks != napi_ok) return bks;
+  if (!is_ab && !is_sab) {
     // Per C column: invalid_arg (not arraybuffer_expected) for this API.
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "get_arraybuffer_info: not an ArrayBuffer");
     return napi_invalid_arg;
   }
-  ScratchRoot abRoot(ab);
   ChakraBytePtr* outPtrRaw = reinterpret_cast<ChakraBytePtr*>(data);
   BYTE* tmpBuf = nullptr;
   unsigned int tmpLen = 0;
   // Always need both to fill optional out-params; pass locals then publish.
-  ec = JsGetArrayBufferStorage(ab, &tmpBuf, &tmpLen);
+  JsErrorCode ec = JsGetArrayBufferStorage(ab, &tmpBuf, &tmpLen);
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetArrayBufferStorage");
   // R4: data borrow is valid only while abRoot holds (caller responsibility
   // after return). Detached and zero-length attached both report NULL/0.
@@ -751,7 +779,7 @@ napi_status NAPI_CDECL napi_detach_arraybuffer(napi_env env,
   }
   ScratchRoot abRoot(ab);
   bool detached = false;
-  napi_status ds = IsDetachedViaProperty(env, ab, &detached);
+  napi_status ds = NodeApiBinary_IsArrayBufferDetached(env, ab, &detached);
   if (ds != napi_ok) return ds;
   if (detached) {
     nodeapi::SetLastError(env, napi_detachable_arraybuffer_expected,
@@ -851,7 +879,7 @@ napi_status NAPI_CDECL napi_is_detached_arraybuffer(napi_env env,
   }
   ScratchRoot vRoot(v);
   bool detached = false;
-  napi_status ds = IsDetachedViaProperty(env, v, &detached);
+  napi_status ds = NodeApiBinary_IsArrayBufferDetached(env, v, &detached);
   if (ds != napi_ok) return ds;
   *result = detached;
   nodeapi::ClearLastError(env);
@@ -903,10 +931,11 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
 
   JsValueRef base = ToJs(arraybuffer);
   {
-    JsValueType t = JsUndefined;
-    JsErrorCode te = JsGetValueType(base, &t);
-    if (te != JsNoError) return MapJsError(env, te, "JsGetValueType");
-    if (t != JsArrayBuffer) {
+    bool is_ab = false;
+    bool is_sab = false;
+    napi_status bks = CheckBackingBuffer(env, base, &is_ab, &is_sab);
+    if (bks != napi_ok) return bks;
+    if (!is_ab && !is_sab) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "create_typedarray: not an ArrayBuffer");
       return napi_invalid_arg;
@@ -991,11 +1020,12 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
   // override the borrow.
   {
     bool is_det = false;
-    napi_status ds = IsDetachedViaProperty(env, jsAB, &is_det);
+    napi_status ds = NodeApiBinary_IsArrayBufferDetached(env, jsAB, &is_det);
     if (ds != napi_ok) return ds;
     if (is_det) {
       storBuf = nullptr;
       storLen = 0;
+      jsOff = 0;
     }
   }
   size_t elemCount = static_cast<size_t>(storLen) / elemSize;
@@ -1047,10 +1077,11 @@ napi_status NAPI_CDECL napi_create_dataview(napi_env env, size_t length,
   bool needTempAB = false;
   if (arraybuffer != nullptr) {
     JsValueRef candidate = ToJs(arraybuffer);
-    JsValueType t = JsUndefined;
-    JsErrorCode te = JsGetValueType(candidate, &t);
-    if (te != JsNoError) return MapJsError(env, te, "JsGetValueType");
-    if (t != JsArrayBuffer) {
+    bool is_ab = false;
+    bool is_sab = false;
+    napi_status bks = CheckBackingBuffer(env, candidate, &is_ab, &is_sab);
+    if (bks != napi_ok) return bks;
+    if (!is_ab && !is_sab) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "create_dataview: not an ArrayBuffer");
       return napi_invalid_arg;
@@ -1144,47 +1175,73 @@ napi_status NAPI_CDECL napi_get_dataview_info(napi_env env,
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetDataViewStorage");
 
   // ArrayBuffer + byteOffset have no JsGetDataViewInfo equivalent; read via
-  // the builtin accessors (JS-executing). R4: revalidate storage after.
-  JsPropertyIdRef pidBuf = JS_INVALID_REFERENCE;
-  napi_status s = MakeIdMap(env, "buffer", &pidBuf, "get_dataview_info: buffer id");
-  if (s != napi_ok) return s;
+  // the captured builtin getters (fallback to property lookup only if absent).
   JsValueRef abVal = JS_INVALID_REFERENCE;
-  ec = JsGetProperty(dv, pidBuf, &abVal);
-  if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: buffer get");
+  JsValueRef bufGetter = nodeapi::GetCachedDataViewBufferGetter(env);
+  if (bufGetter != JS_INVALID_REFERENCE) {
+    JsValueRef args[1] = {dv};
+    ec = JsCallFunction(bufGetter, args, 1, &abVal);
+    if (ec != JsNoError) {
+      return MapJsError(env, ec, "get_dataview_info: buffer getter");
+    }
+  } else {
+    JsPropertyIdRef pidBuf = JS_INVALID_REFERENCE;
+    napi_status s = MakeIdMap(env, "buffer", &pidBuf, "get_dataview_info: buffer id");
+    if (s != napi_ok) return s;
+    ec = JsGetProperty(dv, pidBuf, &abVal);
+    if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: buffer get");
+  }
   ScratchRoot abRoot(abVal);
   {
-    JsValueType bt = JsUndefined;
-    JsErrorCode be = JsGetValueType(abVal, &bt);
-    if (be != JsNoError) return MapJsError(env, be, "get_dataview_info: buffer type");
-    if (bt != JsArrayBuffer) {
+    bool is_ab = false;
+    bool is_sab = false;
+    napi_status bks = CheckBackingBuffer(env, abVal, &is_ab, &is_sab);
+    if (bks != napi_ok) return bks;
+    if (!is_ab && !is_sab) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "get_dataview_info: buffer not ArrayBuffer");
       return napi_invalid_arg;
     }
   }
 
-  JsPropertyIdRef pidOff = JS_INVALID_REFERENCE;
-  s = MakeIdMap(env, "byteOffset", &pidOff, "get_dataview_info: offset id");
-  if (s != napi_ok) return s;
-  JsValueRef offVal = JS_INVALID_REFERENCE;
-  ec = JsGetProperty(dv, pidOff, &offVal);
-  if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: offset get");
-  ScratchRoot offRoot(offVal);
-  double offD = 0.0;
-  ec = JsNumberToDouble(offVal, &offD);
-  if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: offset num");
-  if (offD < 0 || offD > static_cast<double>(std::numeric_limits<unsigned int>::max())) {
-    nodeapi::SetLastError(env, napi_generic_failure,
-                          "get_dataview_info: offset out of range");
-    return napi_generic_failure;
-  }
-  unsigned int off = static_cast<unsigned int>(offD);
+  bool is_det = false;
+  napi_status ds = NodeApiBinary_IsArrayBufferDetached(env, abVal, &is_det);
+  if (ds != napi_ok) return ds;
 
-  // Revalidate storage after the JS-executing gets (R4).
   BYTE* storBuf = nullptr;
   unsigned int storLen = 0;
-  ec = JsGetDataViewStorage(dv, &storBuf, &storLen);
-  if (ec != JsNoError) return MapJsError(env, ec, "JsGetDataViewStorage");
+  unsigned int off = 0;
+  if (!is_det) {
+    JsValueRef offVal = JS_INVALID_REFERENCE;
+    JsValueRef offGetter = nodeapi::GetCachedDataViewByteOffsetGetter(env);
+    if (offGetter != JS_INVALID_REFERENCE) {
+      JsValueRef args[1] = {dv};
+      ec = JsCallFunction(offGetter, args, 1, &offVal);
+      if (ec != JsNoError) {
+        return MapJsError(env, ec, "get_dataview_info: offset getter");
+      }
+    } else {
+      JsPropertyIdRef pidOff = JS_INVALID_REFERENCE;
+      napi_status s = MakeIdMap(env, "byteOffset", &pidOff, "get_dataview_info: offset id");
+      if (s != napi_ok) return s;
+      ec = JsGetProperty(dv, pidOff, &offVal);
+      if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: offset get");
+    }
+    ScratchRoot offRoot(offVal);
+    double offD = 0.0;
+    ec = JsNumberToDouble(offVal, &offD);
+    if (ec != JsNoError) return MapJsError(env, ec, "get_dataview_info: offset num");
+    if (offD < 0 || offD > static_cast<double>(std::numeric_limits<unsigned int>::max())) {
+      nodeapi::SetLastError(env, napi_generic_failure,
+                            "get_dataview_info: offset out of range");
+      return napi_generic_failure;
+    }
+    off = static_cast<unsigned int>(offD);
+
+    // Revalidate storage after the getter calls (R4).
+    ec = JsGetDataViewStorage(dv, &storBuf, &storLen);
+    if (ec != JsNoError) return MapJsError(env, ec, "JsGetDataViewStorage");
+  }
   // Optional byteLength property is not needed; storage is authoritative.
 
   if (bytelength != nullptr) *bytelength = static_cast<size_t>(storLen);

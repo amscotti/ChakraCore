@@ -425,6 +425,24 @@ int main() {
      * wrapper => primitive, same object => boxed). Node reports
      * napi_object for Object(1n); the provider now matches. */
     expect(vt == napi_object, "typeof boxed bigint is object (Node, MED-1 fix)");
+    /* GR-NA6: napi_typeof must not invoke Symbol.toStringTag getters on
+     * ordinary objects or leak exceptions from throwing getters. */
+    {
+      napi_value tagObj = FromScript(
+          env, "(globalThis.__tagCalls = 0, { get [Symbol.toStringTag]() { globalThis.__tagCalls++; return 'Foo'; } })");
+      expect(tagObj != nullptr, "typeof setup side-effect tag obj");
+      expect_status(napi_typeof(env, tagObj, &vt), napi_ok, "typeof side-effect tag obj ok");
+      expect(vt == napi_object, "typeof side-effect tag obj is object");
+      napi_value tagCalls = FromScript(env, "globalThis.__tagCalls");
+      expect(tagCalls != nullptr && ReadDouble(env, tagCalls) == 0.0,
+             "typeof does not invoke Symbol.toStringTag getter (GR-NA6)");
+      napi_value throwObj = FromScript(
+          env, "({ get [Symbol.toStringTag]() { throw new Error('tag-boom'); } })");
+      expect(throwObj != nullptr, "typeof setup throwing tag obj");
+      expect_status(napi_typeof(env, throwObj, &vt), napi_ok, "typeof throwing tag obj ok");
+      expect(vt == napi_object, "typeof throwing tag obj is object");
+      expect_pending(env, false, "typeof throwing tag obj leaves no pending exception (GR-NA6)");
+    }
     /* Boxed BigInt is rejected by the bigint getters (Node: a boxed
      * BigInt is an object, not a BigInt) -- same discrimination. */
     {

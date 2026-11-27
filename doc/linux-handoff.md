@@ -1,6 +1,6 @@
 # ChakraCore Modernization -- Linux Bring-Up and Testing Handoff
 
-> Phase-4 Handoff (`G0-phase4`): **2026-11-26** (`modernize/baseline`: `modernize/phase4` promoted + §§30, 32, 33 Linux follow-ups & Wave 2 fixes landed -- `IntlEnumeration`, engine-table `v`-flag folding, Linux `dlsym` `exp`, PAL/Recycler atomics, `linux.zig`/`check_metadata_linux.py` sanitizer `--profile` & ELF/NEEDED/per-member archive rules, `u8a_codec` sanitizer instrumentation, Node-API `StubEnv` `dlsym` + depfiles, UBSan `EncodeOpCode`, `RECORDED_BASELINE` `2945/2405`, `126` `test_build_tools.py` tests, `19/19` `test_package_tools.py`, `17/17` `test_bench_tools.py`, `linux-gate-tests.zig` `10/10`, `.github/workflows/zig-linux.yml`; historical pre-Phase-4 `G0` baseline was `1bf42d1f6`)
+> Phase-4 Handoff (`G0-phase4`): **2026-11-26** (`modernize/baseline`: `modernize/phase4` promoted + §§30, 32, 33, 34 Linux follow-ups & remediation fixes landed -- `IntlEnumeration`, engine-table `v`-flag folding, Linux `dlsym` `exp`, PAL/Recycler atomics, `linux.zig`/`check_metadata_linux.py` sanitizer `--profile` & ELF/NEEDED/per-member archive rules, `u8a_codec` sanitizer instrumentation, Node-API `StubEnv` `dlsym` + depfiles, UBSan `EncodeOpCode`, `RECORDED_BASELINE` `2949/2409`, `126` `test_build_tools.py` tests, `19/19` `test_package_tools.py`, `17/17` `test_bench_tools.py`, `linux-gate-tests.zig` `10/10`, `.github/workflows/zig-linux.yml`; historical pre-Phase-4 `G0` baseline was `1bf42d1f6`)
 > Original Handoff: 2026-11-16 (`modernize/baseline` at `526393e26`, `8f4e85d62..526393e26`)
 > Synchronized: **2026-11-17** (`modernize/baseline` at `06d783c64`, including Linux bring-up `4778b3a2b..c639e9f02` and post-review fixes `193c95046..06d783c64`)
 > Companion Docs: [architecture-and-readiness-review.md](architecture-and-readiness-review.md),
@@ -70,8 +70,8 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
          Date/date_set_es2025.js Function/toString_es2025_and_arrow_ub.js)
        ```
    - **How to audit & re-pin `RECORDED_BASELINE` in `tools/build/check_regression_linux.py`:**
-     - Historical `G0` (`1bf42d1f6`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}`; §§30, 32, & 33 updated it on `modernize/baseline` to `{"interpreted": (2945, 0), "dynapogo": (2405, 0)}`.
-     - Phase-4 + Waves 1–5b + §§32–33 added new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, `C3.1`, and audit/hardening/Wave-2 regression tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2132/2184`; Linux also executes JIT/AsmJs/WASM suites).
+     - Historical `G0` (`1bf42d1f6`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}`; §§30, 32, 33, & 34 updated it on `modernize/baseline` to `{"interpreted": (2949, 0), "dynapogo": (2409, 0)}`.
+     - Phase-4 + Waves 1–5b + §§32–34 added new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, `C3.1`, and audit/hardening/remediation regression tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2136/2188`; Linux also executes JIT/AsmJs/WASM suites).
      - Run `mise exec -- zig build check-regression`: confirm **`0` failures** in both `interpreted` and `dynapogo`, reconcile any `passed` delta against `git diff 1bf42d1f6 -- 'test/*/rlexe.xml'`, update `RECORDED_BASELINE` and its docstring in `tools/build/check_regression_linux.py` if needed (plus any matching `test_build_tools.py` pin tests), and run full `mise exec -- zig build check` to confirm exit `0`.
    - Confirm `check_metadata_linux` passes cleanly with zero leaked `zig_u8a_*` symbols and `verify-bytecode` exits `0`.
 
@@ -88,7 +88,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    mise exec -- zig build check-fulljit check-wasm check-gcstress
    (cd test && python3 runtests.py --x64 --debug --variants=interpreted -b ../out/debug-static/bin/ch wasm)
    ```
-   Expected: `check-fulljit` `0` failures across `Basics/Array/Function/Regex/es6/es7` (pinned in `tools/build/gate_counts.json` at `651/0`, superseding `G0`'s `615/0`); `check-wasm` P1 **`383/383`** (record any x64 manifest deltas); `check-gcstress` completes both `in-thread` and `concurrent` legs (`>=2` walks each, `0` errors); debug `wasm` triggers zero assertions.
+   Expected: `check-fulljit` `0` failures across `Basics/Array/Function/Regex/es6/es7` (pinned in `tools/build/gate_counts.json` at `654/0`, superseding `G0`'s `615/0`); `check-wasm` P1 **`383/383`** (record any x64 manifest deltas); `check-gcstress` completes both `in-thread` and `concurrent` legs (`>=2` walks each, `0` errors); debug `wasm` triggers zero assertions.
 
 6. **Step 6 — Linux Sanitizers (`ASan`, `UBSan`, & `TSan`):**
    ```sh

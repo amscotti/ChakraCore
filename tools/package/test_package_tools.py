@@ -809,6 +809,15 @@ class TestWave2RpathAndIcu(unittest.TestCase):
                     for dll in ("icuuc74.dll", "icuin74.dll", "icudt74.dll"):
                         self.assertTrue(any(n == "bin/" + dll or n.endswith("/bin/" + dll) for n in names), names)
 
+    def test_smoke_subprocess_timeout_raises_runtime_error(self):
+        with unittest.mock.patch.object(
+            test_package.subprocess, "run",
+            side_effect=subprocess.TimeoutExpired(["ch", "--version"], 0.5),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                test_package._run_subprocess(["ch", "--version"], timeout=0.5)
+        self.assertIn("timed out", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

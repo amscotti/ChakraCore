@@ -49,6 +49,12 @@ Var JavascriptMap::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
     }
     Assert(mapObject != nullptr);
 
+    if (isCtorSuperCall)
+    {
+        mapObject = VarTo<JavascriptMap>(JavascriptOperators::OrdinaryCreateFromConstructor(
+            VarTo<RecyclableObject>(newTarget), mapObject, nullptr, scriptContext));
+    }
+
     Var iterable = (args.Info.Count > 1) ? args[1] : library->GetUndefined();
 
     // REVIEW: This condition seems impossible?
@@ -63,13 +69,13 @@ Var JavascriptMap::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
 
     if (JavascriptConversion::CheckObjectCoercible(iterable, scriptContext))
     {
-        iter = JavascriptOperators::GetIterator(iterable, scriptContext);
         Var adderVar = JavascriptOperators::GetPropertyNoCache(mapObject, PropertyIds::set, scriptContext);
         if (!JavascriptConversion::IsCallable(adderVar))
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
         }
         adder = VarTo<RecyclableObject>(adderVar);
+        iter = JavascriptOperators::GetIterator(iterable, scriptContext);
     }
 
     if (iter != nullptr)
@@ -105,9 +111,7 @@ Var JavascriptMap::NewInstance(RecyclableObject* function, CallInfo callInfo, ..
         });
     }
 
-    return isCtorSuperCall ?
-        JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), mapObject, nullptr, scriptContext) :
-        mapObject;
+    return mapObject;
 }
 
 Var JavascriptMap::EntryClear(RecyclableObject* function, CallInfo callInfo, ...)

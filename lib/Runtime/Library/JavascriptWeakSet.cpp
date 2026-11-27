@@ -39,13 +39,19 @@ namespace Js
 
         if (callInfo.Flags & CallFlags_New)
         {
-             weakSetObject = library->CreateWeakSet();
+            weakSetObject = library->CreateWeakSet();
         }
         else
         {
             JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedObjectOfType, _u("WeakSet"), _u("WeakSet"));
         }
         Assert(weakSetObject != nullptr);
+
+        if (isCtorSuperCall)
+        {
+            weakSetObject = VarTo<JavascriptWeakSet>(JavascriptOperators::OrdinaryCreateFromConstructor(
+                VarTo<RecyclableObject>(newTarget), weakSetObject, nullptr, scriptContext));
+        }
 
         Var iterable = (args.Info.Count > 1) ? args[1] : library->GetUndefined();
 
@@ -54,13 +60,13 @@ namespace Js
 
         if (JavascriptConversion::CheckObjectCoercible(iterable, scriptContext))
         {
-            iter = JavascriptOperators::GetIterator(iterable, scriptContext);
-            Var adderVar = JavascriptOperators::GetProperty(weakSetObject, PropertyIds::add, scriptContext);
+            Var adderVar = JavascriptOperators::GetPropertyNoCache(weakSetObject, PropertyIds::add, scriptContext);
             if (!JavascriptConversion::IsCallable(adderVar))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
             }
             adder = VarTo<RecyclableObject>(adderVar);
+            iter = JavascriptOperators::GetIterator(iterable, scriptContext);
         }
 
         if (iter != nullptr)
@@ -79,9 +85,7 @@ namespace Js
         //      may want to optimize this and use a notify here that we have a weak container -- also update post inflate and post snap
 #endif
 
-        return isCtorSuperCall ?
-            JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), weakSetObject, nullptr, scriptContext) :
-            weakSetObject;
+        return weakSetObject;
     }
 
     Var JavascriptWeakSet::EntryAdd(RecyclableObject* function, CallInfo callInfo, ...)

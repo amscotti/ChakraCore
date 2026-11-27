@@ -421,8 +421,19 @@ JSONStringifier::ReadArray(_In_ RecyclableObject* arr, _In_ JSONObjectStack* obj
 
     const uint32 arrayLength = this->ReadArrayLength(arr);
 
+    Recycler* recycler = this->scriptContext->GetRecycler();
+#if ENABLE_DEBUG_CONFIG_OPTIONS
+    const size_t maxSingleAllocBytes = static_cast<size_t>(recycler->GetRecyclerFlagsTable().MaxSingleAllocSizeInMB) * 1024 * 1024;
+#else
+    const size_t maxSingleAllocBytes = static_cast<size_t>(CONFIG_FLAG(MaxSingleAllocSizeInMB)) * 1024 * 1024;
+#endif
     const size_t arraySize = AllocSizeMath::Mul(arrayLength, sizeof(JSONProperty));
-    JSONArray * jsonArray = RecyclerNewPlusZ(this->scriptContext->GetRecycler(), arraySize, JSONArray);
+    const size_t totalAllocSize = AllocSizeMath::Add(sizeof(JSONArray), arraySize);
+    if (totalAllocSize == static_cast<size_t>(-1) || totalAllocSize >= maxSingleAllocBytes)
+    {
+        JavascriptError::ThrowRangeError(this->scriptContext, JSERR_OutOfBoundString);
+    }
+    JSONArray * jsonArray = RecyclerNewPlusZ(recycler, arraySize, JSONArray);
 
     jsonArray->length = arrayLength;
     for (uint32 i = 0; i < arrayLength; ++i)

@@ -423,6 +423,10 @@ napi_status NAPI_CDECL napi_async_destroy(napi_env env,
                        static_cast<std::ptrdiff_t>(idx));
     if (rec != nullptr) {
       rec->destroyed = true;
+      while (st->retired_contexts.size() >= nodeapi::kDeadEnvCap) {
+        delete st->retired_contexts.front();
+        st->retired_contexts.erase(st->retired_contexts.begin());
+      }
       try {
         st->retired_contexts.push_back(rec);
       } catch (...) {
@@ -551,6 +555,10 @@ napi_status NAPI_CDECL napi_close_callback_scope(napi_env env,
     // every path (retire = deferred-free until teardown).
     st->scopes.erase(st->scopes.begin() +
                      static_cast<std::ptrdiff_t>(idx));
+    while (st->retired_scopes.size() >= nodeapi::kDeadEnvCap) {
+      delete st->retired_scopes.front();
+      st->retired_scopes.erase(st->retired_scopes.begin());
+    }
     try {
       st->retired_scopes.push_back(rec);
     } catch (...) {

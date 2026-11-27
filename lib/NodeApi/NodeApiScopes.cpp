@@ -331,8 +331,9 @@ napi_status NAPI_CDECL napi_escape_handle(napi_env env,
     return napi_escape_called_twice;
   }
   /* Locate the escapee's slot in this scope's list (identity by handle +
-   * presence). AMB-SC-4: a value not rooted here is invalid_arg and does
-   * NOT set the escaped flag, so a later valid escape can still succeed. */
+   * presence). If the handle was created in an outer scope (e.g. a callback
+   * argument or `this` rooted in the implicit thunk scope, GR-NA7), root it
+   * directly into the parent scope so it survives closing this scope. */
   size_t pos = s->roots.size();
   for (size_t i = 0; i < s->roots.size(); ++i) {
     if (s->roots[i].value == escapee) {
@@ -340,7 +341,14 @@ napi_status NAPI_CDECL napi_escape_handle(napi_env env,
       break;
     }
   }
-  if (pos == s->roots.size()) return napi_invalid_arg;
+  if (pos == s->roots.size()) {
+    if (idx == 0) return napi_generic_failure; /* no parent: env bug */
+    napi_status rs = RootInto(env, st->stack[static_cast<size_t>(idx) - 1], st, escapee);
+    if (rs != napi_ok) return rs;
+    s->escaped = true;
+    *result = escapee;
+    return napi_ok;
+  }
   if (idx == 0) return napi_generic_failure; /* no parent: env bug */
 
   /* Move: transfer the entry (same id) to the parent list with NO

@@ -159,10 +159,40 @@ jobs:
           if (-not $root) {
             throw "Classic-mode vcpkg root (vcpkg.exe + ports/) not found. Probed: $($candidates -join ', ')"
           }
+          $icuManifest = Join-Path $root "ports\icu\vcpkg.json"
+          $icuVer = "unknown"
+          $icuHash = "nohash"
+          if (Test-Path $icuManifest) {
+            $icuHash = (Get-FileHash -Path $icuManifest -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+            try {
+              $manifestObj = Get-Content -Path $icuManifest -Raw | ConvertFrom-Json
+              $verField = if ($manifestObj.version) { $manifestObj.version }
+                elseif ($manifestObj.'version-semver') { $manifestObj.'version-semver' }
+                elseif ($manifestObj.'version-string') { $manifestObj.'version-string' }
+                elseif ($manifestObj.'version-date') { $manifestObj.'version-date' }
+                else { "unknown" }
+              $portVer = if ($null -ne $manifestObj.'port-version') { $manifestObj.'port-version' } else { 0 }
+              $icuVer = "$verField-p$portVer"
+            } catch {
+              $icuVer = "unknown"
+            }
+          }
+          $vcpkgRev = "nogit"
+          if (Test-Path (Join-Path $root ".git")) {
+            $revOut = & git -C $root rev-parse --short=12 HEAD 2>$null
+            if ($LASTEXITCODE -eq 0 -and $revOut) {
+              $vcpkgRev = "$revOut".Trim()
+            }
+          }
+          $cacheKey = "windows-x64-vcpkg-icu-$icuVer-$vcpkgRev-$icuHash-v2"
           "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_ICU_VERSION=$icuVer" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCPKG_REV=$vcpkgRev" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $root | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           "vcpkg_root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "archives_dir=$(Join-Path $env:LOCALAPPDATA 'vcpkg\archives')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "icu_cache_key=$cacheKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Resolved vcpkg root=$root icu=$icuVer rev=$vcpkgRev cache_key=$cacheKey"
       - &vcpkg-cache
         name: Cache vcpkg icu:x64-windows
         uses: actions/cache@v4
@@ -170,9 +200,7 @@ jobs:
           path: |
             ${{ steps.vcpkg.outputs.vcpkg_root }}\installed\x64-windows
             ${{ steps.vcpkg.outputs.archives_dir }}
-          key: windows-x64-vcpkg-icu-v1
-          restore-keys: |
-            windows-x64-vcpkg-icu-
+          key: ${{ steps.vcpkg.outputs.icu_cache_key }}
       - &vcpkg-icu
         name: Install icu:x64-windows and expose ICU DLLs on PATH
         shell: pwsh
@@ -232,6 +260,8 @@ jobs:
             "WindowsSdkDir=$env:WindowsSdkDir"
             "WindowsSDKVersion=$env:WindowsSDKVersion"
             "VCPKG_ROOT=$env:VCPKG_ROOT"
+            "VCPKG_ICU_VERSION=$env:VCPKG_ICU_VERSION"
+            "VCPKG_REV=$env:VCPKG_REV"
             "CHAKRA_ICU_DIR=$env:CHAKRA_ICU_DIR"
             "ICU_INCLUDE_DIR=$env:ICU_INCLUDE_DIR"
             "ICU_LIB_DIR=$env:ICU_LIB_DIR"

@@ -457,14 +457,60 @@ def discover_entries() -> list[Entry]:
 # Build + run (offline; no network, no node-gyp).
 # ---------------------------------------------------------------------------
 
+def _find_mise_pinned_node(version: str) -> str:
+    """Resolve the pinned Node binary installed by mise (e.g. node@22.22.3)."""
+    mise_bin = shutil.which("mise")
+    if not mise_bin:
+        return ""
+    try:
+        proc = subprocess.run([mise_bin, "where", f"node@{version}"],
+                              capture_output=True, text=True, timeout=10)
+        root = (proc.stdout or "").strip()
+        if proc.returncode == 0 and root:
+            base = Path(root)
+            for cand in (base / "bin" / "node", base / "node.exe", base / "node"):
+                if cand.is_file() and os.access(cand, os.X_OK):
+                    return str(cand)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def probe_node_version(node_bin: str) -> str:
+    """Return the actual `node --version` output for `node_bin`, or empty."""
+    if not node_bin:
+        return ""
+    try:
+        proc = subprocess.run([node_bin, "--version"],
+                              capture_output=True, text=True, timeout=10)
+        if proc.returncode == 0:
+            return (proc.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
 def find_zig() -> str:
     return _resolve_tool(("NODEAPI_ZIG", "NODEAPI_MISE_ZIG"), "zig")
 
 
 def find_node(explicit: str | None) -> str:
+    """Resolve Node oracle: --node -> env -> mise node@NODE_VERSION -> PATH -> mise."""
     if explicit:
         return explicit
-    return _resolve_tool(("NODEAPI_NODE", "NODEAPI_MISE_NODE"), "node")
+    for env_name in ("NODEAPI_NODE", "NODEAPI_MISE_NODE"):
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            p = Path(val)
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+            found = shutil.which(val)
+            if found:
+                return found
+    pinned = _find_mise_pinned_node(NODE_VERSION)
+    if pinned:
+        return pinned
+    return _resolve_tool((), "node")
 
 
 def copy_tree(src: Path, dst: Path) -> None:
@@ -729,10 +775,19 @@ def run_matrix(args: argparse.Namespace) -> tuple[list[dict], str]:
             results = _run_entries(entries, work_root, args, plat, used_host,
                                    zig, host_bin, node_bin)
 
+    actual_node_version = (
+        probe_node_version(node_bin) if (used_host == "node-direct" and node_bin) else ""
+    )
     document = {
         "platform": plat,
         "host": used_host,
-        "nodeVersion": NODE_VERSION,
+        "vendoredNodeVersion": NODE_VERSION,
+        "nodeVersion": (
+            actual_node_version
+            if actual_node_version
+            else ("not used" if used_host != "node-direct" else "unknown")
+        ),
+        "nodeBinary": node_bin if used_host == "node-direct" else "",
         "nodeCommit": NODE_COMMIT,
         "examplesCommit": EXAMPLES_COMMIT,
         "napiVersion": NAPI_VERSION,

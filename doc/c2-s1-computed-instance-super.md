@@ -3,16 +3,16 @@
 ## Overview
 
 This slice closes two related S1 residuals on top of the public-fields
-([`doc/c2-s1-public-fields.md`](doc/c2-s1-public-fields.md)), static-fields
-([`doc/c2-s1-static-fields.md`](doc/c2-s1-static-fields.md)) and static-super
-([`doc/c2-s1-super-static-init.md`](doc/c2-s1-super-static-init.md)) slices:
+([`doc/c2-s1-public-fields.md`](c2-s1-public-fields.md)), static-fields
+([`doc/c2-s1-static-fields.md`](c2-s1-static-fields.md)) and static-super
+([`doc/c2-s1-super-static-init.md`](c2-s1-super-static-init.md)) slices:
 
 (a) Computed class field names: `[expr] = v`, `static [expr] = v`, and bare
 `[expr]`, for instance and static fields.
 (b) `super` references in INSTANCE field initializers: `x = super.foo`,
 `x = super[expr]`, `super.foo = v` and compound forms, `super.m()`. This is
 the instance analog of
-[`doc/c2-s1-super-static-init.md`](doc/c2-s1-super-static-init.md) and reuses
+[`doc/c2-s1-super-static-init.md`](c2-s1-super-static-init.md) and reuses
 its machinery with the instance home object. The static path is not regressed.
 
 Spec target is ECMAScript 2025. Node (v26.5.0) was used as a differential

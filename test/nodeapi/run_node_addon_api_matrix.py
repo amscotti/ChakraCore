@@ -496,11 +496,60 @@ def gate_lock_command(*args: str) -> list[str]:
     return cmd_args
 
 
+PINNED_NODE_VERSION = "22.22.3"
+
+
+def _find_mise_pinned_node(version: str) -> Path | None:
+    """Resolve the pinned Node binary installed by mise (e.g. node@22.22.3)."""
+    mise_bin = shutil.which("mise")
+    if not mise_bin:
+        return None
+    try:
+        proc = subprocess.run([mise_bin, "where", f"node@{version}"],
+                              capture_output=True, text=True, timeout=10)
+        root = (proc.stdout or "").strip()
+        if proc.returncode == 0 and root:
+            base = Path(root)
+            for cand in (base / "bin" / "node", base / "node.exe", base / "node"):
+                if cand.is_file() and os.access(cand, os.X_OK):
+                    return cand
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def probe_node_version(node: Path | None) -> str:
+    """Return the actual `node --version` output for `node`, or empty."""
+    if node is None:
+        return ""
+    try:
+        proc = subprocess.run([str(node), "--version"],
+                              capture_output=True, text=True, timeout=10)
+        if proc.returncode == 0:
+            return (proc.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
 def find_node(explicit: str | None) -> Path | None:
+    """Resolve Node oracle: --node -> env -> mise node@PINNED_NODE_VERSION -> PATH -> mise."""
     if explicit:
         p = Path(explicit)
         return p if p.is_file() else None
-    return _resolve_tool(("NODEAPI_NODE", "NODEAPI_MISE_NODE"), "node")
+    for env_name in ("NODEAPI_NODE", "NODEAPI_MISE_NODE"):
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            p = Path(val)
+            if p.is_file() and os.access(p, os.X_OK):
+                return p
+            found = shutil.which(val)
+            if found:
+                return Path(found)
+    pinned = _find_mise_pinned_node(PINNED_NODE_VERSION)
+    if pinned is not None:
+        return pinned
+    return _resolve_tool((), "node")
 
 
 def find_host() -> Path | None:
@@ -778,13 +827,22 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="nodeapi-na-") as tmp:
             run_entries(Path(tmp))
 
+    actual_node_version = (
+        probe_node_version(node) if args.hosts in ("both", "node-direct") else ""
+    )
     document = {
         "platform": plat,
         "napiVersion": NAPI_VERSION,
         "nodeAddonApiTag": NA_TAG,
         "nodeAddonApiCommit": NA_COMMIT,
         "vendor": "test/nodeapi/vendor/node-addon-api",
-        "nodeVersion": "22.22.3 (mise pin, differential host only)",
+        "pinnedNodeVersion": PINNED_NODE_VERSION,
+        "nodeVersion": (
+            f"{actual_node_version} (differential host)"
+            if actual_node_version
+            else ("not used (--hosts=ch-nodeapi)" if args.hosts == "ch-nodeapi" else "unavailable")
+        ),
+        "nodeBinary": str(node) if (node is not None and args.hosts in ("both", "node-direct")) else "",
         "results": results,
     }
     results_path = Path(args.results) if args.results else DEFAULT_RESULTS

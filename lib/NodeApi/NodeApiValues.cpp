@@ -342,19 +342,41 @@ bool IsExternalValue(JsValueRef jsv) {
   return has;
 }
 
-/* Primitive-BigInt test (PR-9 + MED-1 fix): Object.prototype.toString
- * tag == "[object BigInt]" AND JsConvertValueToObject identity
- * (fresh wrapper => primitive; same object => boxed). Runs the
- * standard toString call with this=jsv (Object.prototype.toString.call
- * semantics). Caller has already established JsGetValueType==JsObject,
- * so primitives never pay this. Pending-world failures
- * (InExceptionState/ScriptException from the tag call) degrade to
- * *out=false so C-Yes callers keep their napi_ok contract; genuine
- * JsRT failures (OOM/invalid-arg) are mapped. (Defensive: this build's
- * JsCallFunction tolerates a pending exception -- verified in the probe
- * -- so the degradation branch is cold here.) */
+/* Primitive-BigInt test (PR-9 + MED-1 + GR-NA6 fix):
+ * Fast path first: JsConvertValueToObject returns any true ECMAScript
+ * object unchanged (asObj == jsv) with NO user JS execution, so plain
+ * objects, proxies, boxed BigInts, and objects with Symbol.toStringTag
+ * getters never execute JS or leak exceptions. Only a primitive value
+ * that JsGetValueType reports as JsObject (i.e. a primitive BigInt)
+ * boxes to a distinct wrapper object; on that narrow path we confirm
+ * the "[object BigInt]" tag and clear any newly-thrown exception so
+ * C-Yes callers keep their napi_ok contract without leaking pending
+ * exceptions. */
 napi_status TagIsBigInt(napi_env env, JsValueRef jsv, bool* out) {
   *out = false;
+  JsValueRef asObj = JS_INVALID_REFERENCE;
+  JsErrorCode ec = JsConvertValueToObject(jsv, &asObj);
+  if (ec != JsNoError) {
+    if (ec == JsErrorInExceptionState || ec == JsErrorScriptException) {
+      return napi_ok; /* degraded: *out == false (object) */
+    }
+    return map_js(env, ec, "bigint-tag: ToObject");
+  }
+  if (asObj == jsv) {
+    return napi_ok; /* *out == false: already an ECMAScript object */
+  }
+  TmpRoot asObjRoot(asObj);
+  bool ident = false;
+  ec = JsStrictEquals(jsv, asObj, &ident);
+  if (ec != JsNoError) {
+    if (ec == JsErrorInExceptionState || ec == JsErrorScriptException) {
+      return napi_ok; /* degraded: *out == false (object) */
+    }
+    return map_js(env, ec, "bigint-tag: identity");
+  }
+  if (ident) {
+    return napi_ok; /* *out == false: boxed/object, not primitive BigInt */
+  }
   JsValueRef objCtor = JS_INVALID_REFERENCE;
   napi_status s = GetGlobalProp(env, "Object", &objCtor, "bigint-tag: global Object");
   if (s != napi_ok) return s;
@@ -363,7 +385,7 @@ napi_status TagIsBigInt(napi_env env, JsValueRef jsv, bool* out) {
   s = MakePid(env, "prototype", &protoPid, "bigint-tag: prototype id");
   if (s != napi_ok) return s;
   JsValueRef proto = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsGetProperty(objCtor, protoPid, &proto);
+  ec = JsGetProperty(objCtor, protoPid, &proto);
   if (ec != JsNoError) return map_js(env, ec, "bigint-tag: Object.prototype");
   TmpRoot protoRoot(proto);
   JsPropertyIdRef tsPid = JS_INVALID_REFERENCE;
@@ -381,12 +403,18 @@ napi_status TagIsBigInt(napi_env env, JsValueRef jsv, bool* out) {
                           "bigint-tag: Object.prototype.toString tampered");
     return napi_generic_failure;
   }
+  bool had_pending = false;
+  (void)JsHasException(&had_pending);
   JsValueRef args[1] = {jsv};
   JsValueRef res = JS_INVALID_REFERENCE;
   ec = JsCallFunction(fn, args, 1, &res);
   if (ec != JsNoError) {
     if (ec == JsErrorInExceptionState || ec == JsErrorScriptException) {
-      return napi_ok; /* degraded: not bigint; caller clears on success */
+      if (!had_pending) {
+        JsValueRef ignored = JS_INVALID_REFERENCE;
+        (void)JsGetAndClearException(&ignored);
+      }
+      return napi_ok; /* degraded: not bigint; no newly-leaked exception */
     }
     return map_js(env, ec, "bigint-tag: toString call");
   }
@@ -418,35 +446,7 @@ napi_status TagIsBigInt(napi_env env, JsValueRef jsv, bool* out) {
   size_t written = 0;
   ec = JsCopyString(res, buf.data(), buf.size(), &written);
   if (ec != JsNoError) return map_js(env, ec, "bigint-tag: tag copy");
-  if (!(written == 15 && std::memcmp(buf.data(), "[object BigInt]", 15) == 0)) {
-    return napi_ok; /* *out == false: not BigInt */
-  }
-  // MED-1: the tag alone cannot split primitive BigInt from a boxed
-  // BigInt (Object(1n) also tags "[object BigInt]" but Node reports
-  // napi_object). Discriminate via ToObject identity: JsConvertValue
-  // ToObject returns the SAME object for objects (boxed) and a fresh
-  // wrapper for primitives. StrictEquals checks spec identity, not
-  // handle-pointer equality. No user code runs (pure boxing), so this
-  // is safe for C-Yes callers. Verified empirically (2026-11-12):
-  // prim==wrapper? false; boxed==boxed? true (pointer + StrictEquals).
-  JsValueRef asObj = JS_INVALID_REFERENCE;
-  ec = JsConvertValueToObject(jsv, &asObj);
-  if (ec != JsNoError) {
-    if (ec == JsErrorInExceptionState || ec == JsErrorScriptException) {
-      return napi_ok; /* degraded: *out == false (object) */
-    }
-    return map_js(env, ec, "bigint-tag: ToObject");
-  }
-  TmpRoot asObjRoot(asObj);
-  bool ident = false;
-  ec = JsStrictEquals(jsv, asObj, &ident);
-  if (ec != JsNoError) {
-    if (ec == JsErrorInExceptionState || ec == JsErrorScriptException) {
-      return napi_ok; /* degraded: *out == false (object) */
-    }
-    return map_js(env, ec, "bigint-tag: identity");
-  }
-  *out = !ident; /* primitive (fresh wrapper) => true; boxed => false */
+  *out = (written == 15 && std::memcmp(buf.data(), "[object BigInt]", 15) == 0);
   return napi_ok;
 }
 

@@ -455,12 +455,15 @@ BVSparse<TAllocator>::NodeFromIndex(BVIndex i, Field(BVSparseNode*, TAllocator) 
         curNode = this->head;
     }
 
+    const BVSparseNode * prevNode = nullptr;
     for (; curNode && searchIndex > curNode->startIndex; curNode = curNode->next)
     {
+        prevNode = curNode;
         prevNextField = &curNode->next;
     }
 
-    const_cast<BVSparse<TAllocator>*>(this)->lastFoundIndex = *prevNextField;
+    const_cast<BVSparse<TAllocator>*>(this)->lastFoundIndex =
+        const_cast<BVSparseNode*>(curNode != nullptr ? curNode : prevNode);
 
     if (curNode && searchIndex == curNode->startIndex)
     {

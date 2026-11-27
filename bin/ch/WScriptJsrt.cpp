@@ -211,7 +211,20 @@ JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstru
     {
         double exitCodeDouble;
         IfJsrtErrorFail(ChakraRTInterface::JsNumberToDouble(arguments[1], &exitCodeDouble), JS_INVALID_REFERENCE);
-        exitCode = (int)exitCodeDouble;
+        if (!std::isfinite(exitCodeDouble) || exitCodeDouble == 0.0)
+        {
+            exitCode = 0;
+        }
+        else
+        {
+            // Safe ToInt32-style modular wrap without UB on out-of-range doubles.
+            double wrapped = std::fmod(std::trunc(exitCodeDouble), 4294967296.0);
+            if (wrapped < 0.0)
+            {
+                wrapped += 4294967296.0;
+            }
+            exitCode = static_cast<int>(static_cast<uint32_t>(wrapped));
+        }
     }
 
     RawExitProcess(exitCode);
@@ -571,7 +584,17 @@ JsValueRef WScriptJsrt::SetTimeoutCallback(JsValueRef callee, bool isConstructCa
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsNumberToDouble(arguments[2], &tmp));
 
-    time = static_cast<int>(tmp);
+    // Clamp negative, non-finite, or > INT32_MAX delays to 0 ms (matching HTML /
+    // Node 32-bit signed timeout semantics and avoiding UB in double->int casts
+    // and ~49-day sleeps on negative/oversized values).
+    if (!std::isfinite(tmp) || tmp <= 0.0 || tmp > static_cast<double>(INT32_MAX))
+    {
+        time = 0;
+    }
+    else
+    {
+        time = static_cast<unsigned int>(tmp);
+    }
     msg = new (std::nothrow) CallbackMessage(time, function);
     if (msg == nullptr)
     {
@@ -613,8 +636,11 @@ JsValueRef WScriptJsrt::ClearTimeoutCallback(JsValueRef callee, bool isConstruct
 
     if (ChakraRTInterface::JsNumberToDouble(arguments[1], &tmp) == JsNoError)
     {
-        timerId = static_cast<int>(tmp);
-        GetThreadMessageQueue()->RemoveById(timerId);
+        if (std::isfinite(tmp) && tmp >= 0.0 && tmp <= static_cast<double>(UINT32_MAX))
+        {
+            timerId = static_cast<unsigned int>(tmp);
+            GetThreadMessageQueue()->RemoveById(timerId);
+        }
     }
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&undef));

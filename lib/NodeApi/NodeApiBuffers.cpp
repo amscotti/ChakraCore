@@ -219,6 +219,7 @@
 
 #include "NodeApiBuffers.h"
 
+#include "NodeApiBinary.h"
 #include "NodeApiEnv.h"
 #include "NodeApiScopes.h"
 #include "NodeApiWrap.h"
@@ -558,30 +559,6 @@ napi_status GetOrCreateState(napi_env env, BufferState** out) {
   return napi_ok;
 }
 
-napi_status IsArrayBufferDetached(napi_env env, JsValueRef ab, bool* out) {
-  *out = false;
-  JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsCreatePropertyId("detached", 8, &pid);
-  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: id");
-  JsValueRef val = JS_INVALID_REFERENCE;
-  ec = JsGetProperty(ab, pid, &val);
-  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: get");
-  ScratchRoot valRoot(val);
-  JsValueType t = JsUndefined;
-  ec = JsGetValueType(val, &t);
-  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: type");
-  if (t != JsBoolean) {
-    nodeapi::SetLastError(env, napi_generic_failure,
-                          "is_detached: detached not boolean");
-    return napi_generic_failure;
-  }
-  bool b = false;
-  ec = JsBooleanToBool(val, &b);
-  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: bool");
-  *out = b;
-  return napi_ok;
-}
-
 // Define the hidden marker property on a fresh Uint8Array view.
 // Descriptor: {value:true, writable:false, enumerable:false,
 // configurable:false} via a real descriptor object + JsObjectDefineProperty.
@@ -834,8 +811,8 @@ napi_status NAPI_CDECL napi_create_external_buffer(
     return napi_invalid_arg;
   }
   // External ArrayBuffer with NULL finalizer: the ArrayBuffer aliases
-  // `data` without owning a finalizer; the user's finalizer is carried
-  // by the WrapRecord on the view (see header).
+  // `data` without owning a JsRT finalizer; the user's finalizer is
+  // carried by the WrapRecord on the backing ArrayBuffer (see header).
   JsValueRef ab = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsCreateExternalArrayBuffer(data, len32, nullptr, nullptr, &ab);
   if (ec != JsNoError) return MapJsError(env, ec, "JsCreateExternalArrayBuffer");
@@ -864,11 +841,13 @@ napi_status NAPI_CDECL napi_create_external_buffer(
   if (ss != napi_ok) return ss;
   napi_status ms = MarkBuffer(env, st, ta);
   if (ms != napi_ok) return ms;
-  // Attach the user's finalizer to the view via the section 3.7 WrapRecord
-  // path (N3.2). Only when a finalizer was supplied (NULL => no
-  // record; the external storage is still aliased).
+  // Attach the user's finalizer to the backing ArrayBuffer via the section 3.7
+  // WrapRecord path (N3.2). Attaching to `ab` keeps `data` alive if the view
+  // is GC'd while `buf.buffer` remains reachable, and survives detach.
+  // Only when a finalizer was supplied (NULL => no record; external storage
+  // is still aliased).
   if (finalize_cb != nullptr) {
-    napi_status fs = napi_add_finalizer(env, FromJs(ta), data, finalize_cb,
+    napi_status fs = napi_add_finalizer(env, FromJs(ab), data, finalize_cb,
                                         finalize_hint, nullptr);
     if (fs != napi_ok) return fs;
   }
@@ -910,7 +889,7 @@ NAPI_EXTERN napi_status NAPI_CDECL node_api_create_buffer_from_arraybuffer(
   ScratchRoot abRoot(ab);
 
   bool detached = false;
-  napi_status ds = IsArrayBufferDetached(env, ab, &detached);
+  napi_status ds = NodeApiBinary_IsArrayBufferDetached(env, ab, &detached);
   if (ds != napi_ok) return ds;
 
   BYTE* abStor = nullptr;

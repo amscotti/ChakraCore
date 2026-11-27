@@ -70,11 +70,14 @@ VARIANTS = ("interpreted", "dynapogo")
 # because the Linux selection runs the x64-eligible subset (include_slow
 # off, platform exclusions); the two counts are the authoritative Linux
 # baseline.
-# 2026-11-26 Wave 2 (`review-glm.md` remediation): +10 non-SIMD rlexe.xml
-# entries (+2 es7, +1 Function, +1 BigInt, +4 Regex incl. -ES6RegExSymbols-,
-# +1 es6module, +1 typedarray; 0 tag exclusions on Linux x64) over 2935/2395;
-# pending native Linux CI confirmation.
-RECORDED_BASELINE = {"interpreted": (2945, 0), "dynapogo": (2405, 0)}
+# 2026-11-26 Wave 2 (external/uncommitted `review-glm.md` remediation): +10
+# non-SIMD rlexe.xml entries (+2 es7, +1 Function, +1 BigInt, +4 Regex incl.
+# -ES6RegExSymbols-, +1 es6module, +1 typedarray; 0 tag exclusions on Linux
+# x64) over 2935/2395 -> 2945/2405.
+# 2026-11-26 section 34 (`glm-review.md` remediation): +4 non-SIMD rlexe.xml
+# entries (+1 es7, +1 Bugs, +1 es6, +1 Regex; 0 tag exclusions on Linux x64)
+# over 2945/2405; pending native Linux CI confirmation.
+RECORDED_BASELINE = {"interpreted": (2949, 0), "dynapogo": (2409, 0)}
 
 
 def grade_variant(variant, rc, lines, allow_higher=False):

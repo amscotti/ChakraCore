@@ -45,7 +45,7 @@ All active Windows x64 builds use `zig build` (`build.zig` delegates automatical
 | `check-nodeapi` | Verifies `gen_nodeapi_exports.py --check` + pure-Python PE32+ export parser `check_nodeapi.py --dll <libChakraNodeApi.dll>` matches all `161` symbols (`155` `napi_*`/`node_api_*` + `6` host) |
 | `check-gcstress` | Runs bounded `GCStress.exe` in-thread and concurrent heap walks |
 | `check-wasm` | Runs `tools/build/check_wasm_p1.py` (`383` P1 entries; requires `-Djit=true` and non-release profile) |
-| `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`, pinned in `tools/build/gate_counts.json` at `650/0` `win32_test` and `669/0` `win32_debug`) |
+| `check-fulljit` | Runs `tools/build/check_fulljit.py` no-profile FullJit suites (`Basics/Array/Function/Regex/es6/es7`, pinned in `tools/build/gate_counts.json` at `653/0` `win32_test` and `672/0` `win32_debug`) |
 | `check` | Aggregates `check-selftest`, `verify-bytecode` (non-release), `check-regression` (non-release), `check-smoke`, `check-jit` (when `-Djit=true`), `check-nodeapi` (shared profiles), `check-gcstress`, and `check-metadata` |
 | `package` | Builds deterministic `out/package/<profile>/chakracore-<version>-windows-x64.tar.gz` + `MANIFEST.json` (shared profiles only) |
 | `check-package` | Builds, SHA-256 verifies (`verify_package.py`), and executes packaged `ch.exe` + `ch-nodeapi.exe` (`test_package.py`) |

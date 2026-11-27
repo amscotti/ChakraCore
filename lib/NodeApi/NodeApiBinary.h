@@ -26,6 +26,7 @@
 #ifndef CHAKRA_NODEAPI_BINARY_H_
 #define CHAKRA_NODEAPI_BINARY_H_
 
+#include "ChakraCommon.h" /* JsValueRef */
 #include "js_native_api.h" /* napi_status, napi_value, NAPI_VERSION=8 */
 
 #include <cstddef> /* size_t */
@@ -41,6 +42,13 @@ void DrainExternalFinalizers(napi_env env);
 // records still queued for `generation` WITHOUT invoking user finalizers.
 // Pure native (no context/JS). Only that generation's queue is touched.
 void NodeApiBinary_DestroyForEnv(napi_env env, uint64_t generation);
+
+// Detached query shared across NodeApiBinary and NodeApiBuffers.
+// Returns napi_ok + *out = false immediately for non-ArrayBuffer values
+// (e.g., SharedArrayBuffer, which cannot be detached); otherwise queries
+// ArrayBuffer.prototype.detached via the env's cached intrinsic getter.
+napi_status NodeApiBinary_IsArrayBufferDetached(napi_env env, JsValueRef ab,
+                                                bool* out);
 
 // Introspection for tests/probes (A8-1): live ExternalRecord objects, and
 // the total number of records currently queued. Both are zero when every

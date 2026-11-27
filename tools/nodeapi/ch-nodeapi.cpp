@@ -592,8 +592,11 @@ struct RequireState {
   std::string driver_path;       /* absolute driver path */
   std::string cwd_dir;           /* getcwd at startup */
   std::string active_module_dir; /* dir of currently loading JS module */
-  std::map<std::string, JsValueRef> cache; /* abs path -> module.exports
-                                              (host-rooted, R1) */
+  std::map<std::string, JsValueRef> cache; /* canonical abs path -> module
+                                              object (host-rooted, R1;
+                                              module.exports read dynamically
+                                              so CommonJS cycles return the
+                                              in-progress exports object) */
   AddonRegistry* registry = nullptr;       /* borrowed from main() */
 };
 
@@ -883,14 +886,30 @@ JsValueRef host_get_global(const char* name) {
   return out;
 }
 
+JsValueRef get_module_exports(JsValueRef module_obj) {
+  if (module_obj == JS_INVALID_REFERENCE) return JS_INVALID_REFERENCE;
+  JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+  if (JsCreatePropertyId("exports", 7, &pid) != JsNoError) {
+    return JS_INVALID_REFERENCE;
+  }
+  JsValueRef result = JS_INVALID_REFERENCE;
+  if (JsGetProperty(module_obj, pid, &result) != JsNoError) {
+    return JS_INVALID_REFERENCE;
+  }
+  return result;
+}
+
 // Execute one .js file as a CommonJS module and return module.exports.
 // Sets __nodeapi_module__/__nodeapi_exports__ globals so the wrapper can
 // reference them; saves/restores active_module_dir and wrapper globals for
-// nesting. Returns JS_INVALID_REFERENCE on failure (exception already printed).
+// nesting. Publishes module_obj to rs->cache before JsRun (matching Node
+// CommonJS cycle semantics) and evicts it if JsRun throws.
+// Returns JS_INVALID_REFERENCE on failure (exception already printed).
 JsValueRef load_commonjs_module(RequireState* rs,
                                 const std::string& abs_path) {
-  auto it = rs->cache.find(abs_path);
-  if (it != rs->cache.end()) return it->second;
+  std::string cache_key = host_canonicalize(abs_path);
+  auto it = rs->cache.find(cache_key);
+  if (it != rs->cache.end()) return get_module_exports(it->second);
   std::string source;
   if (!read_file(abs_path, &source)) {
     std::fprintf(stderr, "ch-nodeapi: require: cannot read %s\n",
@@ -931,6 +950,23 @@ JsValueRef load_commonjs_module(RequireState* rs,
     JsPropertyIdRef pid = JS_INVALID_REFERENCE;
     JsCreatePropertyId("exports", 7, &pid);
     JsSetProperty(module_obj, pid, exports_obj, false);
+  }
+  // Publish the in-progress module object to rs->cache BEFORE JsRun so
+  // circular require() calls return the live module.exports instead of
+  // recursing until stack overflow (GR-TL4). Ownership of the cache's
+  // dedicated JsAddRef is released either on JsRun failure below or in
+  // shutdown_all().
+  bool cached = false;
+  if (JsAddRef(module_obj, nullptr) == JsNoError) {
+    try {
+      rs->cache.emplace(cache_key, module_obj);
+      cached = true;
+    } catch (...) {
+      JsRelease(module_obj, nullptr);
+      std::fprintf(stderr, "ch-nodeapi: require: out of memory caching %s\n",
+                   abs_path.c_str());
+      return JS_INVALID_REFERENCE;
+    }
   }
   std::string prev_active_dir = rs->active_module_dir;
   rs->active_module_dir = host_dirname(abs_path);
@@ -979,19 +1015,19 @@ JsValueRef load_commonjs_module(RequireState* rs,
   if (prev_dn != JS_INVALID_REFERENCE) host_set_global("__dirname__", prev_dn);
   rs->active_module_dir = prev_active_dir;
   if (err != JsNoError) {
+    if (cached) {
+      auto cit = rs->cache.find(cache_key);
+      if (cit != rs->cache.end()) {
+        JsValueRef cached_mod = cit->second;
+        rs->cache.erase(cit);
+        if (cached_mod != JS_INVALID_REFERENCE) JsRelease(cached_mod, nullptr);
+      }
+    }
     clear_exception(("require: " + abs_path + " threw").c_str());
     return JS_INVALID_REFERENCE;
   }
-  JsValueRef result = JS_INVALID_REFERENCE;
-  {
-    JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-    JsCreatePropertyId("exports", 7, &pid);
-    JsGetProperty(module_obj, pid, &result);
-  }
+  JsValueRef result = get_module_exports(module_obj);
   if (result == JS_INVALID_REFERENCE) result = exports_obj;
-  if (JsAddRef(result, nullptr) == JsNoError) {
-    rs->cache[abs_path] = result;
-  }
   return result;
 }
 
@@ -1993,7 +2029,10 @@ int main(int argc, char** argv) {
       return shutdown_all(1);
     }
     // Run as a CommonJS module (module/exports/__filename/__dirname in
-    // scope) so top-level `return` and module patterns work.
+    // scope) so top-level `return` and module patterns work. Register the
+    // driver's module object in req_state.cache before JsRun so a driver
+    // requiring its own path observes its live module.exports instead of
+    // recursing until stack overflow (GR-TL4).
     JsValueRef driver_module = JS_INVALID_REFERENCE;
     JsValueRef driver_exports = JS_INVALID_REFERENCE;
     JsCreateObject(&driver_module);
@@ -2002,6 +2041,17 @@ int main(int argc, char** argv) {
       JsPropertyIdRef pid = JS_INVALID_REFERENCE;
       JsCreatePropertyId("exports", 7, &pid);
       JsSetProperty(driver_module, pid, driver_exports, false);
+    }
+    if (driver_module != JS_INVALID_REFERENCE &&
+        JsAddRef(driver_module, nullptr) == JsNoError) {
+      std::string driver_cache_key = host_canonicalize(abs_driver);
+      try {
+        req_state.cache.emplace(driver_cache_key, driver_module);
+      } catch (...) {
+        JsRelease(driver_module, nullptr);
+        std::fprintf(stderr, "ch-nodeapi: out of memory caching driver\n");
+        return shutdown_all(1);
+      }
     }
     host_set_global("module", driver_module);
     host_set_global("exports", driver_exports);
@@ -2086,11 +2136,18 @@ int main(int argc, char** argv) {
       }
       if (run_rc == 0) {
         for (auto& kv : req_state.cache) {
+          JsValueRef mod_exports = get_module_exports(kv.second);
+          JsValueType exp_ty = JsUndefined;
+          if (mod_exports == JS_INVALID_REFERENCE ||
+              JsGetValueType(mod_exports, &exp_ty) != JsNoError ||
+              (exp_ty != JsObject && exp_ty != JsFunction)) {
+            continue;
+          }
           JsValueRef c = JS_INVALID_REFERENCE;
           {
             JsPropertyIdRef pid = JS_INVALID_REFERENCE;
             JsCreatePropertyId("_checkMustCall", 14, &pid);
-            JsGetProperty(kv.second, pid, &c);
+            JsGetProperty(mod_exports, pid, &c);
           }
           JsValueType ty = JsUndefined;
           if (c == JS_INVALID_REFERENCE ||

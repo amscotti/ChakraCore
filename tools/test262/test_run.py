@@ -60,6 +60,52 @@ class TestRunPatterns(unittest.TestCase):
             ["test/intl402/**/*.js"],
         )
 
+    def test_run_timeout_default_and_kill_on_hang(self):
+        import subprocess
+        import tempfile
+        import types
+
+        args = run.build_parser().parse_args(["--binary", "zig-out/bin/ch"])
+        self.assertEqual(args.run_timeout, run.DEFAULT_RUN_TIMEOUT)
+
+        args_custom = run.build_parser().parse_args(
+            ["--binary", "zig-out/bin/ch", "--run-timeout", "45"]
+        )
+        self.assertEqual(args_custom.run_timeout, 45)
+
+        class FakeProc:
+            def __init__(self):
+                self.killed = False
+                self.waits = 0
+                self.stdout = []
+
+            def wait(self, timeout=None):
+                self.waits += 1
+                raise subprocess.TimeoutExpired(["fake"], timeout or 1)
+
+            def kill(self):
+                self.killed = True
+
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td)
+            fake_args = types.SimpleNamespace(
+                node=sys.executable,
+                host_flags="",
+                checkout=out_dir,
+                jobs=1,
+                timeout=100,
+                run_timeout=1,
+            )
+            fake = FakeProc()
+            orig_popen = subprocess.Popen
+            subprocess.Popen = lambda *a, **kw: fake
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    run.harness(out_dir / "ch", out_dir, ["test/**/*.js"], out_dir / "out.json", fake_args)
+            finally:
+                subprocess.Popen = orig_popen
+            self.assertTrue(fake.killed)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -50,22 +50,44 @@ Var JavascriptAsyncGeneratorFunction::EntryAsyncGeneratorFunctionImplementation(
 
     auto* asyncGeneratorFn = VarTo<JavascriptAsyncGeneratorFunction>(function);
     auto* library = scriptContext->GetLibrary();
-    Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
-
-    // fall back to the original prototype if we have an invalid prototype object
-    DynamicObject* protoObject = VarIs<DynamicObject>(prototype) ?
-        UnsafeVarTo<DynamicObject>(prototype) : library->GetAsyncGeneratorPrototype();
-
     auto* scriptFn = asyncGeneratorFn->GetGeneratorVirtualScriptFunction();
+    const bool hasComplexInit = scriptFn->GetFunctionInfo()->GetGeneratorWithComplexParams();
+    DynamicObject* defaultProto = library->GetAsyncGeneratorPrototype();
+    DynamicObject* protoObject = defaultProto;
+
+    if (!hasComplexInit)
+    {
+        Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
+
+        // fall back to the original prototype if we have an invalid prototype object
+        if (VarIs<DynamicObject>(prototype))
+        {
+            protoObject = UnsafeVarTo<DynamicObject>(prototype);
+        }
+    }
+
     auto* generator = library->CreateAsyncGenerator(args, scriptFn, protoObject);
 
     // Run the generator to execute until the beginning of the body
-    if (scriptFn->GetFunctionInfo()->GetGeneratorWithComplexParams())
-    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+    if (hasComplexInit)
     {
-        generator->CallGenerator(library->GetUndefined(), ResumeYieldKind::Normal);
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            generator->CallGenerator(library->GetUndefined(), ResumeYieldKind::Normal);
+        }
+        END_SAFE_REENTRANT_CALL
+
+        // Parameter initializers run before reading `function.prototype`.
+        Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
+        if (VarIs<DynamicObject>(prototype))
+        {
+            DynamicObject* postProto = UnsafeVarTo<DynamicObject>(prototype);
+            if (postProto != defaultProto)
+            {
+                JavascriptObject::ChangePrototype(generator, postProto, /*shouldThrow=*/false, scriptContext);
+            }
+        }
     }
-    END_SAFE_REENTRANT_CALL
 
     generator->SetSuspendedStart();
 

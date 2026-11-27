@@ -488,19 +488,8 @@ namespace Js
                             return false;
                         }
                         bool hasUItem = false;
-                        size_t attrStart = pos;
                         while (pos < count && subtags[pos].len >= 3 && subtags[pos].len <= 8)
                         {
-                            const Subtag& attr = subtags[pos];
-                            for (size_t prev = attrStart; prev < pos; ++prev)
-                            {
-                                if (SubtagEqualsIgnoreCase(
-                                        tag + subtags[prev].start, subtags[prev].len,
-                                        tag + attr.start, attr.len))
-                                {
-                                    return false;
-                                }
-                            }
                             hasUItem = true;
                             ++pos;
                         }
@@ -1255,8 +1244,25 @@ namespace Js
 
                         while (p < ext.endSubtag && subtags[p].len >= 3)
                         {
-                            attrs.Push(pool.AppendSliceLower(tag + subtags[p].start, subtags[p].len));
+                            Subtag attrSub = pool.AppendSliceLower(tag + subtags[p].start, subtags[p].len);
                             ++p;
+
+                            // Deduplicate attributes (first wins per UTS #35 / ECMA-402)
+                            bool dupAttr = false;
+                            for (size_t i = 0; i < attrs.Count(); ++i)
+                            {
+                                if (CompareSlices(
+                                        pool.Data() + attrs[i].start, attrs[i].len,
+                                        pool.Data() + attrSub.start, attrSub.len) == 0)
+                                {
+                                    dupAttr = true;
+                                    break;
+                                }
+                            }
+                            if (!dupAttr)
+                            {
+                                attrs.Push(attrSub);
+                            }
                         }
 
                         // Sort attributes

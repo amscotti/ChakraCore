@@ -3679,10 +3679,10 @@ ParseNodePtr Parser::ParseImport(bool isLabelled)
             Error(ERRExperimental);
         }
 
-        ParseNodePtr pnode = ParseImportCall<buildAST>();
-        BOOL fCanAssign;
-        IdentToken token;
-        return ParsePostfixOperators<buildAST>(pnode, TRUE, FALSE, FALSE, TRUE, &fCanAssign, &token);
+        // Dynamic import() is a MemberExpression and may be the left operand
+        // of any postfix, binary, ternary, or comma operator (GR-FE6).
+        this->GetScanner()->SeekTo(parsedImport);
+        return ParseExpr<buildAST>();
     }
     else if (m_token.tk == tkDot && m_scriptContext->GetConfig()->IsESImportMetaEnabled())
     {
@@ -13889,7 +13889,7 @@ LRestart:
                     Error(ERRLabelBeforeLexicalDeclaration); 
                 }
             }
-            else if (this->NextTokenConfirmsLetDecl() &&
+            else if (this->NextTokenConfirmsLetDecl(this->GetScanner()->FHadNewLine() != FALSE) &&
                 (m_token.tk == tkLBrack ||
                  !this->GetScanner()->FHadNewLine() ||
                  (m_pstmtCur != nullptr && m_pstmtCur->GetNop() == knopBlock)))
@@ -14079,7 +14079,7 @@ LRestart:
                 {
                     this->GetScanner()->Capture(&startExprOrIdentifier);
                 }
-                if (this->NextTokenConfirmsLetDecl() && m_token.tk != tkIN)
+                if (this->NextTokenConfirmsLetDecl(this->GetScanner()->FHadNewLine() != FALSE) && m_token.tk != tkIN)
                 {
                     pnodeT = ParseVariableDeclaration<buildAST>(tkLET, ichMinInner
                         , /*fAllowIn = */FALSE

@@ -24,8 +24,8 @@ test gates; these are evidence-collection tools.
   sigbus-trace.c && codesign -s - sigbus-trace.dylib`.
 - `rvs.mjs` — churn driver (adapted from the S6e reviewer's rvb.mjs):
   `node rvs.mjs <pre|predbg|post|postdbg> <killms> <agents> <count> <par>
-  [interp]`. Bins live in the (git-ignored) `out/sigbus/bin-*` dirs of the
-  lane worktree. Note: any `*dbg` label symbolicates against the pre-fix
+  [interp]`. Override the artifact directory with `SIGBUS_DIR` (defaults to
+  the git-ignored `<repo>/out/sigbus/bin-*` directories). Note: any `*dbg` label symbolicates against the pre-fix
   debug image's offsets — harmless for fault counting, but do not interpose
   dbg legs (symbolication would use the wrong image).
 - `cs-hammer.c` — mutual-exclusion hammer for the PAL CriticalSection

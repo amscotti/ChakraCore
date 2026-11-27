@@ -1088,6 +1088,24 @@ int main() {
     expect_status(napi_has_property(g_env, reinterpret_cast<napi_value>(Num(5)), reinterpret_cast<napi_value>(Str("x")), &bh),
                   napi_ok, "pf: boxed has ok");
     expect(!bh, "pf: boxed has false");
+    // GR-NA15: tampering Object.freeze / Object.seal in JS must not bypass
+    // cached intrinsics captured at env creation.
+    Run("globalThis.__origFreeze = Object.freeze; globalThis.__origSeal = Object.seal; "
+        "Object.freeze = function(o) { return o; }; Object.seal = function(o) { return o; };");
+    napi_value tFz = NewObj();
+    StoreGlobal("__pfTamperFz", tFz);
+    expect_status(napi_set_named_property(g_env, tFz, "k", ten), napi_ok, "pf: tamper fz prop");
+    expect_status(napi_object_freeze(g_env, tFz), napi_ok, "pf: freeze ok despite tamper");
+    expect(RunBool("__origFreeze === undefined ? false : Object.isFrozen(__pfTamperFz)"),
+           "pf: object actually frozen despite Object.freeze tamper");
+    napi_value tSl = NewObj();
+    StoreGlobal("__pfTamperSl", tSl);
+    expect_status(napi_set_named_property(g_env, tSl, "k", ten), napi_ok, "pf: tamper sl prop");
+    expect_status(napi_object_seal(g_env, tSl), napi_ok, "pf: seal ok despite tamper");
+    expect(RunBool("Object.isSealed(__pfTamperSl)"),
+           "pf: object actually sealed despite Object.seal tamper");
+    Run("Object.freeze = globalThis.__origFreeze; Object.seal = globalThis.__origSeal; "
+        "delete globalThis.__origFreeze; delete globalThis.__origSeal;");
   }
   AtBaseline("pf: ends at baseline");
 

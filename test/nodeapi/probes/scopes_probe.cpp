@@ -444,6 +444,25 @@ int main() {
   Check(Cnt() == Base() && Base() == 0, "P2-1",
         "baseline restored on env after destroy (fresh env baseline 0)");
 
+  /* P2-12: GR-NA7 escape outer-scope handle from inner escapable scope. */
+  {
+    napi_handle_scope outer = nullptr;
+    CheckStatus(napi_open_handle_scope(g_env, &outer), napi_ok, "P2-12", "open outer");
+    napi_value outerObj = CreateObj();
+    napi_handle_scope mid = nullptr;
+    CheckStatus(napi_open_handle_scope(g_env, &mid), napi_ok, "P2-12", "open mid");
+    napi_escapable_handle_scope inner = nullptr;
+    CheckStatus(napi_open_escapable_handle_scope(g_env, &inner), napi_ok, "P2-12", "open inner");
+    napi_value esc = nullptr;
+    CheckStatus(napi_escape_handle(g_env, inner, outerObj, &esc), napi_ok,
+                "P2-12", "escape outer handle into mid succeeds");
+    Check(esc == outerObj, "P2-12", "escaped handle preserves value");
+    CheckStatus(napi_close_escapable_handle_scope(g_env, inner), napi_ok, "P2-12", "close inner");
+    CheckStatus(napi_close_handle_scope(g_env, mid), napi_ok, "P2-12", "close mid");
+    CheckStatus(napi_close_handle_scope(g_env, outer), napi_ok, "P2-12", "close outer");
+    Check(Cnt() == Base(), "P2-12", "baseline restored after escaping outer handle");
+  }
+
   /* P2-11: destroy with scopes still open (step 6 closes everything). */
   {
     napi_handle_scope s = nullptr;

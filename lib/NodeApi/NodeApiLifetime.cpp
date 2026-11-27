@@ -348,6 +348,10 @@ void Lifetime_RunAsyncCleanupHooks(NodeEnv* env) {
         if (current != nullptr) {
           current->completed = true;
           UnregisterAsyncHandle(static_cast<void*>(current));
+          while (env->retired_async_handles.size() >= nodeapi::kDeadEnvCap) {
+            delete env->retired_async_handles.front();
+            env->retired_async_handles.erase(env->retired_async_handles.begin());
+          }
           try {
             env->retired_async_handles.push_back(current);
           } catch (...) {
@@ -522,9 +526,6 @@ napi_status NAPI_CDECL napi_add_async_cleanup_hook(
   handle->data = arg;
   handle->completed = false;
   try {
-    env->retired_async_handles.reserve(
-        env->retired_async_handles.size() +
-        env->async_cleanup_hooks.size() + 1);
     env->async_cleanup_hooks.push_back(handle);
   } catch (...) {
     delete handle;
@@ -584,6 +585,10 @@ napi_status NAPI_CDECL napi_remove_async_cleanup_hook(
   list.erase(it);
   remove_handle->completed = true;
   nodeapi::UnregisterAsyncHandle(static_cast<void*>(remove_handle));
+  while (owner->retired_async_handles.size() >= nodeapi::kDeadEnvCap) {
+    delete owner->retired_async_handles.front();
+    owner->retired_async_handles.erase(owner->retired_async_handles.begin());
+  }
   try {
     owner->retired_async_handles.push_back(remove_handle);
   } catch (...) {

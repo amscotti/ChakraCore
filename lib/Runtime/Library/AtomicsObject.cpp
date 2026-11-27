@@ -186,7 +186,7 @@ namespace Js
     Var AtomicsObject::EntryIsLockFree(RecyclableObject* function, CallInfo callInfo, ...)
     {
         ATOMICS_FUNCTION_ENTRY_CHECKS(1, "Atomics.isLockFree");
-        uint32 size = JavascriptConversion::ToUInt32(args[1], scriptContext);
+        double size = JavascriptConversion::ToInteger(args[1], scriptContext);
         // TODO : Currently for the size 1, 2 and 4 we are treating them lock free, we will take a look at this later.
         // Size 8 (BigInt64Array/BigUint64Array elements) is lock free exactly
         // on 64-bit targets, where the 64-bit Interlocked* RMW primitives used
@@ -198,7 +198,7 @@ namespace Js
 #else
         const bool isLockFree8 = false;
 #endif
-        return (size == 1 || size == 2 || size == 4 || (size == 8 && isLockFree8)) ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
+        return (size == 1.0 || size == 2.0 || size == 4.0 || (size == 8.0 && isLockFree8)) ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
     }
 
     Var AtomicsObject::EntryPause(RecyclableObject* function, CallInfo callInfo, ...)

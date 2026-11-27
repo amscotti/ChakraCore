@@ -652,6 +652,37 @@ napi_status CallIntrinsic(napi_env env, napi_value object, const char* prop,
   return napi_ok;
 }
 
+napi_status FreezeOrSealImpl(napi_env env, napi_value object, bool is_freeze,
+                             const char* null_what, const char* what) {
+  if (object == nullptr) {
+    if (env) nodeapi::SetLastError(env, napi_invalid_arg, null_what);
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/false, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  napi_value obj = nullptr;
+  napi_status s = ToObject(env, object, &obj);
+  if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
+  JsValueRef cached = is_freeze ? nodeapi::GetCachedObjectFreeze(env)
+                                : nodeapi::GetCachedObjectSeal(env);
+  if (cached != JS_INVALID_REFERENCE) {
+    JsValueRef undef = JS_INVALID_REFERENCE;
+    JsErrorCode e = JsGetUndefinedValue(&undef);
+    if (e != JsNoError) return MapJsError(env, e, what);
+    JsValueRef args[2] = {undef, ToJs(obj)};
+    JsValueRef res = JS_INVALID_REFERENCE;
+    e = JsCallFunction(cached, args, 2, &res);
+    if (e != JsNoError) return MapJsError(env, e, what);
+  } else {
+    s = CallIntrinsic(env, obj, is_freeze ? "freeze" : "seal", what);
+    if (s != napi_ok) return s;
+  }
+  nodeapi::ClearLastError(env);
+  return napi_ok;
+}
+
 // MED-2 helper: Object.isExtensible probe (D8 intrinsic call).
 // Exception-neutral: any failure (including a tampered global) clears
 // any exception the probe itself set and reports check_ok=false, so
@@ -1573,39 +1604,13 @@ napi_status NAPI_CDECL NodeApiObjects_SetPrototype(napi_env env,
 
 
 napi_status NAPI_CDECL napi_object_freeze(napi_env env, napi_value object) {
-  if (object == nullptr) {
-    if (env) nodeapi::SetLastError(env, napi_invalid_arg, "object_freeze: NULL arg");
-    return napi_invalid_arg;
-  }
-  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
-                            /*allowPending=*/false, /*needContext=*/true);
-  if (!guard.ok()) return guard.status();
-  napi_value obj = nullptr;
-  napi_status s = ToObject(env, object, &obj);
-  if (s != napi_ok) return s;
-  ScratchRoot obj_root(ToJs(obj));
-  s = CallIntrinsic(env, obj, "freeze", "object_freeze");
-  if (s != napi_ok) return s;
-  nodeapi::ClearLastError(env);
-  return napi_ok;
+  return FreezeOrSealImpl(env, object, /*is_freeze=*/true,
+                          "object_freeze: NULL arg", "object_freeze");
 }
 
 napi_status NAPI_CDECL napi_object_seal(napi_env env, napi_value object) {
-  if (object == nullptr) {
-    if (env) nodeapi::SetLastError(env, napi_invalid_arg, "object_seal: NULL arg");
-    return napi_invalid_arg;
-  }
-  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
-                            /*allowPending=*/false, /*needContext=*/true);
-  if (!guard.ok()) return guard.status();
-  napi_value obj = nullptr;
-  napi_status s = ToObject(env, object, &obj);
-  if (s != napi_ok) return s;
-  ScratchRoot obj_root(ToJs(obj));
-  s = CallIntrinsic(env, obj, "seal", "object_seal");
-  if (s != napi_ok) return s;
-  nodeapi::ClearLastError(env);
-  return napi_ok;
+  return FreezeOrSealImpl(env, object, /*is_freeze=*/false,
+                          "object_seal: NULL arg", "object_seal");
 }
 
 napi_status NAPI_CDECL napi_instanceof(napi_env env, napi_value object,

@@ -183,6 +183,7 @@ namespace Js
         virtual Var  DirectGetItem(_In_ uint32 index) = 0;
         virtual BOOL DirectSetItemNoDetachCheck(_In_ uint32 index, _In_ Js::Var value) = 0;
         virtual Var  DirectGetItemNoDetachCheck(_In_ uint32 index) = 0;
+        virtual BOOL DirectFillRange(_In_ uint32 start, _In_ uint32 count, _In_ Js::Var value) { return FALSE; }
 
         virtual Var TypedAdd(_In_ uint32 index, _In_ Var second) = 0;
         virtual Var TypedAnd(_In_ uint32 index, _In_ Var second) = 0;
@@ -546,11 +547,21 @@ namespace Js
 
             TypeName* typedBuffer = (TypeName*)buffer;
 
-            if (typedValue == 0 || sizeof(TypeName) == 1)
+            uint64 bits = 0;
+            static_assert(sizeof(TypeName) <= sizeof(bits), "Unexpected TypedArray element size");
+            memcpy(&bits, &typedValue, sizeof(TypeName));
+
+            if (sizeof(TypeName) == 1)
             {
                 const size_t byteSize = sizeof(TypeName) * newLength;
                 Assert(byteSize >= newLength); // check for overflow
-                memset(typedBuffer + newStart, (int)typedValue, byteSize);
+                memset(typedBuffer + newStart, static_cast<int>(bits & 0xFF), byteSize);
+            }
+            else if (bits == 0)
+            {
+                const size_t byteSize = sizeof(TypeName) * newLength;
+                Assert(byteSize >= newLength); // check for overflow
+                memset(typedBuffer + newStart, 0, byteSize);
             }
             else
             {
@@ -561,6 +572,45 @@ namespace Js
             }
 
             return TRUE;
+        }
+
+        inline BOOL BaseTypedDirectFillRange(_In_ uint32 start, _In_ uint32 count, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
+        {
+            if (CrossSite::IsCrossSiteObjectTyped(this) ||
+                IsImmutableBuffer(GetArrayBuffer()) ||
+                this->IsDetachedBuffer() ||
+                this->IsOutOfBounds())
+            {
+                return FALSE;
+            }
+
+            uint32 currentLength = GetLength();
+            if (start >= currentLength || count == 0)
+            {
+                return TRUE;
+            }
+            if (count > currentLength - start)
+            {
+                count = currentLength - start;
+            }
+
+            TypeName typedValue = convFunc(value, GetScriptContext());
+
+            if (this->IsDetachedBuffer() || this->IsOutOfBounds())
+            {
+                return FALSE;
+            }
+            currentLength = GetLength();
+            if (start >= currentLength)
+            {
+                return TRUE;
+            }
+            if (count > currentLength - start)
+            {
+                count = currentLength - start;
+            }
+
+            return DirectSetItemAtRange(static_cast<int32>(start), count, typedValue);
         }
 
         inline BOOL BaseTypedDirectSetItem(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
@@ -682,6 +732,7 @@ namespace Js
         virtual Var  DirectGetItem(_In_ uint32 index) override sealed;
         virtual BOOL DirectSetItemNoDetachCheck(_In_ uint32 index, _In_ Js::Var value) override sealed;
         virtual Var  DirectGetItemNoDetachCheck(_In_ uint32 index) override sealed;
+        virtual BOOL DirectFillRange(_In_ uint32 start, _In_ uint32 count, _In_ Js::Var value) override sealed;
         virtual Var TypedAdd(_In_ uint32 index, _In_ Var second) override;
         virtual Var TypedAnd(_In_ uint32 index, _In_ Var second) override;
         virtual Var TypedLoad(_In_ uint32 index) override;

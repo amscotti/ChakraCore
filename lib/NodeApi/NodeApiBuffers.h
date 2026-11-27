@@ -56,18 +56,18 @@
 //   napi_create_external_buffer uses JsCreateExternalArrayBuffer with
 //   NULL finalizeCallback (storage aliases the caller's `data`), creates
 //   the Uint8Array view + marker, then attaches the user's
-//   node_api_basic_finalize via napi_add_finalizer on the view (which
-//   creates a WrapRecord in NodeApiWrap.* with a before-collect
-//   trampoline). Drain points are the same as N3.2: entry to every
-//   Buffer napi_* entry (cheap via nodeapi_wrap_drain), host pump via
-//   chakra_nodeapi_test_drain_finalizers, and destroy steps 2/6 (via
-//   nodeapi_wrap_drain / nodeapi_wrap_teardown). The trampoline only
-//   enqueues; user finalizers run on the env thread with a live env
-//   (D4). The ArrayBuffer itself carries no finalizer, so detach does
-//   not drop the user's finalizer (unlike N3.1's external ArrayBuffer
-//   detached-leak residual; see .cpp ownership record). If
-//   finalize_cb == NULL, no WrapRecord is created (no finalizer to
-//   call; the external storage is still aliased).
+//   node_api_basic_finalize via napi_add_finalizer on the backing
+//   ArrayBuffer (which creates a WrapRecord in NodeApiWrap.* with a
+//   before-collect trampoline). Attaching to the ArrayBuffer keeps `data`
+//   valid even if the Uint8Array view is GC'd while `buf.buffer` remains
+//   reachable, and still survives JsDetachArrayBuffer (unlike N3.1's
+//   external ArrayBuffer detached-leak residual; see .cpp). Drain points are
+//   the same as N3.2: entry to every Buffer napi_* entry (cheap via
+//   nodeapi_wrap_drain), host pump via chakra_nodeapi_test_drain_finalizers,
+//   and destroy steps 2/6 (via nodeapi_wrap_drain / nodeapi_wrap_teardown).
+//   The trampoline only enqueues; user finalizers run on the env thread with
+//   a live env (D4). If finalize_cb == NULL, no WrapRecord is created (no
+//   finalizer to call; the external storage is still aliased).
 //
 // Status discipline (doc/node-api-status-mapping.md C column):
 //   - Gated (No -> napi_pending_exception without executing):

@@ -6,17 +6,17 @@ Lane `a2-serialization-fix`, base `modernize/baseline` (`a1e1f6b1b`).
 
 Commit `851d0646f` added a codegen-propagated lexical `[[HomeObject]]` marker
 (`ParseableFunctionInfo::m_hasHomeObjectContext`,
-[FunctionBody.h:1836](lib/Runtime/Base/FunctionBody.h:1836)) that
+[FunctionBody.h:1836](../lib/Runtime/Base/FunctionBody.h#L1836)) that
 `GlobalObject::PerformEval` consults for the direct-eval `inMethod` decision
-([GlobalObject.cpp:620-622](lib/Runtime/Library/GlobalObject.cpp:620)).
+([GlobalObject.cpp:620-622](../lib/Runtime/Library/GlobalObject.cpp#L620-L622)).
 Codegen sets it (`ByteCodeGenerator.cpp:2694-2697` deferred reuse,
 `:2916-2930` post-visit propagation) but the bytecode serializer never
 persisted it: the `FunctionFlags` bitmask
-([ByteCodeSerializer.cpp:212-237](lib/Runtime/ByteCode/ByteCodeSerializer.cpp:212))
+([ByteCodeSerializer.cpp:212-237](../lib/Runtime/ByteCode/ByteCodeSerializer.cpp#L212-L237))
 had no bit for it, the `AddFunction` writer (`:2289-2311`) never set one, and
 the `ReadFunctionBody` reader (`:4234-4249`) never restored it. `FunctionBody`
 construction from cache defaults the marker to false
-([FunctionBody.cpp:1702](lib/Runtime/Base/FunctionBody.cpp:1702)).
+([FunctionBody.cpp:1702](../lib/Runtime/Base/FunctionBody.cpp#L1702)).
 
 Result: bytecode-resident arrows lost their eval-super binding. A method arrow
 doing `eval("super.value")` works from source (deferred reparse recomputes the

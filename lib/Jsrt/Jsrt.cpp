@@ -2121,7 +2121,7 @@ CHAKRA_API JsCreateTypedArray(_In_ JsTypedArrayType arrayType, _In_ JsValueRef b
 
         Js::JavascriptLibrary* library = scriptContext->GetLibrary();
 
-        const bool fromArrayBuffer = (baseArray != JS_INVALID_REFERENCE && Js::VarIs<Js::ArrayBuffer>(baseArray));
+        const bool fromArrayBuffer = (baseArray != JS_INVALID_REFERENCE && Js::VarIs<Js::ArrayBufferBase>(baseArray));
 
         if (byteOffset != 0 && !fromArrayBuffer)
         {
@@ -2214,13 +2214,13 @@ CHAKRA_API JsCreateDataView(_In_ JsValueRef arrayBuffer, _In_ unsigned int byteO
         VALIDATE_INCOMING_REFERENCE(arrayBuffer, scriptContext);
         PARAM_NOT_NULL(result);
 
-        if (!Js::VarIs<Js::ArrayBuffer>(arrayBuffer))
+        if (!Js::VarIs<Js::ArrayBufferBase>(arrayBuffer))
         {
             return JsErrorInvalidArgument;
         }
 
         Js::JavascriptLibrary* library = scriptContext->GetLibrary();
-        *result = library->CreateDataView(Js::VarTo<Js::ArrayBuffer>(arrayBuffer), byteOffset, byteLength, false);
+        *result = library->CreateDataView(Js::VarTo<Js::ArrayBufferBase>(arrayBuffer), byteOffset, byteLength, false);
 
         JS_ETW(EventWriteJSCRIPT_RECYCLER_ALLOCATE_OBJECT(*result));
         return JsNoError;
@@ -2304,12 +2304,12 @@ CHAKRA_API JsGetArrayBufferStorage(_In_ JsValueRef instance, _Outptr_result_byte
 
     BEGIN_JSRT_NO_EXCEPTION
     {
-        if (!Js::VarIs<Js::ArrayBuffer>(instance))
+        if (!Js::VarIs<Js::ArrayBufferBase>(instance))
         {
             RETURN_NO_EXCEPTION(JsErrorInvalidArgument);
         }
 
-        Js::ArrayBuffer* arrayBuffer = Js::VarTo<Js::ArrayBuffer>(instance);
+        Js::ArrayBufferBase* arrayBuffer = Js::VarTo<Js::ArrayBufferBase>(instance);
         *buffer = arrayBuffer->GetBuffer();
         *bufferLength = arrayBuffer->GetByteLength();
     }

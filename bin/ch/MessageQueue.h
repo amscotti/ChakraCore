@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
+#include <atomic>
 
 class MessageBase
 {
@@ -23,12 +24,12 @@ private:
     unsigned long long m_time;
     unsigned int m_id;
 
-    static unsigned int s_messageCount;
+    static std::atomic<unsigned int> s_messageCount;
 
     MessageBase(const MessageBase&);
 
 public:
-    MessageBase(unsigned int time) : m_time(time), m_id(s_messageCount++) { }
+    MessageBase(unsigned int time) : m_time(time), m_id(s_messageCount.fetch_add(1, std::memory_order_relaxed)) { }
     virtual ~MessageBase() { }
 
     void BeginTimer() { m_time += GetTickCount64(); };
@@ -59,7 +60,8 @@ class SortedList
 
 public:
     SortedList():
-        head(nullptr)
+        head(nullptr),
+        tail(nullptr)
     {
     }
 
@@ -71,27 +73,48 @@ public:
         }
     }
 
-    // Scan through the sorted list
-    // Insert before the first node that satisfies the LessThan function
-    // This function maintains the invariant that the list is always sorted
+    // Append at the tail in O(1) for equal-key FIFO queues (e.g. microtasks).
+    void Append(const T& data)
+    {
+        DListNode<T>* node = new DListNode<T>(data);
+        InsertAfter(node, tail);
+    }
+
+    // Insert maintaining sorted order with FIFO tie-breaking for equal keys.
+    // Fast paths at head/tail make monotonic ascending/equal/descending timer
+    // bursts O(1) instead of O(N).
     void Insert(const T& data)
     {
-        DListNode<T>* curr = head;
         DListNode<T>* node = new DListNode<T>(data);
-        DListNode<T>* prev = nullptr; 
 
-        // Now, if we have to insert, we have to insert *after* some node
-        while (curr != nullptr)
+        if (tail == nullptr)
         {
-            if (T::LessThan(data, curr->data))
-            {
-                break;
-            }
-            prev = curr;
-            curr = curr->next;
+            InsertAfter(node, nullptr);
+            return;
         }
 
-        InsertAfter(node, prev);
+        // Fast path: data >= tail->data (common case for monotonic timers / equal keys).
+        if (!T::LessThan(data, tail->data))
+        {
+            InsertAfter(node, tail);
+            return;
+        }
+
+        // Fast path: data < head->data (strictly earlier than earliest entry).
+        if (T::LessThan(data, head->data))
+        {
+            InsertAfter(node, nullptr);
+            return;
+        }
+
+        // Scan backwards from tail to find the last node with !(data < curr->data).
+        DListNode<T>* curr = tail->prev;
+        while (curr != nullptr && T::LessThan(data, curr->data))
+        {
+            curr = curr->prev;
+        }
+
+        InsertAfter(node, curr);
     }
 
     T Pop()
@@ -109,7 +132,7 @@ public:
     }
 
     template <typename PredicateFn>
-    void Remove(PredicateFn fn)
+    bool Remove(PredicateFn fn)
     {
         DListNode<T>* node = head;
 
@@ -118,7 +141,7 @@ public:
             if (fn(node->data))
             {
                 Remove(node);
-                return;
+                return true;
             }
             // Advance: without this, a predicate that misses the head (e.g.
             // ClearTimeout for a timer sitting behind earlier-queued
@@ -127,6 +150,7 @@ public:
             // (gc-async-continuation, doc/e2-gc-async-continuation.md).
             node = node->next;
         }
+        return false;
     }
 
     template <typename PredicateFn>
@@ -139,7 +163,7 @@ public:
         }
     }
 
-    bool IsEmpty()
+    bool IsEmpty() const
     {
         return head == nullptr;
     }
@@ -156,7 +180,11 @@ private:
             node->prev->next = node->next;
         }
 
-        if (node->next != nullptr)
+        if (node->next == nullptr)
+        {
+            tail = node->prev;
+        }
+        else
         {
             node->next->prev = node->prev;
         }
@@ -166,15 +194,16 @@ private:
 
     void InsertAfter(DListNode<T>* newNode, DListNode<T>* node)
     {
-        // If the list is empty, just set head to newNode
+        // If the list is empty, set both head and tail to newNode.
         if (head == nullptr)
         {
-            Assert(node == nullptr);
+            Assert(node == nullptr && tail == nullptr);
             head = newNode;
+            tail = newNode;
             return;
         }
 
-        // If node is null here, we must be trying to insert before head
+        // If node is null here, insert before head.
         if (node == nullptr)
         {
             newNode->next = head;
@@ -187,15 +216,20 @@ private:
         newNode->next = node->next;
         newNode->prev = node;
 
-        if (node->next)
+        if (node->next != nullptr)
         {
             node->next->prev = newNode;
+        }
+        else
+        {
+            tail = newNode;
         }
 
         node->next = newNode;
     }
 
     DListNode<T>* head;
+    DListNode<T>* tail;
 };
 
 class MessageQueue
@@ -219,43 +253,47 @@ class MessageQueue
         }
     };
 
-    SortedList<ListEntry> m_queue;
+    // Separate O(1) FIFO queue for immediate (microtask) messages so queuing
+    // many promise continuations does not scan timed entries or vice versa.
+    SortedList<ListEntry> m_immediateQueue;
+    SortedList<ListEntry> m_timedQueue;
 
 public:
     // `immediate` marks a microtask message (a promise-continuation task
     // raised by the engine's JsSetPromiseContinuationCallback). ES job
     // semantics require the continuation queued by a finished callback to
-    // run before the next macrotask (timer), so immediate messages carry
-    // due time 0 -- strictly before every timed message, whose due time is
-    // always GetTickCount64()+delay (a large positive ms-since-boot value).
-    // SortedList inserts equal keys after existing entries, so immediate
-    // messages keep FIFO order among themselves. Without this, an immediate
-    // task stamped "now" could land after an already-queued timer whose
-    // absolute due time is <= now (a slow earlier callback overrunning a
-    // pending timer's deadline, or a timer stamped in the same millisecond),
-    // and the continuation would silently run after later timers -- observed
-    // as async functions never resuming (gc-async-continuation,
-    // doc/e2-gc-async-continuation.md).
+    // run before the next macrotask (timer), so immediate messages live in
+    // `m_immediateQueue` (logical due time 0, drained strictly before any
+    // entry in `m_timedQueue`, whose due time is always GetTickCount64()+delay).
+    // Without this, an immediate task stamped "now" could land after an
+    // already-queued timer whose absolute due time is <= now (a slow earlier
+    // callback overrunning a pending timer's deadline, or a timer stamped in
+    // the same millisecond), and the continuation would silently run after
+    // later timers -- observed as async functions never resuming
+    // (gc-async-continuation, doc/e2-gc-async-continuation.md).
     void InsertSorted(MessageBase *message, bool immediate = false)
     {
-        unsigned long long time;
         if (immediate)
         {
-            time = 0;
+            m_immediateQueue.Append(ListEntry(0, message));
         }
         else
         {
             message->BeginTimer();
-            time = message->GetTime();
+            m_timedQueue.Insert(ListEntry(message->GetTime(), message));
         }
-        m_queue.Insert(ListEntry(time, message));
     }
 
     MessageBase* PopAndWait()
     {
-        Assert(!m_queue.IsEmpty());
+        Assert(!IsEmpty());
 
-        ListEntry entry = m_queue.Pop();
+        if (!m_immediateQueue.IsEmpty())
+        {
+            return m_immediateQueue.Pop().message;
+        }
+
+        ListEntry entry = m_timedQueue.Pop();
         MessageBase *tmp = entry.message;
 
         // 64-bit difference: a far-future due time (e.g. UINT32_MAX ms from
@@ -272,24 +310,33 @@ public:
         return tmp;
     }
 
-    bool IsEmpty()
+    bool IsEmpty() const
     {
-        return m_queue.IsEmpty();
+        return m_immediateQueue.IsEmpty() && m_timedQueue.IsEmpty();
     }
 
     // Absolute due time of the earliest message. Requires !IsEmpty(); callers
     // use it to compute how long their event loop may block before a delayed
     // task (e.g. an Atomics.waitAsync timeout/monitor task) becomes due.
-    unsigned long long NextDueTime()
+    unsigned long long NextDueTime() const
     {
-        return m_queue.Peek().time;
+        Assert(!IsEmpty());
+        if (!m_immediateQueue.IsEmpty())
+        {
+            return 0;
+        }
+        return m_timedQueue.Peek().time;
     }
 
     // True when the earliest message's absolute due time has passed.
-    bool HasDueMessage()
+    bool HasDueMessage() const
     {
-        return !m_queue.IsEmpty() &&
-            (long long)(m_queue.Peek().time - GetTickCount64()) <= 0;
+        if (!m_immediateQueue.IsEmpty())
+        {
+            return true;
+        }
+        return !m_timedQueue.IsEmpty() &&
+            (long long)(m_timedQueue.Peek().time - GetTickCount64()) <= 0;
     }
 
     // Pop the earliest message iff it is already due; nullptr otherwise.
@@ -297,34 +344,41 @@ public:
     // due messages with its own wake events.
     MessageBase* PopDue()
     {
-        if (!HasDueMessage())
+        if (!m_immediateQueue.IsEmpty())
+        {
+            return m_immediateQueue.Pop().message;
+        }
+        if (m_timedQueue.IsEmpty() ||
+            (long long)(m_timedQueue.Peek().time - GetTickCount64()) > 0)
         {
             return nullptr;
         }
-        ListEntry entry = m_queue.Pop();
-        return entry.message;
+        return m_timedQueue.Pop().message;
     }
 
     void RemoveById(unsigned int id)
     {
-        // Search for the message with the correct id, and delete it. Can be updated
-        // to a hash to improve speed, if necessary.
-        m_queue.Remove([id](const ListEntry& entry) 
+        // Search for the message with the correct id, and delete it.
+        auto matchId = [id](const ListEntry& entry)
         {
             MessageBase *msg = entry.message;
-            if(msg->GetId() == id)
+            if (msg->GetId() == id)
             {
                 delete msg;
                 return true;
             }
 
             return false;
-        });
+        };
+        if (!m_timedQueue.Remove(matchId))
+        {
+            m_immediateQueue.Remove(matchId);
+        }
     }
 
     void RemoveTimerTask(JsValueRef task)
     {
-        m_queue.Remove([task](const ListEntry& entry)
+        auto matchTask = [task](const ListEntry& entry)
         {
             MessageBase *msg = entry.message;
             if (msg->IsTimerContinuationTask(task))
@@ -333,15 +387,21 @@ public:
                 return true;
             }
             return false;
-        });
+        };
+        if (!m_timedQueue.Remove(matchTask))
+        {
+            m_immediateQueue.Remove(matchTask);
+        }
     }
 
     void RemoveAll()
     {
-        m_queue.RemoveAll([](const ListEntry& entry) { 
+        auto destroyEntry = [](const ListEntry& entry) {
             MessageBase* msg = entry.message;
             delete msg;
-        });
+        };
+        m_immediateQueue.RemoveAll(destroyEntry);
+        m_timedQueue.RemoveAll(destroyEntry);
     }
 
     HRESULT ProcessAll(LPCSTR fileName)

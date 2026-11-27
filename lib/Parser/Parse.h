@@ -608,7 +608,11 @@ private:
     ParseNodeFnc *GetCurrentFunctionNode();
     ParseNodeFnc *GetCurrentNonLambdaFunctionNode();
 
-    bool NextTokenConfirmsLetDecl() const { return m_token.tk == tkID || m_token.tk == tkLBrack || m_token.tk == tkLCurly || m_token.IsReservedWord(); }
+    bool NextTokenConfirmsLetDecl(bool hadNewLine = false) const
+    {
+        return m_token.tk == tkID || m_token.tk == tkLBrack || m_token.tk == tkLCurly ||
+            (!hadNewLine && m_token.IsReservedWord() && m_token.tk != tkIN && m_token.tk != tkINSTANCEOF);
+    }
     bool NextTokenConfirmsUsingDecl() const { return m_token.tk == tkID; }
     void ValidateUsingPlacement();
     void ValidateAwaitUsingContext();

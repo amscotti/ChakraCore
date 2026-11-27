@@ -271,6 +271,27 @@ struct NodeEnv {
     napi_extended_error_info info{};
   };
   LastError last_error{};
+
+  // Cached captured engine intrinsics (owner-thread only).
+  // Ownership record (memory-management.md section 3):
+  //   Resource: NodeEnv::cached_intrinsics JsValueRef slots.
+  //   Domain/allocator: Chakra Recycler roots held via JsAddRef on env->context
+  //     (never exposed directly as user napi_values).
+  //   Owner/transfer: NodeEnv owns each non-JS_INVALID_REFERENCE slot;
+  //     GetCached* helpers return a borrowed JsValueRef strictly within a
+  //     live call on the owner thread.
+  //   Invalidation/release: TeardownPromiseScript releases every slot via
+  //     JsRelease under ContextGuard (destroy step 6c, before Dead and
+  //     JsDisposeRuntime).
+  //   Thread/context: owner_thread only with env->context current.
+  struct CachedIntrinsics {
+    JsValueRef object_freeze = JS_INVALID_REFERENCE;
+    JsValueRef object_seal = JS_INVALID_REFERENCE;
+    JsValueRef arraybuffer_detached_getter = JS_INVALID_REFERENCE;
+    JsValueRef dataview_buffer_getter = JS_INVALID_REFERENCE;
+    JsValueRef dataview_byte_offset_getter = JS_INVALID_REFERENCE;
+  };
+  CachedIntrinsics cached_intrinsics{};
 };
 
 // Registry lookup by pointer value WITHOUT dereferencing the pointer
@@ -476,6 +497,22 @@ size_t DebugTotalEnvCount() noexcept;
 // Hidden visibility: not exported from the release dylib.
 CHAKRA_NODEAPI_HIDDEN
 size_t DebugDeadEnvCount() noexcept;
+
+// Owner-thread read helpers for module_api_version and captured intrinsics.
+// GetCached* return borrowed JsValueRefs owned by NodeEnv::cached_intrinsics
+// (or JS_INVALID_REFERENCE if unavailable or env is not live on owner thread).
+CHAKRA_NODEAPI_HIDDEN
+std::uint32_t GetModuleApiVersion(napi_env env);
+CHAKRA_NODEAPI_HIDDEN
+JsValueRef GetCachedObjectFreeze(napi_env env);
+CHAKRA_NODEAPI_HIDDEN
+JsValueRef GetCachedObjectSeal(napi_env env);
+CHAKRA_NODEAPI_HIDDEN
+JsValueRef GetCachedArrayBufferDetachedGetter(napi_env env);
+CHAKRA_NODEAPI_HIDDEN
+JsValueRef GetCachedDataViewBufferGetter(napi_env env);
+CHAKRA_NODEAPI_HIDDEN
+JsValueRef GetCachedDataViewByteOffsetGetter(napi_env env);
 
 } /* namespace nodeapi */
 

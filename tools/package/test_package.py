@@ -23,6 +23,17 @@ import sys
 import tarfile
 import tempfile
 
+DEFAULT_SUBPROCESS_TIMEOUT = 60
+
+
+def _run_subprocess(cmd, timeout=DEFAULT_SUBPROCESS_TIMEOUT, **kwargs):
+    try:
+        return subprocess.run(cmd, timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "Command {} timed out after {}s".format(cmd[0], timeout)
+        ) from exc
+
 
 def get_repo_root():
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +69,8 @@ def is_native_binary(path):
     return not head.startswith(b"#!")
 
 
-def check_macos_no_external_homebrew(package_dir, bin_paths, lib_paths):
+def check_macos_no_external_homebrew(package_dir, bin_paths, lib_paths,
+                                     timeout=DEFAULT_SUBPROCESS_TIMEOUT):
     if sys.platform != "darwin":
         return
     for p in bin_paths + lib_paths:
@@ -71,7 +83,7 @@ def check_macos_no_external_homebrew(package_dir, bin_paths, lib_paths):
                          b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
                          b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"):
             continue
-        res = subprocess.run(["otool", "-L", p], capture_output=True, text=True)
+        res = _run_subprocess(["otool", "-L", p], timeout=timeout, capture_output=True, text=True)
         if res.returncode != 0:
             raise RuntimeError("otool -L failed on {}: {}".format(p, res.stderr))
         for line in res.stdout.splitlines()[1:]:
@@ -83,7 +95,8 @@ def check_macos_no_external_homebrew(package_dir, bin_paths, lib_paths):
                 )
 
 
-def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_profile=None):
+def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_profile=None,
+                            timeout=DEFAULT_SUBPROCESS_TIMEOUT):
     # Check for single nested root directory
     manifest_p = os.path.join(package_dir, "MANIFEST.json")
     if not os.path.isfile(manifest_p):
@@ -165,7 +178,8 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
 
         if is_darwin and pkg_icu_mode == "bundled":
             check_macos_no_external_homebrew(
-                package_dir, [ch_bin, ch_nodeapi_bin], [core_lib, nodeapi_lib])
+                package_dir, [ch_bin, ch_nodeapi_bin], [core_lib, nodeapi_lib],
+                timeout=timeout)
 
     # Clean environment: ensure DYLD_LIBRARY_PATH and LD_LIBRARY_PATH are unset
     # so we strictly test rpath resolution relative to the binary!
@@ -175,8 +189,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
 
     # 1. Test: <dir>/bin/ch --version
     print("--- Test 1: {} --version ---".format(ch_bin))
-    res1 = subprocess.run(
+    res1 = _run_subprocess(
         [ch_bin, "--version"],
+        timeout=timeout,
         capture_output=True,
         text=True,
         env=clean_env
@@ -191,8 +206,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
 
     # 2. Test: <dir>/bin/ch -e "console.log('package smoke')"
     print("--- Test 2: {} -e \"console.log('package smoke')\" ---".format(ch_bin))
-    res2 = subprocess.run(
+    res2 = _run_subprocess(
         [ch_bin, "-e", "console.log('package smoke')"],
+        timeout=timeout,
         capture_output=True,
         text=True,
         env=clean_env
@@ -203,8 +219,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
             tf.write("console.log('package smoke');\n")
             temp_snippet = tf.name
         try:
-            res2 = subprocess.run(
+            res2 = _run_subprocess(
                 [ch_bin, temp_snippet],
+                timeout=timeout,
                 capture_output=True,
                 text=True,
                 env=clean_env
@@ -224,8 +241,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
     print("--- Test 3: {} dynamic library resolution ---".format(ch_nodeapi_bin))
 
     # 3a. First verify ch-nodeapi executes and resolves @executable_path/../lib/libChakraCore
-    res3_help = subprocess.run(
+    res3_help = _run_subprocess(
         [ch_nodeapi_bin, "--help"],
+        timeout=timeout,
         capture_output=True,
         text=True,
         env=clean_env
@@ -267,7 +285,7 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
             print("Found compiled addon: {}".format(addon_node))
             cmd3 = [ch_nodeapi_bin, addon_node, case_file]
             print("Running: {}".format(" ".join(cmd3)))
-            res3 = subprocess.run(cmd3, capture_output=True, text=True, env=clean_env)
+            res3 = _run_subprocess(cmd3, timeout=timeout, capture_output=True, text=True, env=clean_env)
             out3 = (res3.stdout or "").strip()
             print("ch-nodeapi output:\n{}".format(out3))
             if res3.returncode != 0:
@@ -280,7 +298,7 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
             # <dir>/bin/ch-nodeapi tools/nodeapi/cases/hello_world.js
             cmd3 = [ch_nodeapi_bin, case_file]
             print("Running: {}".format(" ".join(cmd3)))
-            res3 = subprocess.run(cmd3, capture_output=True, text=True, env=clean_env)
+            res3 = _run_subprocess(cmd3, timeout=timeout, capture_output=True, text=True, env=clean_env)
             # Verify dynamic linker succeeded (no dyld / dlopen / Win32 DLL loader error)
             stderr_out = res3.stderr or ""
             if ("dyld: Library not loaded" in stderr_out
@@ -317,7 +335,7 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
             )
             intl_js = tf.name
         try:
-            res4 = subprocess.run([ch_bin, intl_js], capture_output=True, text=True, env=clean_env)
+            res4 = _run_subprocess([ch_bin, intl_js], timeout=timeout, capture_output=True, text=True, env=clean_env)
         finally:
             if os.path.exists(intl_js):
                 os.remove(intl_js)
@@ -364,8 +382,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
             "print('dlopen-ok:' + os.path.basename(p))"
         )
         with tempfile.TemporaryDirectory(prefix="chakra-pkg-dlopen-cwd-") as outside_dir:
-            res5 = subprocess.run(
+            res5 = _run_subprocess(
                 [sys.executable, "-c", dl_code, provider_lib],
+                timeout=timeout,
                 cwd=outside_dir,
                 env=dl_env,
                 capture_output=True,
@@ -379,8 +398,9 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None, expected_pro
                 )
             print("Out-of-tree cwd provider-first dlopen succeeded: {}".format((res5.stdout or "").strip()))
             if ch_nodeapi_bin and _is_real_shared_lib(ch_nodeapi_bin):
-                res5_host = subprocess.run(
+                res5_host = _run_subprocess(
                     [ch_nodeapi_bin, "--help"],
+                    timeout=timeout,
                     cwd=outside_dir,
                     env=dl_env,
                     capture_output=True,
@@ -429,8 +449,12 @@ def main(argv=None):
                         help="Path to nodeapi case JS file (default: tools/nodeapi/cases/hello_world.js)")
     parser.add_argument("--repo-root", default=None,
                         help="ChakraCore repository root")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_SUBPROCESS_TIMEOUT,
+                        help="Subprocess timeout in seconds (default: {})".format(DEFAULT_SUBPROCESS_TIMEOUT))
 
     args = parser.parse_args(argv)
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
 
     target_path = args.tarball or args.dir or args.target
     if not target_path:
@@ -448,7 +472,7 @@ def main(argv=None):
                     tar.extractall(path=tmpdir, filter="data")
                 else:
                     tar.extractall(path=tmpdir)
-            run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile)
+            run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile, timeout=args.timeout)
     elif os.path.isdir(target_path):
         tb = find_tarball_in_dir(target_path, expected_profile=args.profile)
         has_ch = (
@@ -463,9 +487,9 @@ def main(argv=None):
                         tar.extractall(path=tmpdir, filter="data")
                     else:
                         tar.extractall(path=tmpdir)
-                run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile)
+                run_package_smoke_tests(tmpdir, repo_root, args.case, expected_profile=args.profile, timeout=args.timeout)
         else:
-            run_package_smoke_tests(target_path, repo_root, args.case, expected_profile=args.profile)
+            run_package_smoke_tests(target_path, repo_root, args.case, expected_profile=args.profile, timeout=args.timeout)
     else:
         print("Error: Target path '{}' does not exist".format(target_path), file=sys.stderr)
         sys.exit(1)

@@ -112,11 +112,21 @@ using namespace Js;
         auto* library = scriptContext->GetLibrary();
         auto* generatorFunction = VarTo<JavascriptGeneratorFunction>(function);
 
-        Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
+        FunctionInfo* funcInfo = generatorFunction->scriptFunction->GetFunctionInfo();
+        const bool hasComplexInit = funcInfo->GetGeneratorWithComplexParams() || funcInfo->IsModule();
+        DynamicObject* defaultProto = library->GetGeneratorPrototype();
+        DynamicObject* protoObject = defaultProto;
 
-        // fall back to the original prototype if we have an invalid prototype object
-        DynamicObject* protoObject = VarIs<DynamicObject>(prototype) ?
-            UnsafeVarTo<DynamicObject>(prototype) : library->GetGeneratorPrototype();
+        if (!hasComplexInit)
+        {
+            Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
+
+            // fall back to the original prototype if we have an invalid prototype object
+            if (VarIs<DynamicObject>(prototype))
+            {
+                protoObject = UnsafeVarTo<DynamicObject>(prototype);
+            }
+        }
 
         JavascriptGenerator* generator = library->CreateGenerator(
             args,
@@ -124,13 +134,27 @@ using namespace Js;
             protoObject);
 
         // Call a next on the generator to execute till the beginning of the body
-        FunctionInfo* funcInfo = generatorFunction->scriptFunction->GetFunctionInfo();
-        if (funcInfo->GetGeneratorWithComplexParams() || funcInfo->IsModule())
-        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        if (hasComplexInit)
         {
-            generator->CallGenerator(library->GetUndefined(), ResumeYieldKind::Normal);
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                generator->CallGenerator(library->GetUndefined(), ResumeYieldKind::Normal);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            // ES2024 10.2.1 / 13.3.6.1: parameter initializers run before creating the
+            // generator object with OrdinaryCreateFromConstructor(function, "%GeneratorPrototype%"),
+            // so read `function.prototype` after complex parameter init completes.
+            Var prototype = JavascriptOperators::GetPropertyNoCache(function, Js::PropertyIds::prototype, scriptContext);
+            if (VarIs<DynamicObject>(prototype))
+            {
+                DynamicObject* postProto = UnsafeVarTo<DynamicObject>(prototype);
+                if (postProto != defaultProto)
+                {
+                    JavascriptObject::ChangePrototype(generator, postProto, /*shouldThrow=*/false, scriptContext);
+                }
+            }
         }
-        END_SAFE_REENTRANT_CALL
 
         generator->SetSuspendedStart();
 

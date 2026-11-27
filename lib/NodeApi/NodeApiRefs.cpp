@@ -92,13 +92,15 @@
 
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <new>
 #include <unordered_map>
 
 /* One napi_ref record. `count` is authoritative (R2); `is_strong`
  * tracks which Js handle is currently held. Dead records are retained
- * (root already released) until teardown so double-delete /
- * use-after-delete is a clean napi_invalid_arg. */
+ * in a bounded FIFO tombstone queue (capped at nodeapi::kDeadEnvCap)
+ * so recent double-delete / use-after-delete is a clean napi_invalid_arg
+ * without unbounded per-env growth (GR-NA9). */
 struct NodeApiRefRecord {
   uint32_t count = 0;
   bool dead = false;
@@ -116,6 +118,7 @@ struct NodeApiRefRecord {
  * get_reference_value roots live in the N1.2 scope stack. */
 struct NodeApiRefsState {
   std::unordered_map<napi_ref, NodeApiRefRecord*> refs;
+  std::deque<napi_ref> retired_refs;
   size_t baseline = 0;
 };
 
@@ -329,6 +332,7 @@ void teardown_state(RefsState* st) {
     delete rec;
   }
   st->refs.clear();
+  st->retired_refs.clear();
 }
 
 } /* namespace */
@@ -443,8 +447,9 @@ napi_status NAPI_CDECL napi_create_reference(napi_env env, napi_value value,
   JsValueType type = JsUndefined;
   JsErrorCode te = JsGetValueType(jsv, &type);
   if (te != JsNoError) return map_js(env, te, "JsGetValueType");
-  if (!is_allowed_type(type)) {
-    /* v8 restriction: object/function/symbol/external only. No
+  if (nodeapi::GetModuleApiVersion(env) < 10 && !is_allowed_type(type)) {
+    /* v8 restriction: object/function/symbol/external only (v10 allows
+     * references to any ECMAScript value including primitives). No
      * partial root is created (P3-7 counter unchanged). */
     nodeapi::SetLastError(env, napi_invalid_arg, "create_reference disallowed v8 type");
     return napi_invalid_arg;
@@ -667,6 +672,21 @@ napi_status NAPI_CDECL napi_delete_reference(node_api_basic_env env_raw,
   rec->strong_value = JS_INVALID_REFERENCE;
   rec->weak_handle = JS_INVALID_REFERENCE;
   nodeapi_wrap_cancel_by_ref(env, ref);
+  while (st->retired_refs.size() >= nodeapi::kDeadEnvCap) {
+    napi_ref oldest = st->retired_refs.front();
+    st->retired_refs.pop_front();
+    auto oit = st->refs.find(oldest);
+    if (oit != st->refs.end()) {
+      delete oit->second;
+      st->refs.erase(oit);
+    }
+  }
+  try {
+    st->retired_refs.push_back(ref);
+  } catch (...) {
+    st->refs.erase(ref);
+    delete rec;
+  }
   nodeapi::ClearLastError(env);
   return napi_ok;
 }

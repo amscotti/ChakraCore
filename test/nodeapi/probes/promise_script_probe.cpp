@@ -1120,6 +1120,33 @@ int main() {
     std::printf("phaseA8-3: done\n");
   }
 
+  /* ========== GR-NA9: bounded settled deferred tombstones ========== */
+  {
+    napi_env env = chakra_nodeapi_create_env(g_runtime, g_context, "gr-na9",
+                                             nullptr, nullptr);
+    Check(env != nullptr, "GR-NA9 env created");
+    JsValueRef undef = JS_INVALID_REFERENCE;
+    JsGetUndefinedValue(&undef);
+    bool all_ok = true;
+    for (int i = 0; i < 600; ++i) {
+      napi_handle_scope sc = nullptr;
+      napi_deferred def = nullptr;
+      napi_value prom = nullptr;
+      if (napi_open_handle_scope(env, &sc) != napi_ok ||
+          napi_create_promise(env, &def, &prom) != napi_ok ||
+          napi_resolve_deferred(env, def, reinterpret_cast<napi_value>(undef)) != napi_ok ||
+          napi_close_handle_scope(env, sc) != napi_ok) {
+        all_ok = false;
+        break;
+      }
+    }
+    Check(all_ok, "GR-NA9 600 create+resolve promises ok");
+    Check(NodeApiPromise_DeferredCount(env) <= 256,
+          "GR-NA9 settled deferred tombstones bounded <= 256");
+    chakra_nodeapi_destroy_env(env);
+    std::printf("phaseGR-NA9: done\n");
+  }
+
   std::printf("promise_script_probe: %d checks, %d failures\n", g_checks, g_failures);
   ShutdownEngine();
   return g_failures == 0 ? 0 : 1;

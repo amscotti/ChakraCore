@@ -847,4 +847,10 @@
       <files>async-generator-yield-throwing-thenable.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>gr_runtime_regressions.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

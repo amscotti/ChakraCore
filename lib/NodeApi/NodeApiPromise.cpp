@@ -38,6 +38,7 @@
 #include "ChakraCore.h"
 
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <new>
 #include <unordered_map>
@@ -81,6 +82,7 @@ struct PromiseQueue {
 
 struct PromiseState {
   std::unordered_map<napi_deferred, DeferredRecord*> deferreds;
+  std::deque<napi_deferred> retired_deferreds;
   PromiseQueue* queue = nullptr;
   JsContextRef installed_context = JS_INVALID_REFERENCE;
 };
@@ -156,6 +158,25 @@ void ReleaseRecord(DeferredRecord* rec) {
   delete rec;
 }
 
+void RetireSettledDeferred(PromiseState* st, napi_deferred deferred,
+                           DeferredRecord* rec) {
+  while (st->retired_deferreds.size() >= nodeapi::kDeadEnvCap) {
+    napi_deferred oldest = st->retired_deferreds.front();
+    st->retired_deferreds.pop_front();
+    auto oit = st->deferreds.find(oldest);
+    if (oit != st->deferreds.end()) {
+      delete oit->second;
+      st->deferreds.erase(oit);
+    }
+  }
+  try {
+    st->retired_deferreds.push_back(deferred);
+  } catch (...) {
+    st->deferreds.erase(deferred);
+    delete rec;
+  }
+}
+
 /* Shared settle body. `use_reject` selects reject vs resolve. */
 napi_status SettleCommon(napi_env env, napi_deferred deferred,
                          napi_value value, bool use_reject,
@@ -189,6 +210,7 @@ napi_status SettleCommon(napi_env env, napi_deferred deferred,
   if (callee == JS_INVALID_REFERENCE) {
     /* Should be unreachable (roots held until settle), but treat as
      * generic_failure rather than calling an invalid value. */
+    RetireSettledDeferred(st, deferred, rec);
     nodeapi::SetLastError(env, napi_generic_failure, what);
     return napi_generic_failure;
   }
@@ -207,6 +229,7 @@ napi_status SettleCommon(napi_env env, napi_deferred deferred,
       (void)JsRelease(rec->reject_fn, nullptr);
       rec->reject_fn = JS_INVALID_REFERENCE;
     }
+    RetireSettledDeferred(st, deferred, rec);
     return MapJs(env, ec, what);
   }
   JsValueRef args[2] = {undef, reinterpret_cast<JsValueRef>(value)};
@@ -222,6 +245,7 @@ napi_status SettleCommon(napi_env env, napi_deferred deferred,
     (void)JsRelease(rec->reject_fn, nullptr);
     rec->reject_fn = JS_INVALID_REFERENCE;
   }
+  RetireSettledDeferred(st, deferred, rec);
   if (ec != JsNoError) {
     return MapJs(env, ec, what);
   }
@@ -250,6 +274,7 @@ void NodeApiPromise_DestroyForEnv(napi_env env) {
     ReleaseRecord(kv.second);
   }
   st->deferreds.clear();
+  st->retired_deferreds.clear();
 
   PromiseQueue* q = st->queue;
   JsContextRef ctx = st->installed_context;

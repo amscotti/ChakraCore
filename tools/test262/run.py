@@ -17,12 +17,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 LOCK = json.loads((HERE / 'test262.lock.json').read_text())
 DEFAULT_PATTERNS = ('test/language/**/*.js', 'test/built-ins/**/*.js', 'test/annexB/**/*.js')
 INTL402_PATTERN = 'test/intl402/**/*.js'
+DEFAULT_GIT_TIMEOUT = 30
+DEFAULT_FETCH_TIMEOUT = 300
+DEFAULT_RUN_TIMEOUT = 7200
+DEFAULT_CONTROLS_TIMEOUT = 300
+DEFAULT_WAIT_TIMEOUT = 30
 
 
 def resolve_patterns(patterns, intl402=False):
@@ -76,9 +82,11 @@ def engine_identity():
     """
     try:
         commit = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
-                                         text=True, stderr=subprocess.DEVNULL).strip()
+                                         text=True, stderr=subprocess.DEVNULL,
+                                         timeout=DEFAULT_GIT_TIMEOUT).strip()
         dirty = bool(subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain'],
-                                             text=True, stderr=subprocess.DEVNULL).strip())
+                                             text=True, stderr=subprocess.DEVNULL,
+                                             timeout=DEFAULT_GIT_TIMEOUT).strip())
     except (OSError, subprocess.SubprocessError):
         return None, None
     return commit, dirty
@@ -88,17 +96,20 @@ def checkout(directory, prepare):
     if prepare:
         if not (directory / '.git').is_dir():
             directory.mkdir(parents=True, exist_ok=True)
-            subprocess.run(['git', 'init', str(directory)], check=True)
+            subprocess.run(['git', 'init', str(directory)], check=True,
+                           timeout=DEFAULT_GIT_TIMEOUT)
             subprocess.run(['git', '-C', str(directory), 'remote', 'add', 'origin',
-                            LOCK['repository']], check=True)
+                            LOCK['repository']], check=True, timeout=DEFAULT_GIT_TIMEOUT)
         subprocess.run(['git', '-C', str(directory), 'fetch', '--depth=1', 'origin',
-                        LOCK['revision']], check=True)
+                        LOCK['revision']], check=True, timeout=DEFAULT_FETCH_TIMEOUT)
         subprocess.run(['git', '-C', str(directory), 'checkout', '--detach',
-                        LOCK['revision']], check=True)
-    revision = subprocess.check_output(['git', '-C', str(directory), 'rev-parse', 'HEAD'], text=True).strip()
+                        LOCK['revision']], check=True, timeout=DEFAULT_FETCH_TIMEOUT)
+    revision = subprocess.check_output(['git', '-C', str(directory), 'rev-parse', 'HEAD'],
+                                       text=True, timeout=DEFAULT_GIT_TIMEOUT).strip()
     if revision != LOCK['revision']:
         raise ValueError('test262 revision differs from test262.lock.json; run --prepare')
-    dirty = subprocess.check_output(['git', '-C', str(directory), 'status', '--porcelain'], text=True)
+    dirty = subprocess.check_output(['git', '-C', str(directory), 'status', '--porcelain'],
+                                    text=True, timeout=DEFAULT_GIT_TIMEOUT)
     if dirty:
         raise ValueError('test262 checkout is modified; use a clean pinned checkout')
 
@@ -144,6 +155,23 @@ def harness(binary, corpus, patterns, output, args, controls=False):
         with output.open('w') as raw, errors.open('w') as stderr:
             process = subprocess.Popen(command, cwd=corpus, stdout=subprocess.PIPE,
                                        stderr=stderr, text=True, encoding='utf-8', env=environment)
+            run_timeout = getattr(args, 'run_timeout', DEFAULT_RUN_TIMEOUT)
+            if controls and (run_timeout is None or run_timeout <= 0 or run_timeout > DEFAULT_CONTROLS_TIMEOUT):
+                effective_timeout = DEFAULT_CONTROLS_TIMEOUT
+            else:
+                effective_timeout = run_timeout
+            timed_out = [False]
+            timer = None
+            if effective_timeout and effective_timeout > 0:
+                def _kill_on_timeout():
+                    timed_out[0] = True
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                timer = threading.Timer(effective_timeout, _kill_on_timeout)
+                timer.daemon = True
+                timer.start()
             try:
                 for line in process.stdout:
                     raw.write(line)
@@ -166,11 +194,24 @@ def harness(binary, corpus, patterns, output, args, controls=False):
                     records.append(record)
                     if len(records) % 5000 == 0:
                         print(f'  {len(records)} scenarios completed', flush=True)
+                if timed_out[0]:
+                    raise subprocess.TimeoutExpired(command, effective_timeout)
+                try:
+                    rc = process.wait(timeout=DEFAULT_WAIT_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=DEFAULT_WAIT_TIMEOUT)
+                    raise
             except BaseException:
                 process.kill()
-                process.wait()
+                try:
+                    process.wait(timeout=DEFAULT_WAIT_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    pass
                 raise
-            rc = process.wait()
+            finally:
+                if timer is not None:
+                    timer.cancel()
         if rc or not records or not opened or not closed:
             raise ValueError(f'harness failed or emitted no scenarios (rc={rc}); see {errors}')
         skips = [json.loads(line[len('TEST262_SKIP:'):]) for line in errors.read_text().splitlines()
@@ -316,6 +357,8 @@ def build_parser():
     parser.add_argument('--node', default='node')
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--timeout', type=int, default=10000, help='per-scenario timeout, milliseconds')
+    parser.add_argument('--run-timeout', type=int, default=DEFAULT_RUN_TIMEOUT,
+                        help='overall harness wall timeout in seconds (0 disables)')
     parser.add_argument('--host-flags', default='-nonative -Test262 -CollectGarbage -NegativePhaseReport')
     parser.add_argument('patterns', nargs='*', help='quoted test262-relative globs')
     return parser
@@ -325,8 +368,8 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     args.binary, args.checkout, args.output = (path.resolve() for path in (args.binary, args.checkout, args.output))
-    if args.jobs <= 0 or args.timeout <= 0:
-        parser.error('--jobs and --timeout must be positive')
+    if args.jobs <= 0 or args.timeout <= 0 or args.run_timeout < 0:
+        parser.error('--jobs and --timeout must be positive and --run-timeout non-negative')
     if not args.binary.is_file():
         parser.error('--binary does not exist')
     if not (HERE / 'node_modules/test262-harness/bin/run.js').is_file():
@@ -418,7 +461,8 @@ def main():
         'engine_dylib_sha256': digest(engine_dylib) if engine_dylib else None,
         'shared_libraries': {path.name: digest(path) for path in shared},
         'package_lock_sha256': digest(HERE / 'package-lock.json'),
-        'node_version': subprocess.check_output([args.node, '--version'], text=True).strip(),
+        'node_version': subprocess.check_output(
+            [args.node, '--version'], text=True, timeout=DEFAULT_GIT_TIMEOUT).strip(),
         'host_flags': args.host_flags, 'patterns': patterns, 'command': command,
         'jobs': args.jobs, 'timeout_ms': args.timeout,
         'host_exclusions': ['IsHTMLDDA', 'CanBlockIsFalse'],

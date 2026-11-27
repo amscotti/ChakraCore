@@ -626,6 +626,30 @@ int main() {
   }
   std::printf("phase10 (external-detach-teardown): done\n");
 
+  // ===== Phase 11: GR-NA9 bounded async cleanup hook churn (5000 cycles) =====
+  {
+    napi_env env = chakra_nodeapi_create_env(
+        FakeRuntime(), FakeContext(), "phase11", nullptr, nullptr);
+    Check(env != nullptr, "phase11: create");
+    auto noop_hook = [](napi_async_cleanup_hook_handle, void*) {};
+    bool all_ok = true;
+    for (int i = 0; i < 5000; ++i) {
+      napi_async_cleanup_hook_handle h = nullptr;
+      if (napi_add_async_cleanup_hook(env, noop_hook, nullptr, &h) != napi_ok ||
+          h == nullptr) {
+        all_ok = false;
+        break;
+      }
+      if (napi_remove_async_cleanup_hook(h) != napi_ok) {
+        all_ok = false;
+        break;
+      }
+    }
+    Check(all_ok, "phase11: 5000 add/remove async cleanup hooks succeeded");
+    chakra_nodeapi_destroy_env(env);
+  }
+  std::printf("phase11 (gr-na9-churn): done\n");
+
   std::printf("teardown_probe: %d checks, %d failures\n", g_checks,
               g_failures);
   ShutdownEngine();

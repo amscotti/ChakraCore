@@ -32,6 +32,8 @@ import uuid
 import os
 
 # Parse provided parameters
+DEFAULT_BUILD_TIMEOUT = 1800
+DEFAULT_GEN_TIMEOUT = 120
 verification_mode = False
 skip_build = False
 noJit = True
@@ -39,6 +41,7 @@ jit = True
 x86 = False
 overide_binary = ""
 allow_single_variant_write = False
+subprocess_timeout = None
 
 for param in sys.argv:
     if param == '--skip-build':
@@ -58,6 +61,8 @@ for param in sys.argv:
     elif param[:9] == '--binary=':
         overide_binary = param[9:]
         skip_build = True
+    elif param[:10] == '--timeout=':
+        subprocess_timeout = int(param[10:])
 
 # Detect OS
 windows = False
@@ -85,11 +90,26 @@ if x86 == True:
 # Adjust path for running from different locations
 base_path = os.path.abspath(os.path.dirname(__file__))
 
+def wait_with_timeout(proc, timeout_sec, error, commands):
+    if sys.version_info[0] >= 3 and timeout_sec and timeout_sec > 0:
+        try:
+            proc.wait(timeout=timeout_sec)
+            return
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            print(error + (' (timed out after %ss)' % timeout_sec))
+            print('Command line: ')
+            print(*commands)
+            sys.exit(1)
+    proc.wait()
+
 # Compile ChakraCore both noJit and Jit variants (unless disabled by args)
 def run_sub(message, commands, error):
     print(message)
     sub = subprocess.Popen(commands, shell=windows)
-    sub.wait()
+    timeout_sec = subprocess_timeout if subprocess_timeout is not None else DEFAULT_BUILD_TIMEOUT
+    wait_with_timeout(sub, timeout_sec, error, commands)
     if sub.returncode != 0:
         print(error)
         sys.exit(1)
@@ -145,7 +165,8 @@ def append_bytecode(header, command, in_path, file_name, error):
     header.write(file_name[:-3])
     header.flush()
     job = subprocess.Popen(command_with_file, stdout=header)
-    job.wait()
+    timeout_sec = subprocess_timeout if subprocess_timeout is not None else DEFAULT_GEN_TIMEOUT
+    wait_with_timeout(job, timeout_sec, error, command_with_file)
     if job.returncode != 0:
         print(error)
         print('Command line: ')

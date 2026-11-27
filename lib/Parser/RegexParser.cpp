@@ -5528,6 +5528,9 @@ namespace UnifiedRegex
         codepoint_t lastCodepoint = INVALID_CODEPOINT;
         codepoint_t pendingRangeStart = INVALID_CODEPOINT;
         codepoint_t pendingRangeEnd = INVALID_CODEPOINT;
+        bool lastCodepointIsExtended = false;
+        bool pendingRangeStartIsExtended = false;
+        bool pendingRangeEndIsExtended = false;
         bool previousSurrogatePart = false;
 
         while(nextChar != ']')
@@ -5543,21 +5546,27 @@ namespace UnifiedRegex
             else if (nextChar == '\\')
             {
                 // Consume, as classescapepass0 expects for it to be consumed
+                const bool startsWithExtendedUnicodeEscape =
+                    (ECLookahead(1) == 'u' && ECLookahead(2) == '{');
                 Char outChar = NextChar();
                 // If previousSurrogatePart = true upon leaving this method, then we are going to pass through here twice
                 // This is because \u{} escape sequence was encountered that is actually 2 characters, the second time we will pass consuming entire character
                 if (ClassEscapePass0(outChar, previousSurrogatePart))
                 {
                     lastCodepoint = outChar;
+                    lastCodepointIsExtended = startsWithExtendedUnicodeEscape &&
+                        (previousSurrogatePart || (next > current + 2));
                 }
                 else
                 {
                     // Last codepoint isn't a singleton, so no codepoint tracking for the sake of ranges is needed.
                     lastCodepoint = INVALID_CODEPOINT;
+                    lastCodepointIsExtended = false;
                     // Unless we have a possible range end, cancel our range tracking.
                     if (pendingRangeEnd == INVALID_CODEPOINT)
                     {
                         pendingRangeStart = INVALID_CODEPOINT;
+                        pendingRangeStartIsExtended = false;
                     }
                 }
             }
@@ -5569,6 +5578,7 @@ namespace UnifiedRegex
                     // OR
                     // '-' is just a char, consume it and set as last char
                     lastCodepoint = NextChar();
+                    lastCodepointIsExtended = false;
                 }
                 else if (ECLookahead(1) == '-' &&
                          scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() &&
@@ -5598,6 +5608,7 @@ namespace UnifiedRegex
                     NextChar(); // first dash
                     NextChar(); // second dash
                     lastCodepoint = INVALID_CODEPOINT;
+                    lastCodepointIsExtended = false;
                     this->tempLocationOfSurrogatePair = nullptr;
                 }
                 else
@@ -5605,7 +5616,9 @@ namespace UnifiedRegex
                     pendingRangeStart = this->next == this->positionAfterLastSurrogate
                         ? this->valueOfLastSurrogate
                         : lastCodepoint;
+                    pendingRangeStartIsExtended = lastCodepointIsExtended;
                     lastCodepoint = INVALID_CODEPOINT;
+                    lastCodepointIsExtended = false;
                     NextChar();
                 }
 
@@ -5629,6 +5642,7 @@ namespace UnifiedRegex
             else
             {
                 lastCodepoint = NextChar();
+                lastCodepointIsExtended = false;
 
                 if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
                 {
@@ -5648,6 +5662,7 @@ namespace UnifiedRegex
                         Fail(JSERR_RegExpBadRange);
                     }
                     pendingRangeStart = lastCodepoint = INVALID_CODEPOINT;
+                    pendingRangeStartIsExtended = lastCodepointIsExtended = false;
                 }
             }
             // We have a candidate for range end, and we have a range start.
@@ -5660,14 +5675,17 @@ namespace UnifiedRegex
                     lastCodepoint = this->valueOfLastSurrogate;
                     Assert(!previousSurrogatePart);
                     pendingRangeEnd = lastCodepoint;
+                    pendingRangeEndIsExtended = pendingRangeEndIsExtended || lastCodepointIsExtended;
 
                     lastCodepoint = INVALID_CODEPOINT;
+                    lastCodepointIsExtended = false;
                 }
                 // If the next character is the end of range ']', then we can't have a surrogate pair.
                 // The current character is the range end, if we don't already have a candidate.
                 else if (ECLookahead() == ']' && pendingRangeEnd == INVALID_CODEPOINT)
                 {
                     pendingRangeEnd = lastCodepoint;
+                    pendingRangeEndIsExtended = lastCodepointIsExtended;
                 }
 
                 //If we get here, and pendingRangeEnd is set. Then one of the above has caused it to be set, or the previous iteration of the loop.
@@ -5675,7 +5693,13 @@ namespace UnifiedRegex
                 {
                     char16 leftSingleChar, rightSingleChar, ignore;
 
-                    if (pendingRangeStart >= 0x10000)
+                    if (pendingRangeStartIsExtended)
+                    {
+                        // Without u/v, \u{...} is the identity escape 'u' followed by
+                        // literal '{...}', so the char immediately preceding '-' is '}'.
+                        leftSingleChar = '}';
+                    }
+                    else if (pendingRangeStart >= 0x10000)
                     {
                         Js::NumberUtilities::CodePointAsSurrogatePair(pendingRangeStart, &ignore, &leftSingleChar);
                     }
@@ -5684,7 +5708,13 @@ namespace UnifiedRegex
                         leftSingleChar = (char16)pendingRangeStart;
                     }
 
-                    if (pendingRangeEnd >= 0x10000)
+                    if (pendingRangeEndIsExtended)
+                    {
+                        // Without u/v, \u{...} starts with the identity escape 'u',
+                        // so the char immediately following '-' is 'u'.
+                        rightSingleChar = 'u';
+                    }
+                    else if (pendingRangeEnd >= 0x10000)
                     {
                         Js::NumberUtilities::CodePointAsSurrogatePair(pendingRangeEnd, &rightSingleChar, &ignore);
                     }
@@ -5695,7 +5725,14 @@ namespace UnifiedRegex
 
                     // Here it is a bit tricky, we don't know if we have a unicode option specified.
                     // If it is, then \ud800\udc00 - \ud800\udc01 is valid, otherwise invalid.
-                    if (pendingRangeStart < 0x10000 && pendingRangeEnd < 0x10000 && pendingRangeStart > pendingRangeEnd)
+                    // Similarly, if either endpoint came from \u{...}, the non-u and u/v
+                    // range endpoints differ (e.g. [a-\u{60}] is [a-u{60}] without u), so
+                    // check each mode via deferred errors instead of failing unconditionally.
+                    if (!pendingRangeStartIsExtended &&
+                        !pendingRangeEndIsExtended &&
+                        pendingRangeStart < 0x10000 &&
+                        pendingRangeEnd < 0x10000 &&
+                        pendingRangeStart > pendingRangeEnd)
                     {
                         if (pendingRangeStart == (codepoint_t)'-' &&
                             pendingRangeEnd < (codepoint_t)'-' &&
@@ -5711,6 +5748,7 @@ namespace UnifiedRegex
                             DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
                             DeferredFailIfUnicodeNoSets(JSERR_RegExpBadRange);
                             pendingRangeStart = pendingRangeEnd = INVALID_CODEPOINT;
+                            pendingRangeStartIsExtended = pendingRangeEndIsExtended = false;
                         }
                         else
                         {
@@ -5719,7 +5757,7 @@ namespace UnifiedRegex
                     }
                     else
                     {
-                        if(leftSingleChar > rightSingleChar)
+                        if (leftSingleChar > rightSingleChar)
                         {
                             DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
                         }
@@ -5731,11 +5769,13 @@ namespace UnifiedRegex
                     }
 
                     pendingRangeStart = pendingRangeEnd = INVALID_CODEPOINT;
+                    pendingRangeStartIsExtended = pendingRangeEndIsExtended = false;
                 }
                 // The current char < 0x10000 is a candidate for the range end, but we need to iterate one more time.
                 else
                 {
                     pendingRangeEnd = lastCodepoint;
+                    pendingRangeEndIsExtended = lastCodepointIsExtended;
                 }
             }
             nextChar = ECLookahead();

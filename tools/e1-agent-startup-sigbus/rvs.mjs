@@ -6,8 +6,11 @@
 // reviewer's rvb.mjs). Params: <bin> <killms> <agents> <count> <par> [interp]
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DIR = '/Users/ascotti/Documents/code/ChakraCore-wt/agent-startup-sigbus/out/sigbus';
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DIR = process.env.SIGBUS_DIR || path.join(REPO_ROOT, 'out', 'sigbus');
 const CH = { pre: DIR + '/bin-pre/ch', post: DIR + '/bin-post/ch', predbg: DIR + '/bin-pre-dbg/ch', postdbg: DIR + '/bin-post-dbg/ch' }[process.argv[2]];
 const KILLMS = parseInt(process.argv[3], 10);
 const N = parseInt(process.argv[4], 10);
